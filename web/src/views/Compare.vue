@@ -22,6 +22,9 @@
 
         <el-button @click="exportCsv">导出CSV</el-button>
         <el-button @click="exportXlsx">导出Excel</el-button>
+        <el-button type="success" @click="exportRecommendCsv">导出CSV(含综合分/原因)</el-button>
+        <el-button type="success" @click="exportRecommendXlsx">导出Excel(含综合分/原因)</el-button>
+
       </div>
 
       <div class="weights">
@@ -102,6 +105,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { useAppStore } from "../stores/app";
+import * as XLSX from "xlsx";
 
 const store = useAppStore();
 
@@ -211,6 +215,79 @@ function exportCsv() {
 function exportXlsx() {
   window.open(buildExportUrl("xlsx"), "_blank");
 }
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildExportRows() {
+  // 用当前表格数据（已应用筛选、排序、综合分、原因）
+  return (tableRows.value || []).map((r) => ({
+    创建时间: r.createdAt ?? "",
+    任务: r.task ?? "",
+    数据集: r.datasetName ?? "",
+    算法: r.algorithmName ?? "",
+    状态: statusText(r.status),
+    PSNR: r.psnr ?? "",
+    SSIM: r.ssim ?? "",
+    NIQE: r.niqe ?? "",
+    耗时: r.elapsed ?? "",
+    综合分: Number.isFinite(r.score) ? r.score : "",
+    推荐原因: r.reason ?? "",
+    RunID: r.id ?? "",
+  }));
+}
+
+function exportRecommendCsv() {
+  const rows = buildExportRows();
+  if (!rows.length) return alert("当前没有可导出的记录");
+
+  const headers = Object.keys(rows[0]);
+  const escape = (v) => {
+    const s = String(v ?? "");
+    // 含逗号/引号/换行 -> 用双引号包裹，并转义双引号
+    if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lines = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
+  ];
+
+  // Excel 友好：加 BOM
+  const csvText = "\uFEFF" + lines.join("\n");
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  downloadBlob(blob, `compare_recommend_${ts}.csv`);
+}
+
+function exportRecommendXlsx() {
+  const rows = buildExportRows();
+  if (!rows.length) return alert("当前没有可导出的记录");
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "compare");
+
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([out], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  downloadBlob(blob, `compare_recommend_${ts}.xlsx`);
+}
+
 
 // ---------- 评分：归一化 + 加权（可解释） ----------
 
