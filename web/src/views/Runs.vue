@@ -16,10 +16,12 @@
         </div>
       </div>
 
-      <div style="display: flex; gap: 8px">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap">
         <el-button type="primary" @click="goNewRun">发起评测</el-button>
         <el-button @click="mockOne">添加一条示例任务</el-button>
         <el-button @click="refresh">刷新</el-button>
+        <el-button @click="exportDoneCsv">导出已完成CSV</el-button>
+        <el-button @click="exportDoneXlsx">导出已完成Excel</el-button>
       </div>
     </div>
 
@@ -31,7 +33,9 @@
 
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)">{{ statusText(row.status) }}</el-tag>
+          <el-tag :type="statusTagType(row.status)">
+            {{ statusText(row.status) }}
+          </el-tag>
         </template>
       </el-table-column>
 
@@ -109,6 +113,8 @@ import { useAppStore } from "../stores/app";
 
 const router = useRouter();
 const store = useAppStore();
+
+// ========= 隐藏（本地持久化，不动后端）=========
 const HIDDEN_KEY = "hiddenRunIds_v1";
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
 
@@ -116,20 +122,40 @@ function persistHidden() {
   localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value)));
 }
 
+// ========= 下载（不弹窗，不会被拦截）=========
+function downloadFile(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename; // 某些浏览器会忽略，但不影响下载
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
-// 统一把“任务中心”理解为：评测 Run 列表。
-// NewRun.vue 创建的是 run，所以这里也用 store.runs。
+function exportDoneCsv() {
+  const url = "http://127.0.0.1:8000/runs/export?format=csv&status=done";
+  downloadFile(url, "runs_done.csv");
+}
+
+function exportDoneXlsx() {
+  const url = "http://127.0.0.1:8000/runs/export?format=xlsx&status=done";
+  downloadFile(url, "runs_done.xlsx");
+}
+
+// ========= 表格数据 =========
 const rows = computed(() => {
   const dsMap = new Map((store.datasets ?? []).map((d) => [d.id, d.name]));
   const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
+
   return (store.runs ?? [])
-  .filter((r) => !hiddenIds.value.has(r.id))
-  .map((r) => ({
-    ...r,
-    name: r.name || `${r.task || "评测"} Run`,
-    dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
-    algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
-  }));
+    .filter((r) => !hiddenIds.value.has(r.id))
+    .map((r) => ({
+      ...r,
+      name: r.name || `${r.task || "评测"} Run`,
+      dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
+      algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
+    }));
 });
 
 function goNewRun() {
@@ -145,13 +171,12 @@ function statusText(status) {
 }
 
 function statusTagType(status) {
-  if (status === "done" || status === "已完成") return "success"; // 绿
+  if (status === "done" || status === "已完成") return "success";
   if (status === "running" || status === "运行中") return "warning";
   if (status === "failed" || status === "失败") return "danger";
   return "info";
 }
 
-// 刷新列表：从后端 Redis 拉取最新 runs
 async function refresh() {
   try {
     await store.fetchRuns();
@@ -166,9 +191,7 @@ function remove(id) {
   persistHidden();
 }
 
-
 async function mockOne() {
-  // 用现有 demo 数据集/算法快速创建一条真实 run（POST /runs），方便验收闭环
   const ds = (store.datasets ?? [])[0];
   const algo = (store.algorithms ?? [])[0];
   if (!ds || !algo) return alert("缺少 Demo 数据集或算法，无法创建示例任务");

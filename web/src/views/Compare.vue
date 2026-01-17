@@ -20,6 +20,9 @@
         <el-checkbox v-model="onlyDone">只显示已完成</el-checkbox>
 
         <el-button type="primary" @click="reset">重置</el-button>
+
+        <el-button @click="exportCsv">导出CSV</el-button>
+        <el-button @click="exportXlsx">导出Excel</el-button>
       </div>
     </el-card>
 
@@ -102,6 +105,39 @@ function reset() {
   datasetId.value = "";
   onlyDone.value = true;
 }
+
+function mapTaskLabelToType(label) {
+  const m = {
+    去噪: "denoise",
+    去模糊: "deblur",
+    去雾: "dehaze",
+    超分辨率: "sr",
+    低照度增强: "lowlight",
+    视频去噪: "video_denoise",
+    视频超分: "video_sr",
+  };
+  return m[label] || "";
+}
+
+function buildExportUrl(fmt) {
+  const params = new URLSearchParams();
+  params.set("format", fmt);
+
+  if (onlyDone.value) params.set("status", "done");
+  if (task.value) params.set("task_type", mapTaskLabelToType(task.value));
+  if (datasetId.value) params.set("dataset_id", datasetId.value);
+
+  return `http://127.0.0.1:8000/runs/export?${params.toString()}`;
+}
+
+function exportCsv() {
+  window.open(buildExportUrl("csv"), "_blank");
+}
+
+function exportXlsx() {
+  window.open(buildExportUrl("xlsx"), "_blank");
+}
+
 
 // 计算综合分（多指标融合，可解释）
 // 说明：PSNR/SSIM 越大越好；NIQE 越小越好；score 越大越推荐
