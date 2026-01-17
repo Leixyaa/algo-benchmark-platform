@@ -55,10 +55,11 @@
 </template>
 
 <script setup>
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useAppStore } from "../stores/app";
 
+const NEWRUN_CACHE_KEY = "newrun_form_v1";
 const router = useRouter();
 const store = useAppStore();
 
@@ -68,6 +69,31 @@ const form = reactive({
   algorithmId: "",
   metrics: ["PSNR", "SSIM"],
 });
+
+// 恢复上次选择
+try {
+  const raw = localStorage.getItem(NEWRUN_CACHE_KEY);
+  if (raw) {
+    const cached = JSON.parse(raw);
+
+    // 只恢复你表单里已有字段，避免脏数据
+    if (cached.task) form.task = cached.task;
+    if (cached.datasetId) form.datasetId = cached.datasetId;
+    if (cached.algorithmId) form.algorithmId = cached.algorithmId;
+    if (Array.isArray(cached.metrics)) form.metrics = cached.metrics;
+  }
+} catch {
+  // ignore
+}
+
+watch(
+  () => ({ ...form, metrics: Array.isArray(form.metrics) ? [...form.metrics] : [] }),
+  (val) => {
+    localStorage.setItem(NEWRUN_CACHE_KEY, JSON.stringify(val));
+  },
+  { deep: true }
+);
+
 
 const filteredAlgorithms = computed(() =>
   store.algorithms.filter((a) => a.task === form.task)
@@ -90,7 +116,6 @@ function create() {
     metrics: [...form.metrics],
   });
 
-  // 前端模拟：2秒后变运行中，5秒后变完成
 // 前端模拟：2秒后运行中，5秒后完成并生成指标
 setTimeout(() => store.updateRunStatus(runId, "运行中"), 2000);
 
@@ -105,6 +130,7 @@ setTimeout(() => {
   });
 }, 5000);
 
+  localStorage.removeItem(NEWRUN_CACHE_KEY);
 
   alert("任务已创建（模拟执行中），已进入任务中心");
   router.push("/runs");
