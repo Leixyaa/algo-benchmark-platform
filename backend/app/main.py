@@ -4,11 +4,14 @@ import time
 import uuid
 import io
 import csv
+import json
+
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi import Query
 
 from openpyxl import Workbook
 
@@ -19,7 +22,6 @@ from .tasks import execute_run
 
 app = FastAPI(title="Algo Eval Platform API", version="0.1.0")
 
-# ����ǰ�˱��ؿ�������Vite Ĭ�� 5173��
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -57,7 +59,6 @@ def create_run(payload: RunCreate):
     }
     save_run(r, run_id, run)
 
-    # ���� celery �첽ִ��
     execute_run.delay(run_id)
 
     return RunOut(**run)
@@ -184,6 +185,39 @@ def export_runs(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/runs/clear")
+def clear_runs(
+    status: str | None = Query("done", description="done|queued|running|failed|all"),
+):
+    """
+    清理 runs 历史记录（默认清理已完成 done）
+    - status=done：只删已完成
+    - status=all：全部删除
+    """
+    r = make_redis()
+    keys = r.keys("run:*")
+
+    deleted = 0
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        try:
+            data = json.loads(s)
+        except Exception:
+            continue
+
+        if status and status != "all":
+            if data.get("status") != status:
+                continue
+
+        r.delete(k)
+        deleted += 1
+
+    return {"ok": True, "deleted": deleted, "status": status}
+
 
 
 @app.get("/runs/{run_id}", response_model=RunOut)

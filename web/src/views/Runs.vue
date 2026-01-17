@@ -22,6 +22,7 @@
         <el-button @click="refresh">刷新</el-button>
         <el-button @click="exportDoneCsv">导出已完成CSV</el-button>
         <el-button @click="exportDoneXlsx">导出已完成Excel</el-button>
+        <el-button type="danger" @click="clearDone">清理已完成</el-button>
       </div>
     </div>
 
@@ -152,6 +153,24 @@ function exportDoneXlsx() {
   const url = "http://127.0.0.1:8000/runs/export?format=xlsx&status=done";
   downloadFile(url, "runs_done.xlsx");
 }
+
+async function clearDone() {
+  if (!confirm("确定清理所有“已完成”的历史任务吗？（会删除后端Redis记录，无法恢复）")) return;
+
+  try {
+    const res = await fetch("http://127.0.0.1:8000/runs/clear?status=done", {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+
+    alert(`已清理：${data.deleted} 条已完成任务`);
+    await refresh(); // 重新拉取列表
+  } catch (e) {
+    alert(`清理失败：${e?.message || e}`);
+  }
+}
+
 
 // ========= 表格数据 =========
 const rows = computed(() => {
