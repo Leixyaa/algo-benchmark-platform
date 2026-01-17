@@ -11,6 +11,29 @@
 import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 
+const LS_KEY = "abp_state_v1";
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveState(partial) {
+  try {
+    const prev = loadState() || {};
+    const next = { ...prev, ...partial, _savedAt: Date.now() };
+    localStorage.setItem(LS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+
 // ====================== 状态/映射工具 ======================
 
 function normalizeStatusCN(status) {
@@ -80,51 +103,68 @@ const _pollTimers = new Map();
 export const useAppStore = defineStore("app", {
   state: () => ({
     // 你后面会把 dataset/algorithm 做成真正的管理功能；目前保留 Demo 数据以便流程可跑。
-    datasets: [
-      {
-        id: "ds_demo",
-        name: "Demo-样例数据集",
-        type: "图像",
-        size: "10 张",
-        createdAt: nowStr(),
-      },
-    ],
-    algorithms: [
-      {
-        id: "alg_dn_cnn",
-        task: "去噪",
-        name: "DnCNN(示例)",
-        impl: "PyTorch",
-        version: "v1",
-        createdAt: nowStr(),
-      },
-      // ✅ 新增：去雾真实算法（阶段E）
-      {
-        id: "alg_dehaze_dcp",
-        task: "去雾",
-        name: "DCP暗通道先验(真实)",
-        impl: "OpenCV",
-        version: "v1",
-        createdAt: nowStr(),
-      },
-    ],
+    datasets: (loadState()?.datasets?.length ? loadState().datasets : [
+      { id: "ds_demo", name: "Demo-样例数据集", type: "图像", size: "10 张", createdAt: nowStr() },
+    ]),
+
+    algorithms: (loadState()?.algorithms?.length ? loadState().algorithms : [
+      { id: "alg_dn_cnn", task: "去噪", name: "DnCNN(示例)", impl: "PyTorch", version: "v1", createdAt: nowStr() },
+      { id: "alg_dehaze_dcp", task: "去雾", name: "DCP暗通道先验(真实)", impl: "OpenCV", version: "v1", createdAt: nowStr() },
+    ]),
+
     
 
     // 兼容保留：有些页面可能还在引用 tasks；阶段C 先不动它
     tasks: [],
 
     // 核心：runs 由后端 Redis/Celery 驱动
-    runs: [],
+    runs: loadState()?.runs || [],
   }),
 
   actions: {
     // ====================== Demo 管理（保留） ======================
     addDataset(ds) {
       this.datasets.unshift({ ...ds, createdAt: nowStr() });
+      saveState({ datasets: this.datasets });
     },
+
     addAlgorithm(alg) {
       this.algorithms.unshift({ ...alg, createdAt: nowStr() });
+      saveState({ algorithms: this.algorithms });
     },
+
+    removeDataset(id) {
+      const idx = this.datasets.findIndex((d) => d.id === id);
+      if (idx >= 0) {
+        this.datasets.splice(idx, 1);
+        saveState({ datasets: this.datasets });
+      }
+    },
+
+    removeAlgorithm(id) {
+      const idx = this.algorithms.findIndex((a) => a.id === id);
+      if (idx >= 0) {
+        this.algorithms.splice(idx, 1);
+        saveState({ algorithms: this.algorithms });
+      }
+    },
+
+    updateDataset(id, patch) {
+      const idx = this.datasets.findIndex((d) => d.id === id);
+      if (idx >= 0) {
+        this.datasets[idx] = { ...this.datasets[idx], ...patch };
+        saveState({ datasets: this.datasets });
+      }
+    },
+
+    updateAlgorithm(id, patch) {
+      const idx = this.algorithms.findIndex((a) => a.id === id);
+      if (idx >= 0) {
+        this.algorithms[idx] = { ...this.algorithms[idx], ...patch };
+        saveState({ algorithms: this.algorithms });
+      }
+    },
+
 
     // ====================== 阶段C：后端对接（创建/拉取/轮询） ======================
 
@@ -163,7 +203,7 @@ export const useAppStore = defineStore("app", {
 
       // 覆盖式同步：以 Redis 为准
       this.runs = mapped;
-
+      saveState({ runs: this.runs });
       // 对未结束的 run 自动补轮询
       for (const r of this.runs) {
         if (!isTerminal(r.status)) this.startPolling(r.id);
