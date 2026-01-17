@@ -98,7 +98,17 @@ export const useAppStore = defineStore("app", {
         version: "v1",
         createdAt: nowStr(),
       },
+      // ✅ 新增：去雾真实算法（阶段E）
+      {
+        id: "alg_dehaze_dcp",
+        task: "去雾",
+        name: "DCP暗通道先验(真实)",
+        impl: "OpenCV",
+        version: "v1",
+        createdAt: nowStr(),
+      },
     ],
+    
 
     // 兼容保留：有些页面可能还在引用 tasks；阶段C 先不动它
     tasks: [],
