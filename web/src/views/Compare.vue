@@ -58,8 +58,7 @@
 </template>
 
 <script setup>
-
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
@@ -68,32 +67,23 @@ const task = ref("");
 const datasetId = ref("");
 const onlyDone = ref(true);
 
+// 页面首次进入时，从后端拉取历史 runs（避免刷新页面表格为空）
+onMounted(async () => {
+  if (!store.runs || store.runs.length === 0) {
+    try {
+      await store.fetchRuns();
+    } catch (e) {
+      // 不挡页面：用户仍然可以去 Runs/NewRun 再回来
+      console.warn(e);
+    }
+  }
+});
+
 // 任务类型来自算法库 task 字段（你现在 algorithms 里就是 task: "去噪"）
 const taskOptions = computed(() => {
   const s = new Set(store.algorithms.map((a) => a.task).filter(Boolean));
   return Array.from(s);
 });
-
-function normalizeStatus(s) {
-  // 统一内部状态：queued / running / done / failed
-  const raw = String(s ?? "").trim();
-  if (!raw) return "";
-  const low = raw.toLowerCase();
-
-  // 中文 -> 统一码
-  if (raw === "排队中") return "queued";
-  if (raw === "运行中") return "running";
-  if (raw === "已完成") return "done";
-  if (raw === "失败") return "failed";
-
-  // 英文/其它 -> 统一码
-  if (["queued", "pending", "waiting"].includes(low)) return "queued";
-  if (["running", "processing"].includes(low)) return "running";
-  if (["done", "completed", "success", "succeeded"].includes(low)) return "done";
-  if (["failed", "error"].includes(low)) return "failed";
-
-  return low;
-}
 
 function statusText(status) {
   if (status === "done" || status === "已完成") return "已完成";
@@ -103,12 +93,9 @@ function statusText(status) {
   return status || "-";
 }
 
-
 function isDone(status) {
   return status === "已完成" || status === "done";
 }
-
-
 
 function reset() {
   task.value = "";
@@ -116,21 +103,21 @@ function reset() {
   onlyDone.value = true;
 }
 
-// 计算综合分（含金量最高的点：多指标融合，可解释）
+// 计算综合分（多指标融合，可解释）
 // 说明：PSNR/SSIM 越大越好；NIQE 越小越好；score 越大越推荐
 function calcScore(r) {
   const psnr = Number(r.psnr);
   const ssim = Number(r.ssim);
-  const niqe = Number(r.niqe ?? r.nioe);
+  const niqe = Number(r.niqe);
 
   // 防空：没结果就给 -Infinity，让它排到最后
   if (!isFinite(psnr) || !isFinite(ssim) || !isFinite(niqe)) return -Infinity;
 
-  // 一个稳定、可解释的权重（你答辩时就按这个解释）
+  // 稳定、可解释的权重（答辩按这个解释）
   // - PSNR 45%
   // - SSIM 45%（乘 100 把量纲拉到类似）
   // - NIQE 惩罚 10%（乘 10 把量纲拉到类似）
-  const score = 0.45 * psnr + 0.45 * (ssim * 100) - 0.10 * (niqe * 10);
+  const score = 0.45 * psnr + 0.45 * (ssim * 100) - 0.1 * (niqe * 10);
   return +score.toFixed(2);
 }
 
@@ -147,13 +134,12 @@ const tableRows = computed(() => {
     runs = runs.filter((r) => r.datasetId === datasetId.value);
   }
   if (onlyDone.value) {
-    runs = runs.filter(r => isDone(r.status));
+    runs = runs.filter((r) => isDone(r.status));
   }
 
   const rows = runs.map((r) => {
     const ds = dsMap.get(r.datasetId);
     const alg = algMap.get(r.algorithmId);
-
     const score = calcScore(r);
 
     return {
@@ -178,14 +164,15 @@ const recommendText = computed(() => {
   const parts = [];
   parts.push(`在当前筛选条件下，综合分最高的是 ${top.algorithmName}。`);
   parts.push(
-    `它的指标表现为 PSNR=${top.psnr}、SSIM=${top.ssim}、NIQE=${top.niqe}，耗时 ${top.elapsed || "—"}。`
+    `它的指标表现为 PSNR=${top.psnr}、SSIM=${top.ssim}、NIQE=${top.niqe}，耗时 ${
+      top.elapsed || "—"
+    }。`
   );
   parts.push(
     `本平台采用加权综合评分进行快速选型：画质类指标（PSNR、SSIM）为主，无参考质量（NIQE）作为惩罚项，从而在多指标下给出可解释的排序推荐。`
   );
   return parts.join("");
 });
-
 </script>
 
 <style scoped>
