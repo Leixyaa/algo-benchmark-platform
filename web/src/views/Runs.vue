@@ -39,6 +39,13 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="综合分" width="100">
+        <template #default="{ row }">
+          <span>{{ row.score ?? "-" }}</span>
+        </template>
+      </el-table-column>
+
+
       <el-table-column prop="createdAt" label="创建时间" width="170" />
 
       <el-table-column label="操作" width="260" fixed="right">
@@ -96,6 +103,9 @@
           <div style="color: #666">SSIM</div><div>{{ detail.ssim ?? "-" }}</div>
           <div style="color: #666">NIQE</div><div>{{ detail.niqe ?? "-" }}</div>
           <div style="color: #666">耗时</div><div>{{ detail.elapsed ?? "-" }}</div>
+          <div style="color: #666">综合分</div><div>{{ detail.score ?? "-" }}</div>
+          <div style="color: #666">推荐原因</div><div>{{ detail.reason ?? "-" }}</div>
+
         </div>
       </div>
 
@@ -150,12 +160,22 @@ const rows = computed(() => {
 
   return (store.runs ?? [])
     .filter((r) => !hiddenIds.value.has(r.id))
-    .map((r) => ({
-      ...r,
-      name: r.name || `${r.task || "评测"} Run`,
-      dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
-      algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
-    }));
+    .map((r) => {
+      const base = {
+        ...r,
+        name: r.name || `${r.task || "评测"} Run`,
+        dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
+        algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
+      };
+
+      // 只对已完成且指标齐全的 run 算综合分
+      const ctx = buildScoringContext(store.runs ?? []);
+      const s = scoreOne(base, ctx);
+      return {
+        ...base,
+        score: s.score,
+      };
+  });
 });
 
 function goNewRun() {
@@ -176,6 +196,89 @@ function statusTagType(status) {
   if (status === "failed" || status === "失败") return "danger";
   return "info";
 }
+
+
+// ====== 快速选型：给单条 run 计算综合分 + 推荐原因（与 Compare 同逻辑）======
+
+// elapsed "1.23s" -> seconds
+function parseElapsedSeconds(elapsed) {
+  if (elapsed == null) return null;
+  if (typeof elapsed === "number") return elapsed;
+  const m = String(elapsed).match(/([\d.]+)/);
+  if (!m) return null;
+  const x = Number(m[1]);
+  return Number.isFinite(x) ? x : null;
+}
+
+function toNumber(v) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+
+function minMax(values) {
+  const nums = values.filter((x) => Number.isFinite(x));
+  if (nums.length === 0) return { min: null, max: null };
+  return { min: Math.min(...nums), max: Math.max(...nums) };
+}
+
+function norm01(x, min, max) {
+  if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (max === min) return 1.0;
+  return (x - min) / (max - min);
+}
+
+function buildScoringContext(allRuns) {
+  const psnrs = allRuns.map((r) => toNumber(r.psnr)).filter((x) => x != null);
+  const ssims = allRuns.map((r) => toNumber(r.ssim)).filter((x) => x != null);
+  const niqes = allRuns.map((r) => toNumber(r.niqe)).filter((x) => x != null);
+  const times = allRuns.map((r) => parseElapsedSeconds(r.elapsed)).filter((x) => x != null);
+
+  const mmPSNR = minMax(psnrs);
+  const mmSSIM = minMax(ssims);
+  const mmNIQE = minMax(niqes);
+  const mmTIME = minMax(times);
+
+  // Runs 详情这里用固定默认权重（你在 Compare 里可调；详情里只展示“平台默认推荐逻辑”）
+  const W = { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 };
+
+  return { mmPSNR, mmSSIM, mmNIQE, mmTIME, W };
+}
+
+function scoreOne(run, ctx) {
+  const psnr = toNumber(run.psnr);
+  const ssim = toNumber(run.ssim);
+  const niqe = toNumber(run.niqe);
+  const tsec = parseElapsedSeconds(run.elapsed);
+
+  const nPSNR = norm01(psnr, ctx.mmPSNR.min, ctx.mmPSNR.max);
+  const nSSIM = norm01(ssim, ctx.mmSSIM.min, ctx.mmSSIM.max);
+  const nNIQE = norm01(niqe, ctx.mmNIQE.min, ctx.mmNIQE.max);
+  const nTIME = norm01(tsec, ctx.mmTIME.min, ctx.mmTIME.max);
+
+  const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
+  if (!okAll) return { score: null, reason: "指标不完整，无法计算综合分" };
+
+  const score =
+    ctx.W.psnr * nPSNR +
+    ctx.W.ssim * nSSIM +
+    ctx.W.niqe * (1 - nNIQE) +
+    ctx.W.time * (1 - nTIME);
+
+  // 简短解释：点出主导项
+  const parts = [];
+  if (nPSNR >= 0.8) parts.push("PSNR较高");
+  if (nSSIM >= 0.8) parts.push("SSIM较高");
+  if (nNIQE <= 0.2) parts.push("NIQE较低(更自然)");
+  if (nTIME <= 0.2) parts.push("耗时较短");
+  if (parts.length === 0) parts.push("多指标较均衡");
+
+  return {
+    score: Number(score.toFixed(4)),
+    reason: `${parts.join("，")}；默认权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%`,
+  };
+}
+// ===========================================================================//
+
 
 async function refresh() {
   try {
@@ -216,7 +319,16 @@ const detailVisible = ref(false);
 const detail = ref(null);
 
 function openDetail(row) {
-  detail.value = row;
+  // 用当前列表（已过滤隐藏）作为评分范围；这样解释是“在当前可见 runs 中的相对表现”
+  const ctx = buildScoringContext(rows.value);
+  const s = scoreOne(row, ctx);
+
+  detail.value = {
+    ...row,
+    score: s.score,
+    reason: s.reason,
+  };
   detailVisible.value = true;
 }
+
 </script>
