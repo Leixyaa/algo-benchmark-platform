@@ -1,17 +1,40 @@
 // web/src/stores/app.js
-// Pinia å…¨å±€ storeï¼ˆé˜¶æ®µCï¼šå‰ç«¯å¯¹æ¥åç«¯æœ€å°é—­ç¯ï¼‰
-// - NewRunï¼šPOST /runs åˆ›å»ºçœŸå® run
-// - Runsï¼šè½®è¯¢ GET /runs/{id} æ˜¾ç¤º queued/running/doneï¼ˆç»Ÿä¸€ä¸­æ–‡ï¼‰
-// - Compareï¼šå±•ç¤ºåç«¯ metricsï¼ˆPSNR/SSIM/NIQEï¼‰
+// Pinia È«¾Ö store£¨½×¶ÎC£ºÇ°¶Ë¶Ô½Óºó¶Ë×îĞ¡±Õ»·£©
+// - NewRun£ºPOST /runs ´´½¨ÕæÊµ run
+// - Runs£ºÂÖÑ¯ GET /runs/{id} ÏÔÊ¾ queued/running/done£¨Í³Ò»ÖĞÎÄ£©
+// - Compare£ºÕ¹Ê¾ºó¶Ë metrics£¨PSNR/SSIM/NIQE£©
 //
-// è¯´æ˜ï¼š
-// 1) æœ¬é˜¶æ®µä¸åšå¯¼å‡ºã€ä¸åšçœŸå®ç®—æ³•ï¼ŒåªæŠŠå‰åç«¯ + Celery/Redis çš„é—­ç¯è·‘é€šã€‚
-// 2) è½®è¯¢è®¡æ—¶å™¨ä¸æ”¾è¿› Pinia stateï¼Œé¿å…çƒ­æ›´æ–°/åºåˆ—åŒ–å¯¼è‡´å¥‡æ€ªé—®é¢˜ã€‚
+// ËµÃ÷£º
+// 1) ±¾½×¶Î²»×öµ¼³ö¡¢²»×öÕæÊµËã·¨£¬Ö»°ÑÇ°ºó¶Ë + Celery/Redis µÄ±Õ»·ÅÜÍ¨¡£
+// 2) ÂÖÑ¯¼ÆÊ±Æ÷²»·Å½ø Pinia state£¬±ÜÃâÈÈ¸üĞÂ/ĞòÁĞ»¯µ¼ÖÂÆæ¹ÖÎÊÌâ¡£
 
 import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 
 const LS_KEY = "abp_state_v1";
+
+// ====================== ÈÎÎñÀàĞÍÍ³Ò»Ó³Éä£¨Î¨Ò»ÕæÏà£© ======================
+export const TASK_LABEL_BY_TYPE = {
+  denoise: "È¥Ôë",
+  deblur: "È¥Ä£ºı",
+  dehaze: "È¥Îí",
+  sr: "³¬·Ö±æÂÊ",
+  lowlight: "µÍÕÕ¶ÈÔöÇ¿",
+  video_denoise: "ÊÓÆµÈ¥Ôë",
+  video_sr: "ÊÓÆµ³¬·Ö",
+};
+
+export const TASK_TYPE_BY_LABEL = Object.fromEntries(
+  Object.entries(TASK_LABEL_BY_TYPE).map(([k, v]) => [v, k])
+);
+
+export function toTaskLabel(taskType) {
+  return TASK_LABEL_BY_TYPE[taskType] || taskType || "";
+}
+
+export function toTaskType(taskLabel) {
+  return TASK_TYPE_BY_LABEL[taskLabel] || taskLabel || "";
+}
 
 function loadState() {
   try {
@@ -34,44 +57,15 @@ function saveState(partial) {
 }
 
 
-// ====================== çŠ¶æ€/æ˜ å°„å·¥å…· ======================
+// ====================== ×´Ì¬/Ó³Éä¹¤¾ß ======================
 
 function normalizeStatusCN(status) {
   const s = String(status ?? "").toLowerCase();
-  if (["done", "completed", "success", "å·²å®Œæˆ"].includes(s)) return "å·²å®Œæˆ";
-  if (["running", "è¿è¡Œä¸­"].includes(s)) return "è¿è¡Œä¸­";
-  if (["queued", "pending", "æ’é˜Ÿä¸­"].includes(s)) return "æ’é˜Ÿä¸­";
-  if (["failed", "error", "å¤±è´¥"].includes(s)) return "å¤±è´¥";
+  if (["done", "completed", "success", "ÒÑÍê³É"].includes(s)) return "ÒÑÍê³É";
+  if (["running", "ÔËĞĞÖĞ"].includes(s)) return "ÔËĞĞÖĞ";
+  if (["queued", "pending", "ÅÅ¶ÓÖĞ"].includes(s)) return "ÅÅ¶ÓÖĞ";
+  if (["failed", "error", "Ê§°Ü"].includes(s)) return "Ê§°Ü";
   return String(status ?? "");
-}
-
-// å‰ç«¯å±•ç¤ºï¼ˆä¸­æ–‡ï¼‰ -> åç«¯å­—æ®µ task_typeï¼ˆè‹±æ–‡/æšä¸¾ï¼‰
-function mapTaskLabelToType(label) {
-  const m = {
-    å»å™ª: "denoise",
-    å»æ¨¡ç³Š: "deblur",
-    å»é›¾: "dehaze",
-    è¶…åˆ†è¾¨ç‡: "sr",
-    ä½ç…§åº¦å¢å¼º: "lowlight",
-    è§†é¢‘å»å™ª: "video_denoise",
-    è§†é¢‘è¶…åˆ†: "video_sr",
-  };
-  return m[label] || "denoise";
-}
-
-// åç«¯ task_typeï¼ˆè‹±æ–‡/æšä¸¾ï¼‰ -> å‰ç«¯å±•ç¤ºï¼ˆä¸­æ–‡ï¼‰
-function mapTaskTypeToLabel(taskType) {
-  const m = {
-    denoise: "å»å™ª",
-    deblur: "å»æ¨¡ç³Š",
-    dehaze: "å»é›¾",
-    sr: "è¶…åˆ†è¾¨ç‡",
-    lowlight: "ä½ç…§åº¦å¢å¼º",
-    video_denoise: "è§†é¢‘å»å™ª",
-    video_sr: "è§†é¢‘è¶…åˆ†",
-  };
-  const k = String(taskType ?? "").toLowerCase();
-  return m[k] || taskType;
 }
 
 function formatTs(unixSeconds) {
@@ -92,7 +86,7 @@ function nowStr() {
 }
 
 function isTerminal(statusCN) {
-  return statusCN === "å·²å®Œæˆ" || statusCN === "å¤±è´¥";
+  return statusCN === "ÒÑÍê³É" || statusCN === "Ê§°Ü";
 }
 
 // runId -> timerId
@@ -102,27 +96,27 @@ const _pollTimers = new Map();
 
 export const useAppStore = defineStore("app", {
   state: () => ({
-    // ä½ åé¢ä¼šæŠŠ dataset/algorithm åšæˆçœŸæ­£çš„ç®¡ç†åŠŸèƒ½ï¼›ç›®å‰ä¿ç•™ Demo æ•°æ®ä»¥ä¾¿æµç¨‹å¯è·‘ã€‚
+    // ÄãºóÃæ»á°Ñ dataset/algorithm ×ö³ÉÕæÕıµÄ¹ÜÀí¹¦ÄÜ£»Ä¿Ç°±£Áô Demo Êı¾İÒÔ±ãÁ÷³Ì¿ÉÅÜ¡£
     datasets: (loadState()?.datasets?.length ? loadState().datasets : [
-      { id: "ds_demo", name: "Demo-æ ·ä¾‹æ•°æ®é›†", type: "å›¾åƒ", size: "10 å¼ ", createdAt: nowStr() },
+      { id: "ds_demo", name: "Demo-ÑùÀıÊı¾İ¼¯", type: "Í¼Ïñ", size: "10 ÕÅ", createdAt: nowStr() },
     ]),
 
     algorithms: (loadState()?.algorithms?.length ? loadState().algorithms : [
-      { id: "alg_dn_cnn", task: "å»å™ª", name: "DnCNN(ç¤ºä¾‹)", impl: "PyTorch", version: "v1", createdAt: nowStr() },
-      { id: "alg_dehaze_dcp", task: "å»é›¾", name: "DCPæš—é€šé“å…ˆéªŒ(çœŸå®)", impl: "OpenCV", version: "v1", createdAt: nowStr() },
+      { id: "alg_dn_cnn", task: "È¥Ôë", name: "DnCNN(Ê¾Àı)", impl: "PyTorch", version: "v1", createdAt: nowStr() },
+      { id: "alg_dehaze_dcp", task: "È¥Îí", name: "DCP°µÍ¨µÀÏÈÑé(ÕæÊµ)", impl: "OpenCV", version: "v1", createdAt: nowStr() },
     ]),
 
     
 
-    // å…¼å®¹ä¿ç•™ï¼šæœ‰äº›é¡µé¢å¯èƒ½è¿˜åœ¨å¼•ç”¨ tasksï¼›é˜¶æ®µC å…ˆä¸åŠ¨å®ƒ
+    // ¼æÈİ±£Áô£ºÓĞĞ©Ò³Ãæ¿ÉÄÜ»¹ÔÚÒıÓÃ tasks£»½×¶ÎC ÏÈ²»¶¯Ëü
     tasks: [],
 
-    // æ ¸å¿ƒï¼šruns ç”±åç«¯ Redis/Celery é©±åŠ¨
+    // ºËĞÄ£ºruns ÓÉºó¶Ë Redis/Celery Çı¶¯
     runs: loadState()?.runs || [],
   }),
 
   actions: {
-    // ====================== Demo ç®¡ç†ï¼ˆä¿ç•™ï¼‰ ======================
+    // ====================== Demo ¹ÜÀí£¨±£Áô£© ======================
     addDataset(ds) {
       this.datasets.unshift({ ...ds, createdAt: nowStr() });
       saveState({ datasets: this.datasets });
@@ -166,15 +160,15 @@ export const useAppStore = defineStore("app", {
     },
 
 
-    // ====================== é˜¶æ®µCï¼šåç«¯å¯¹æ¥ï¼ˆåˆ›å»º/æ‹‰å–/è½®è¯¢ï¼‰ ======================
+    // ====================== ½×¶ÎC£ººó¶Ë¶Ô½Ó£¨´´½¨/À­È¡/ÂÖÑ¯£© ======================
 
     /**
-     * åˆ›å»ºçœŸå® Runï¼ˆåç«¯å†™ Redis + æŠ•é€’ Celeryï¼‰
+     * ´´½¨ÕæÊµ Run£¨ºó¶ËĞ´ Redis + Í¶µİ Celery£©
      * @param {{task:string,datasetId:string,algorithmId:string,metrics?:string[]}} payload
      * @returns {Promise<string>} runId
      */
     async createRun(payload) {
-      const task_type = mapTaskLabelToType(payload.task);
+      const task_type = toTaskType(payload.task);
       const params = { metrics: payload.metrics ?? [] };
 
       const out = await runsApi.createRun({
@@ -187,31 +181,31 @@ export const useAppStore = defineStore("app", {
       const run = this._mapRunOut(out);
       this._upsertRun(run);
 
-      // åˆ›å»ºåç«‹å³è½®è¯¢ç›´åˆ° done/failed
+      // ´´½¨ºóÁ¢¼´ÂÖÑ¯Ö±µ½ done/failed
       this.startPolling(run.id);
 
       return run.id;
     },
 
     /**
-     * æ‹‰å– Run åˆ—è¡¨ï¼ˆåˆ·æ–°é¡µé¢ä¸ä¸¢å¤±ï¼‰
+     * À­È¡ Run ÁĞ±í£¨Ë¢ĞÂÒ³Ãæ²»¶ªÊ§£©
      * @param {number} limit
      */
     async fetchRuns(limit = 200) {
       const list = await runsApi.listRuns({ limit });
       const mapped = (list ?? []).map((x) => this._mapRunOut(x));
 
-      // è¦†ç›–å¼åŒæ­¥ï¼šä»¥ Redis ä¸ºå‡†
+      // ¸²¸ÇÊ½Í¬²½£ºÒÔ Redis Îª×¼
       this.runs = mapped;
       saveState({ runs: this.runs });
-      // å¯¹æœªç»“æŸçš„ run è‡ªåŠ¨è¡¥è½®è¯¢
+      // ¶ÔÎ´½áÊøµÄ run ×Ô¶¯²¹ÂÖÑ¯
       for (const r of this.runs) {
         if (!isTerminal(r.status)) this.startPolling(r.id);
       }
     },
 
     /**
-     * æ‹‰å–å•ä¸ª Runï¼ˆè½®è¯¢/è¯¦æƒ…ç”¨ï¼‰
+     * À­È¡µ¥¸ö Run£¨ÂÖÑ¯/ÏêÇéÓÃ£©
      * @param {string} runId
      */
     async fetchRun(runId) {
@@ -222,9 +216,9 @@ export const useAppStore = defineStore("app", {
     },
 
     /**
-     * å¯åŠ¨è½®è¯¢ï¼ˆé»˜è®¤ 800msï¼‰
-     * - run è¿›å…¥ç»ˆæ€ï¼ˆå·²å®Œæˆ/å¤±è´¥ï¼‰ä¼šè‡ªåŠ¨ stop
-     * - ç½‘ç»œ/åç«¯çŸ­æš‚é‡å¯ï¼šä¸ç«‹å³ stopï¼Œè®©ä¸‹ä¸€è½®ç»§ç»­å°è¯•
+     * Æô¶¯ÂÖÑ¯£¨Ä¬ÈÏ 800ms£©
+     * - run ½øÈëÖÕÌ¬£¨ÒÑÍê³É/Ê§°Ü£©»á×Ô¶¯ stop
+     * - ÍøÂç/ºó¶Ë¶ÌÔİÖØÆô£º²»Á¢¼´ stop£¬ÈÃÏÂÒ»ÂÖ¼ÌĞø³¢ÊÔ
      */
     startPolling(runId, intervalMs = 800) {
       if (_pollTimers.has(runId)) return;
@@ -254,28 +248,34 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    // ====================== å†…éƒ¨ï¼šRun æ˜ å°„ & upsert ======================
+    // ====================== ÄÚ²¿£ºRun Ó³Éä & upsert ======================
 
     _mapRunOut(out) {
       const statusCN = normalizeStatusCN(out?.status);
       const metrics = out?.metrics ?? {};
 
+      const taskType = String(out?.task_type ?? "");
       return {
         id: out.run_id,
-        task: mapTaskTypeToLabel(out.task_type),
+
+        // ? Í¬Ê±±£ÁôÓ¢ÎÄÓëÖĞÎÄ£¬ºóĞøÉ¸Ñ¡/µ¼³ö²»ÔÙÂÒ
+        taskType,
+        task: toTaskLabel(taskType),
+
         datasetId: out.dataset_id,
         algorithmId: out.algorithm_id,
+
 
         status: statusCN,
         createdAt: formatTs(out.created_at),
 
-        // è¡¨æ ¼ç›´æ¥ç”¨ï¼šæ‰å¹³å­—æ®µ
+        // ±í¸ñÖ±½ÓÓÃ£º±âÆ½×Ö¶Î
         psnr: metrics.PSNR ?? metrics.psnr ?? null,
         ssim: metrics.SSIM ?? metrics.ssim ?? null,
         niqe: metrics.NIQE ?? metrics.niqe ?? null,
         elapsed: out.elapsed != null ? `${out.elapsed}s` : "-",
 
-        // ä¿ç•™åŸå§‹å­—æ®µï¼ˆæœªæ¥å¯¼å‡º/è¯¦æƒ…ç”¨ï¼‰
+        // ±£ÁôÔ­Ê¼×Ö¶Î£¨Î´À´µ¼³ö/ÏêÇéÓÃ£©
         raw: out,
       };
     },
