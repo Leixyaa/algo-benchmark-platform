@@ -19,6 +19,6 @@ celery_app.conf.update(
     enable_utc=False,
 )
 
-# ? ¹Ø¼ü£ºÈÃ worker Æô¶¯Ê±¼ÓÔØÈÎÎñÄ£¿é£¬·ñÔò runs.execute ÔÚ worker Àï²»×¢²á
-# ÄãÆô¶¯ÃüÁîÊÇ£ºpython -m celery -A app.celery_app.celery_app worker ...
+# ? å…³é”®ï¼šè®© worker å¯åŠ¨æ—¶åŠ è½½ä»»åŠ¡æ¨¡å—ï¼Œå¦åˆ™ runs.execute åœ¨ worker é‡Œä¸æ³¨å†Œ
+# ä½ å¯åŠ¨å‘½ä»¤æ˜¯ï¼špython -m celery -A app.celery_app.celery_app worker ...
 celery_app.conf.imports = ("app.tasks",)

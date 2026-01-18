@@ -64,11 +64,11 @@ def create_run(payload: RunCreate):
     return RunOut(**run)
 
 
-@app.get("/runs", response_model=list[RunOut])
+@app.get("/runs")
 def get_runs(limit: int = 200):
     r = make_redis()
     runs = list_runs(r, limit=limit)
-    return [RunOut(**x) for x in runs]
+    return runs
 
 @app.get("/runs/export")
 def export_runs(
@@ -220,11 +220,11 @@ def clear_runs(
 
 
 
-@app.get("/runs/{run_id}", response_model=RunOut)
+@app.get("/runs/{run_id}")
 def get_run(run_id: str):
     r = make_redis()
     run = load_run(r, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run_not_found")
-    return RunOut(**run)
+    return run
 
