@@ -19,6 +19,10 @@ from .vision.dehaze_dcp import dehaze_dcp
 from .vision.niqe_simple import niqe_score
 
 
+class RunCanceled(Exception):
+    pass
+
+
 def _stable_seed(text: str) -> int:
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big", signed=False)
@@ -89,6 +93,7 @@ def _compute_run_for_task_from_pairs(
     min_demo_seconds: float,
     demo_start: float,
     seed: int,
+    check_cancel,
 ) -> tuple[dict[str, float], dict[str, Any], list[dict[str, Any]]]:
     psnr_list: list[float] = []
     ssim_list: list[float] = []
@@ -98,6 +103,7 @@ def _compute_run_for_task_from_pairs(
     samples: list[dict[str, Any]] = []
 
     for pair in pairs:
+        check_cancel()
         inp_u8 = cv2.imread(str(pair.input_path), cv2.IMREAD_COLOR)
         gt_u8 = cv2.imread(str(pair.gt_path), cv2.IMREAD_COLOR)
         if inp_u8 is None or gt_u8 is None:
@@ -196,7 +202,16 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     if not run:
         return {"ok": False, "error": "run_not_found"}
 
-    # 进入 running
+    status0 = (run.get("status") or "").lower()
+    if status0 in {"canceled"} or run.get("cancel_requested"):
+        finished = time.time()
+        run["status"] = "canceled"
+        run["finished_at"] = finished
+        run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
+        run["error"] = "已取消"
+        save_run(r, run_id, run)
+        return {"ok": False, "run_id": run_id, "error": run["error"]}
+
     now = time.time()
     run["status"] = "running"
     run["started_at"] = now
@@ -207,6 +222,12 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     seed = _stable_seed(f"{run_id}|{task_type}|{run.get('dataset_id','')}|{run.get('algorithm_id','')}")
 
     try:
+        def check_cancel():
+            cur = load_run(r, run_id) or {}
+            s = (cur.get("status") or "").lower()
+            if cur.get("cancel_requested") or s in {"canceled", "canceling"}:
+                raise RunCanceled()
+
         if task_type in {"dehaze", "denoise", "deblur", "sr", "lowlight"}:
             from pathlib import Path
             from .vision.dataset_io import find_paired_images
@@ -253,6 +274,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     min_demo_seconds=min_demo_seconds,
                     demo_start=demo_start,
                     seed=seed,
+                    check_cancel=check_cancel,
                 )
                 finished = time.time()
                 run["status"] = "done"
@@ -268,6 +290,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 save_run(r, run_id, run)
                 return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
 
+            check_cancel()
             gt_u8, inp_u8 = _make_synthetic_pair_for_task(task_type=task_type, seed=seed)
             t0 = time.time()
             pred_u8 = compute_pred(inp_u8, gt_u8, None)
@@ -285,6 +308,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             if remain > 0:
                 time.sleep(remain)
 
+            check_cancel()
             finished = time.time()
             run["status"] = "done"
             run["finished_at"] = finished
@@ -301,6 +325,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             save_run(r, run_id, run)
             return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
 
+        check_cancel()
         sleep_s = random.uniform(1.2, 3.0)
         time.sleep(sleep_s)
 
@@ -312,6 +337,15 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["metrics"] = metrics
         save_run(r, run_id, run)
         return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
+
+    except RunCanceled:
+        finished = time.time()
+        run["status"] = "canceled"
+        run["finished_at"] = finished
+        run["elapsed"] = round(finished - (run.get("started_at") or finished), 3)
+        run["error"] = "已取消"
+        save_run(r, run_id, run)
+        return {"ok": False, "run_id": run_id, "error": run["error"]}
 
     except Exception as e:
         finished = time.time()

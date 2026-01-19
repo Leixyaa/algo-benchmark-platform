@@ -65,6 +65,8 @@ function normalizeStatusCN(status) {
   if (["running", "运行中"].includes(s)) return "运行中";
   if (["queued", "pending", "排队中"].includes(s)) return "排队中";
   if (["failed", "error", "失败"].includes(s)) return "失败";
+  if (["canceling", "cancelling", "取消中"].includes(s)) return "取消中";
+  if (["canceled", "cancelled", "已取消"].includes(s)) return "已取消";
   return String(status ?? "");
 }
 
@@ -86,7 +88,7 @@ function nowStr() {
 }
 
 function isTerminal(statusCN) {
-  return statusCN === "已完成" || statusCN === "失败";
+  return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
 
 // runId -> timerId
@@ -215,6 +217,24 @@ export const useAppStore = defineStore("app", {
       return run;
     },
 
+    async cancelRun(runId) {
+      const prev = this.runs.find((r) => r.id === runId);
+      if (prev && (prev.status === "已完成" || prev.status === "失败" || prev.status === "已取消")) return;
+
+      this._upsertRun({ id: runId, status: "取消中" });
+      try {
+        const out = await runsApi.cancelRun(runId);
+        if (out?.status) {
+          const statusCN = normalizeStatusCN(out.status);
+          this._upsertRun({ id: runId, status: statusCN });
+          if (statusCN === "已取消") this.stopPolling(runId);
+        }
+      } catch (e) {
+        this._upsertRun({ id: runId, status: prev?.status ?? "运行中" });
+        throw e;
+      }
+    },
+
     /**
      * 启动轮询（默认 800ms）
      * - run 进入终态（已完成/失败）会自动 stop
@@ -274,6 +294,8 @@ export const useAppStore = defineStore("app", {
         ssim: metrics.SSIM ?? metrics.ssim ?? null,
         niqe: metrics.NIQE ?? metrics.niqe ?? null,
         elapsed: out.elapsed != null ? `${out.elapsed}s` : "-",
+
+        error: out?.error ?? null,
 
         // 保留原始字段（未来导出/详情用）
         raw: out,

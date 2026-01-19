@@ -27,4 +27,8 @@ export const runsApi = {
   listRuns(query = {}) {
     return request("/runs", { query });
   },
+
+  cancelRun(runId) {
+    return request(`/runs/${runId}/cancel`, { method: "POST" });
+  },
 };

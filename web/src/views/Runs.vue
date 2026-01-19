@@ -10,29 +10,29 @@
       "
     >
       <div>
-        <h2 style="margin: 0 0 6px">ä»»åŠ¡ä¸­å¿ƒ</h2>
+        <h2 style="margin: 0 0 6px">ÈÎÎñÖĞĞÄ</h2>
         <div style="color: #666">
-          å±•ç¤ºè¯„æµ‹ä»»åŠ¡çš„çŠ¶æ€ã€å‚æ•°ä¸ç»“æœæ¦‚è§ˆã€‚çŠ¶æ€ç”±åç«¯ Celery/Redis é©±åŠ¨ï¼Œä¼šè‡ªåŠ¨åˆ·æ–°ã€‚
+          Õ¹Ê¾ÆÀ²âÈÎÎñµÄ×´Ì¬¡¢²ÎÊıÓë½á¹û¸ÅÀÀ¡£×´Ì¬ÓÉºó¶Ë Celery/Redis Çı¶¯£¬»á×Ô¶¯Ë¢ĞÂ¡£
         </div>
       </div>
 
       <div style="display: flex; gap: 8px; flex-wrap: wrap">
-        <el-button type="primary" @click="goNewRun">å‘èµ·è¯„æµ‹</el-button>
-        <el-button @click="mockOne">æ·»åŠ ä¸€æ¡ç¤ºä¾‹ä»»åŠ¡</el-button>
-        <el-button @click="refresh">åˆ·æ–°</el-button>
-        <el-button @click="exportDoneCsv">å¯¼å‡ºå·²å®ŒæˆCSV</el-button>
-        <el-button @click="exportDoneXlsx">å¯¼å‡ºå·²å®ŒæˆExcel</el-button>
-        <el-button type="danger" @click="clearDone">æ¸…ç†å·²å®Œæˆ</el-button>
+        <el-button type="primary" @click="goNewRun">·¢ÆğÆÀ²â</el-button>
+        <el-button @click="mockOne">Ìí¼ÓÒ»ÌõÊ¾ÀıÈÎÎñ</el-button>
+        <el-button @click="refresh">Ë¢ĞÂ</el-button>
+        <el-button @click="exportDoneCsv">µ¼³öÒÑÍê³ÉCSV</el-button>
+        <el-button @click="exportDoneXlsx">µ¼³öÒÑÍê³ÉExcel</el-button>
+        <el-button type="danger" @click="clearDone">ÇåÀíÒÑÍê³É</el-button>
       </div>
     </div>
 
     <el-table :data="rows" size="small" border style="width: 100%">
-      <el-table-column prop="name" label="ä»»åŠ¡å" min-width="160" />
+      <el-table-column prop="name" label="ÈÎÎñÃû" min-width="160" />
       <el-table-column prop="id" label="Run ID" min-width="160" />
-      <el-table-column prop="dataset" label="æ•°æ®é›†" min-width="140" />
-      <el-table-column prop="algorithm" label="ç®—æ³•" min-width="140" />
+      <el-table-column prop="dataset" label="Êı¾İ¼¯" min-width="140" />
+      <el-table-column prop="algorithm" label="Ëã·¨" min-width="140" />
 
-      <el-table-column label="çŠ¶æ€" width="110">
+      <el-table-column label="×´Ì¬" width="110">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)">
             {{ statusText(row.status) }}
@@ -40,28 +40,36 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="ç»¼åˆåˆ†" width="100">
+      <el-table-column label="×ÛºÏ·Ö" width="100">
         <template #default="{ row }">
           <span>{{ row.score ?? "-" }}</span>
         </template>
       </el-table-column>
 
 
-      <el-table-column prop="createdAt" label="åˆ›å»ºæ—¶é—´" width="170" />
+      <el-table-column prop="createdAt" label="´´½¨Ê±¼ä" width="170" />
 
-      <el-table-column label="æ“ä½œ" width="260" fixed="right">
+      <el-table-column label="²Ù×÷" width="320" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" @click="openDetail(row)">è¯¦æƒ…</el-button>
-          <el-button size="small" type="danger" @click="remove(row.id)">ä»åˆ—è¡¨éšè—</el-button>
+          <el-button size="small" @click="openDetail(row)">ÏêÇé</el-button>
+          <el-button
+            v-if="canCancel(row)"
+            size="small"
+            type="warning"
+            @click="cancel(row.id)"
+          >
+            È¡Ïû
+          </el-button>
+          <el-button size="small" type="danger" @click="remove(row.id)">´ÓÁĞ±íÒş²Ø</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <div v-if="rows.length === 0" style="color: #888; margin-top: 12px">
-      è¿˜æ²¡æœ‰ä»»åŠ¡ã€‚ä½ å¯ä»¥ç‚¹å‡»å³ä¸Šè§’â€œå‘èµ·è¯„æµ‹â€åˆ›å»ºç¬¬ä¸€æ¡ä»»åŠ¡ã€‚
+      »¹Ã»ÓĞÈÎÎñ¡£Äã¿ÉÒÔµã»÷ÓÒÉÏ½Ç¡°·¢ÆğÆÀ²â¡±´´½¨µÚÒ»ÌõÈÎÎñ¡£
     </div>
 
-    <el-dialog v-model="detailVisible" title="ä»»åŠ¡è¯¦æƒ…" width="680px">
+    <el-dialog v-model="detailVisible" title="ÈÎÎñÏêÇé" width="680px">
       <div v-if="detail">
         <div
           style="
@@ -72,15 +80,15 @@
             margin-bottom: 12px;
           "
         >
-          <div style="color: #666">ä»»åŠ¡å</div><div>{{ detail.name }}</div>
+          <div style="color: #666">ÈÎÎñÃû</div><div>{{ detail.name }}</div>
           <div style="color: #666">Run ID</div><div>{{ detail.id }}</div>
-          <div style="color: #666">æ•°æ®é›†</div><div>{{ detail.dataset }}</div>
-          <div style="color: #666">ç®—æ³•</div><div>{{ detail.algorithm }}</div>
-          <div style="color: #666">çŠ¶æ€</div><div>{{ statusText(detail.status) }}</div>
-          <div style="color: #666">åˆ›å»ºæ—¶é—´</div><div>{{ detail.createdAt }}</div>
+          <div style="color: #666">Êı¾İ¼¯</div><div>{{ detail.dataset }}</div>
+          <div style="color: #666">Ëã·¨</div><div>{{ detail.algorithm }}</div>
+          <div style="color: #666">×´Ì¬</div><div>{{ statusText(detail.status) }}</div>
+          <div style="color: #666">´´½¨Ê±¼ä</div><div>{{ detail.createdAt }}</div>
         </div>
 
-        <div style="color: #666; margin: 0 0 6px">å‚æ•°ï¼ˆåç«¯ params åŸæ ·å±•ç¤ºï¼‰</div>
+        <div style="color: #666; margin: 0 0 6px">²ÎÊı£¨ºó¶Ë params Ô­ÑùÕ¹Ê¾£©</div>
         <pre
           style="
             background: #0b1020;
@@ -91,7 +99,19 @@
           "
         >{{ detail.raw?.params ?? {} }}</pre>
 
-        <div style="color: #666; margin: 12px 0 6px">ç»“æœæŒ‡æ ‡</div>
+        <div v-if="detail.raw?.error" style="color: #666; margin: 12px 0 6px">Ê§°Ü/È¡ÏûÔ­Òò</div>
+        <pre
+          v-if="detail.raw?.error"
+          style="
+            background: #1a0f12;
+            color: #ffd7d7;
+            padding: 12px;
+            border-radius: 8px;
+            overflow: auto;
+          "
+        >{{ detail.raw?.error }}</pre>
+
+        <div style="color: #666; margin: 12px 0 6px">½á¹ûÖ¸±ê</div>
         <div
           style="
             display: grid;
@@ -103,15 +123,15 @@
           <div style="color: #666">PSNR</div><div>{{ detail.psnr ?? "-" }}</div>
           <div style="color: #666">SSIM</div><div>{{ detail.ssim ?? "-" }}</div>
           <div style="color: #666">NIQE</div><div>{{ detail.niqe ?? "-" }}</div>
-          <div style="color: #666">è€—æ—¶</div><div>{{ detail.elapsed ?? "-" }}</div>
-          <div style="color: #666">ç»¼åˆåˆ†</div><div>{{ detail.score ?? "-" }}</div>
-          <div style="color: #666">æ¨èåŸå› </div><div>{{ detail.reason ?? "-" }}</div>
+          <div style="color: #666">ºÄÊ±</div><div>{{ detail.elapsed ?? "-" }}</div>
+          <div style="color: #666">×ÛºÏ·Ö</div><div>{{ detail.score ?? "-" }}</div>
+          <div style="color: #666">ÍÆ¼öÔ­Òò</div><div>{{ detail.reason ?? "-" }}</div>
 
         </div>
       </div>
 
       <template #footer>
-        <el-button @click="detailVisible = false">å…³é—­</el-button>
+        <el-button @click="detailVisible = false">¹Ø±Õ</el-button>
       </template>
     </el-dialog>
   </div>
@@ -125,7 +145,7 @@ import { useAppStore } from "../stores/app";
 const router = useRouter();
 const store = useAppStore();
 
-// ========= éšè—ï¼ˆæœ¬åœ°æŒä¹…åŒ–ï¼Œä¸åŠ¨åç«¯ï¼‰=========
+// ========= Òş²Ø£¨±¾µØ³Ö¾Ã»¯£¬²»¶¯ºó¶Ë£©=========
 const HIDDEN_KEY = "hiddenRunIds_v1";
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
 
@@ -133,11 +153,11 @@ function persistHidden() {
   localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value)));
 }
 
-// ========= ä¸‹è½½ï¼ˆä¸å¼¹çª—ï¼Œä¸ä¼šè¢«æ‹¦æˆªï¼‰=========
+// ========= ÏÂÔØ£¨²»µ¯´°£¬²»»á±»À¹½Ø£©=========
 function downloadFile(url, filename) {
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename; // æŸäº›æµè§ˆå™¨ä¼šå¿½ç•¥ï¼Œä½†ä¸å½±å“ä¸‹è½½
+  a.download = filename; // Ä³Ğ©ä¯ÀÀÆ÷»áºöÂÔ£¬µ«²»Ó°ÏìÏÂÔØ
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
@@ -155,7 +175,7 @@ function exportDoneXlsx() {
 }
 
 async function clearDone() {
-  if (!confirm("ç¡®å®šæ¸…ç†æ‰€æœ‰â€œå·²å®Œæˆâ€çš„å†å²ä»»åŠ¡å—ï¼Ÿï¼ˆä¼šåˆ é™¤åç«¯Redisè®°å½•ï¼Œæ— æ³•æ¢å¤ï¼‰")) return;
+  if (!confirm("È·¶¨ÇåÀíËùÓĞ¡°ÒÑÍê³É¡±µÄÀúÊ·ÈÎÎñÂğ£¿£¨»áÉ¾³ıºó¶ËRedis¼ÇÂ¼£¬ÎŞ·¨»Ö¸´£©")) return;
 
   try {
     const res = await fetch("http://127.0.0.1:8000/runs/clear?status=done", {
@@ -164,15 +184,15 @@ async function clearDone() {
     const data = await res.json();
     if (!res.ok) throw new Error(JSON.stringify(data));
 
-    alert(`å·²æ¸…ç†ï¼š${data.deleted} æ¡å·²å®Œæˆä»»åŠ¡`);
-    await refresh(); // é‡æ–°æ‹‰å–åˆ—è¡¨
+    alert(`ÒÑÇåÀí£º${data.deleted} ÌõÒÑÍê³ÉÈÎÎñ`);
+    await refresh(); // ÖØĞÂÀ­È¡ÁĞ±í
   } catch (e) {
-    alert(`æ¸…ç†å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`ÇåÀíÊ§°Ü£º${e?.message || e}`);
   }
 }
 
 
-// ========= è¡¨æ ¼æ•°æ® =========
+// ========= ±í¸ñÊı¾İ =========
 const rows = computed(() => {
   const dsMap = new Map((store.datasets ?? []).map((d) => [d.id, d.name]));
   const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
@@ -182,12 +202,12 @@ const rows = computed(() => {
     .map((r) => {
       const base = {
         ...r,
-        name: r.name || `${r.task || "è¯„æµ‹"} Run`,
+        name: r.name || `${r.task || "ÆÀ²â"} Run`,
         dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
         algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
       };
 
-      // åªå¯¹å·²å®Œæˆä¸”æŒ‡æ ‡é½å…¨çš„ run ç®—ç»¼åˆåˆ†
+      // Ö»¶ÔÒÑÍê³ÉÇÒÖ¸±êÆëÈ«µÄ run Ëã×ÛºÏ·Ö
       const ctx = buildScoringContext(store.runs ?? []);
       const s = scoreOne(base, ctx);
       return {
@@ -202,22 +222,40 @@ function goNewRun() {
 }
 
 function statusText(status) {
-  if (status === "done" || status === "å·²å®Œæˆ") return "å·²å®Œæˆ";
-  if (status === "running" || status === "è¿è¡Œä¸­") return "è¿è¡Œä¸­";
-  if (status === "failed" || status === "å¤±è´¥") return "å¤±è´¥";
-  if (status === "queued" || status === "æ’é˜Ÿä¸­") return "æ’é˜Ÿä¸­";
+  if (status === "done" || status === "ÒÑÍê³É") return "ÒÑÍê³É";
+  if (status === "running" || status === "ÔËĞĞÖĞ") return "ÔËĞĞÖĞ";
+  if (status === "failed" || status === "Ê§°Ü") return "Ê§°Ü";
+  if (status === "queued" || status === "ÅÅ¶ÓÖĞ") return "ÅÅ¶ÓÖĞ";
+  if (status === "canceling" || status === "È¡ÏûÖĞ") return "È¡ÏûÖĞ";
+  if (status === "canceled" || status === "ÒÑÈ¡Ïû") return "ÒÑÈ¡Ïû";
   return status || "-";
 }
 
 function statusTagType(status) {
-  if (status === "done" || status === "å·²å®Œæˆ") return "success";
-  if (status === "running" || status === "è¿è¡Œä¸­") return "warning";
-  if (status === "failed" || status === "å¤±è´¥") return "danger";
+  if (status === "done" || status === "ÒÑÍê³É") return "success";
+  if (status === "running" || status === "ÔËĞĞÖĞ") return "warning";
+  if (status === "failed" || status === "Ê§°Ü") return "danger";
+  if (status === "canceling" || status === "È¡ÏûÖĞ") return "warning";
+  if (status === "canceled" || status === "ÒÑÈ¡Ïû") return "info";
   return "info";
 }
 
+function canCancel(row) {
+  return row?.status === "ÅÅ¶ÓÖĞ" || row?.status === "ÔËĞĞÖĞ" || row?.status === "È¡ÏûÖĞ";
+}
 
-// ====== å¿«é€Ÿé€‰å‹ï¼šç»™å•æ¡ run è®¡ç®—ç»¼åˆåˆ† + æ¨èåŸå› ï¼ˆä¸ Compare åŒé€»è¾‘ï¼‰======
+async function cancel(runId) {
+  if (!confirm("È·¶¨È¡Ïû¸ÃÈÎÎñÂğ£¿")) return;
+  try {
+    await store.cancelRun(runId);
+    await refresh();
+  } catch (e) {
+    alert(`È¡ÏûÊ§°Ü£º${e?.message || e}`);
+  }
+}
+
+
+// ====== ¿ìËÙÑ¡ĞÍ£º¸øµ¥Ìõ run ¼ÆËã×ÛºÏ·Ö + ÍÆ¼öÔ­Òò£¨Óë Compare Í¬Âß¼­£©======
 
 // elapsed "1.23s" -> seconds
 function parseElapsedSeconds(elapsed) {
@@ -257,7 +295,7 @@ function buildScoringContext(allRuns) {
   const mmNIQE = minMax(niqes);
   const mmTIME = minMax(times);
 
-  // Runs è¯¦æƒ…è¿™é‡Œç”¨å›ºå®šé»˜è®¤æƒé‡ï¼ˆä½ åœ¨ Compare é‡Œå¯è°ƒï¼›è¯¦æƒ…é‡Œåªå±•ç¤ºâ€œå¹³å°é»˜è®¤æ¨èé€»è¾‘â€ï¼‰
+  // Runs ÏêÇéÕâÀïÓÃ¹Ì¶¨Ä¬ÈÏÈ¨ÖØ£¨ÄãÔÚ Compare Àï¿Éµ÷£»ÏêÇéÀïÖ»Õ¹Ê¾¡°Æ½Ì¨Ä¬ÈÏÍÆ¼öÂß¼­¡±£©
   const W = { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 };
 
   return { mmPSNR, mmSSIM, mmNIQE, mmTIME, W };
@@ -275,7 +313,7 @@ function scoreOne(run, ctx) {
   const nTIME = norm01(tsec, ctx.mmTIME.min, ctx.mmTIME.max);
 
   const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
-  if (!okAll) return { score: null, reason: "æŒ‡æ ‡ä¸å®Œæ•´ï¼Œæ— æ³•è®¡ç®—ç»¼åˆåˆ†" };
+  if (!okAll) return { score: null, reason: "Ö¸±ê²»ÍêÕû£¬ÎŞ·¨¼ÆËã×ÛºÏ·Ö" };
 
   const score =
     ctx.W.psnr * nPSNR +
@@ -283,17 +321,17 @@ function scoreOne(run, ctx) {
     ctx.W.niqe * (1 - nNIQE) +
     ctx.W.time * (1 - nTIME);
 
-  // ç®€çŸ­è§£é‡Šï¼šç‚¹å‡ºä¸»å¯¼é¡¹
+  // ¼ò¶Ì½âÊÍ£ºµã³öÖ÷µ¼Ïî
   const parts = [];
-  if (nPSNR >= 0.8) parts.push("PSNRè¾ƒé«˜");
-  if (nSSIM >= 0.8) parts.push("SSIMè¾ƒé«˜");
-  if (nNIQE <= 0.2) parts.push("NIQEè¾ƒä½(æ›´è‡ªç„¶)");
-  if (nTIME <= 0.2) parts.push("è€—æ—¶è¾ƒçŸ­");
-  if (parts.length === 0) parts.push("å¤šæŒ‡æ ‡è¾ƒå‡è¡¡");
+  if (nPSNR >= 0.8) parts.push("PSNR½Ï¸ß");
+  if (nSSIM >= 0.8) parts.push("SSIM½Ï¸ß");
+  if (nNIQE <= 0.2) parts.push("NIQE½ÏµÍ(¸ü×ÔÈ»)");
+  if (nTIME <= 0.2) parts.push("ºÄÊ±½Ï¶Ì");
+  if (parts.length === 0) parts.push("¶àÖ¸±ê½Ï¾ùºâ");
 
   return {
     score: Number(score.toFixed(4)),
-    reason: `${parts.join("ï¼Œ")}ï¼›é»˜è®¤æƒé‡ï¼šPSNR 35% + SSIM 35% + NIQE 20% + è€—æ—¶ 10%`,
+    reason: `${parts.join("£¬")}£»Ä¬ÈÏÈ¨ÖØ£ºPSNR 35% + SSIM 35% + NIQE 20% + ºÄÊ± 10%`,
   };
 }
 // ===========================================================================//
@@ -303,12 +341,12 @@ async function refresh() {
   try {
     await store.fetchRuns();
   } catch (e) {
-    alert(`åˆ·æ–°å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`Ë¢ĞÂÊ§°Ü£º${e?.message || e}`);
   }
 }
 
 function remove(id) {
-  if (!confirm("ç¡®å®šéšè—è¯¥ä»»åŠ¡å—ï¼Ÿï¼ˆä»…æœ¬æœºæœ¬æµè§ˆå™¨ç”Ÿæ•ˆï¼Œåç«¯ä¸ä¼šåˆ é™¤ï¼‰")) return;
+  if (!confirm("È·¶¨Òş²Ø¸ÃÈÎÎñÂğ£¿£¨½ö±¾»ú±¾ä¯ÀÀÆ÷ÉúĞ§£¬ºó¶Ë²»»áÉ¾³ı£©")) return;
   hiddenIds.value.add(id);
   persistHidden();
 }
@@ -316,17 +354,17 @@ function remove(id) {
 async function mockOne() {
   const ds = (store.datasets ?? [])[0];
   const algo = (store.algorithms ?? [])[0];
-  if (!ds || !algo) return alert("ç¼ºå°‘ Demo æ•°æ®é›†æˆ–ç®—æ³•ï¼Œæ— æ³•åˆ›å»ºç¤ºä¾‹ä»»åŠ¡");
+  if (!ds || !algo) return alert("È±ÉÙ Demo Êı¾İ¼¯»òËã·¨£¬ÎŞ·¨´´½¨Ê¾ÀıÈÎÎñ");
 
   try {
     await store.createRun({
-      task: algo.task || "å»å™ª",
+      task: algo.task || "È¥Ôë",
       datasetId: ds.id,
       algorithmId: algo.id,
       metrics: ["PSNR", "SSIM", "NIQE"],
     });
   } catch (e) {
-    alert(`åˆ›å»ºå¤±è´¥ï¼š${e?.message || e}`);
+    alert(`´´½¨Ê§°Ü£º${e?.message || e}`);
   }
 }
 
@@ -338,7 +376,7 @@ const detailVisible = ref(false);
 const detail = ref(null);
 
 function openDetail(row) {
-  // ç”¨å½“å‰åˆ—è¡¨ï¼ˆå·²è¿‡æ»¤éšè—ï¼‰ä½œä¸ºè¯„åˆ†èŒƒå›´ï¼›è¿™æ ·è§£é‡Šæ˜¯â€œåœ¨å½“å‰å¯è§ runs ä¸­çš„ç›¸å¯¹è¡¨ç°â€
+  // ÓÃµ±Ç°ÁĞ±í£¨ÒÑ¹ıÂËÒş²Ø£©×÷ÎªÆÀ·Ö·¶Î§£»ÕâÑù½âÊÍÊÇ¡°ÔÚµ±Ç°¿É¼û runs ÖĞµÄÏà¶Ô±íÏÖ¡±
   const ctx = buildScoringContext(rows.value);
   const s = scoreOne(row, ctx);
 

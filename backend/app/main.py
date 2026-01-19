@@ -18,6 +18,7 @@ from openpyxl import Workbook
 
 from .schemas import RunCreate, RunOut
 from .store import make_redis, save_run, load_run, list_runs
+from .celery_app import celery_app
 from .tasks import execute_run
 
 
@@ -49,6 +50,8 @@ def create_run(payload: RunCreate):
         "dataset_id": payload.dataset_id,
         "algorithm_id": payload.algorithm_id,
         "params": payload.params,
+        "samples": [],
+        "cancel_requested": False,
 
         "status": "queued",
         "created_at": created,
@@ -60,7 +63,7 @@ def create_run(payload: RunCreate):
     }
     save_run(r, run_id, run)
 
-    execute_run.delay(run_id)
+    execute_run.apply_async((run_id,), task_id=run_id)
 
     return RunOut(**run)
 
@@ -74,7 +77,7 @@ def get_runs(limit: int = 200):
 @app.get("/runs/export")
 def export_runs(
     format: str = Query("csv", description="csv|xlsx"),
-    status: str | None = Query(None, description="queued|running|done|failed"),
+    status: str | None = Query(None, description="queued|running|canceling|canceled|done|failed"),
     task_type: str | None = Query(None, description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr"),
     dataset_id: str | None = Query(None),
     algorithm_id: str | None = Query(None),
@@ -234,4 +237,32 @@ def get_run(run_id: str):
     if not run:
         raise HTTPException(status_code=404, detail="run_not_found")
     return run
+
+
+@app.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str):
+    r = make_redis()
+    run = load_run(r, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run_not_found")
+
+    status = (run.get("status") or "").lower()
+    if status in {"done", "failed", "canceled"}:
+        return {"ok": True, "run_id": run_id, "status": status}
+
+    run["cancel_requested"] = True
+    if status == "queued":
+        celery_app.control.revoke(run_id)
+        finished = time.time()
+        run["status"] = "canceled"
+        run["finished_at"] = finished
+        run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
+        run["error"] = "ÒÑÈ¡Ïû"
+        save_run(r, run_id, run)
+        return {"ok": True, "run_id": run_id, "status": "canceled"}
+
+    run["status"] = "canceling"
+    save_run(r, run_id, run)
+    celery_app.control.revoke(run_id, terminate=False)
+    return {"ok": True, "run_id": run_id, "status": "canceling"}
 
