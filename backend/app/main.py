@@ -1,3 +1,4 @@
+# -*- coding: gbk -*-
 from __future__ import annotations
 
 import time
@@ -80,9 +81,9 @@ def export_runs(
     limit: int = Query(500, ge=1, le=5000),
 ):
     """
-    å¯¼å‡º runsï¼ˆCSV / Excelï¼‰
-    - æœ¬é˜¶æ®µï¼šåªè¯» Redis çš„å†å² runs
-    - è¿‡æ»¤æ¡ä»¶ï¼šstatus/task_type/dataset_id/algorithm_id
+    µ¼³ö runs£¨CSV / Excel£©
+    - ±¾½×¶Î£ºÖ»¶Á Redis µÄÀúÊ· runs
+    - ¹ıÂËÌõ¼ş£ºstatus/task_type/dataset_id/algorithm_id
     """
     fmt = (format or "").lower().strip()
     if fmt not in ("csv", "xlsx"):
@@ -91,7 +92,7 @@ def export_runs(
     r = make_redis()
     runs = list_runs(r, limit=limit)
 
-    # ===== è¿‡æ»¤ =====
+    # ===== ¹ıÂË =====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -105,7 +106,7 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== æ‰å¹³åŒ–è¡¨å¤´ï¼ˆç¨³å®šå­—æ®µï¼Œå‰ç«¯/è®ºæ–‡å¥½è§£é‡Šï¼‰=====
+    # ===== ±âÆ½»¯±íÍ·£¨ÎÈ¶¨×Ö¶Î£¬Ç°¶Ë/ÂÛÎÄºÃ½âÊÍ£©=====
     headers = [
         "run_id",
         "task_type",
@@ -120,10 +121,14 @@ def export_runs(
         "SSIM",
         "NIQE",
         "error",
+        "params_json",
+        "samples_json",
     ]
 
     def to_row(x: dict) -> dict:
         m = x.get("metrics") or {}
+        params = x.get("params") or {}
+        samples = x.get("samples") or []
         return {
             "run_id": x.get("run_id"),
             "task_type": x.get("task_type"),
@@ -138,6 +143,8 @@ def export_runs(
             "SSIM": m.get("SSIM"),
             "NIQE": m.get("NIQE"),
             "error": x.get("error"),
+            "params_json": json.dumps(params, ensure_ascii=False),
+            "samples_json": json.dumps(samples, ensure_ascii=False),
         }
 
     rows = [to_row(x) for x in runs]
@@ -192,9 +199,9 @@ def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
 ):
     """
-    æ¸…ç† runs å†å²è®°å½•ï¼ˆé»˜è®¤æ¸…ç†å·²å®Œæˆ doneï¼‰
-    - status=doneï¼šåªåˆ å·²å®Œæˆ
-    - status=allï¼šå…¨éƒ¨åˆ é™¤
+    ÇåÀí runs ÀúÊ·¼ÇÂ¼£¨Ä¬ÈÏÇåÀíÒÑÍê³É done£©
+    - status=done£ºÖ»É¾ÒÑÍê³É
+    - status=all£ºÈ«²¿É¾³ı
     """
     r = make_redis()
     keys = r.keys("run:*")

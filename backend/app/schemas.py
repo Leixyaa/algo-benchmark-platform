@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -25,4 +25,6 @@ class RunOut(BaseModel):
     elapsed: Optional[float] = None
 
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    params: Dict[str, Any] = Field(default_factory=dict)
+    samples: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[str] = None

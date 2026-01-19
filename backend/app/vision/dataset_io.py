@@ -1,46 +1,58 @@
+# -*- coding: gbk -*-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 
 
 @dataclass
-class DehazePair:
-    hazy_path: Path
+class PairedImage:
+    input_path: Path
     gt_path: Path
+    name: str
 
 
 def _is_img(p: Path) -> bool:
     return p.is_file() and p.suffix.lower() in IMG_EXTS
 
 
-def find_dehaze_pairs(data_root: Path, dataset_id: str, limit: int = 5) -> List[DehazePair]:
+def find_paired_images(
+    data_root: Path,
+    dataset_id: str,
+    input_dirname: str,
+    gt_dirname: str = "gt",
+    limit: int = 5,
+) -> List[PairedImage]:
     """
-    åœ¨ backend/data/<dataset_id>/hazy ä¸ gt ä¸­æ‰¾åŒåæ–‡ä»¶é…å¯¹
-    - è¿”å›æœ€å¤š limit å¯¹
-    - æ‰¾ä¸åˆ°åˆ™è¿”å› []
+    ÔÚ backend/data/<dataset_id>/<input_dirname> Óë <gt_dirname> ÖĞÕÒÍ¬ÃûÎÄ¼şÅä¶Ô
+    - ·µ»Ø×î¶à limit ¶Ô
+    - ÕÒ²»µ½Ôò·µ»Ø []
     """
     ds_dir = data_root / dataset_id
-    hazy_dir = ds_dir / "hazy"
-    gt_dir = ds_dir / "gt"
-    if not hazy_dir.exists() or not gt_dir.exists():
+    input_dir = ds_dir / input_dirname
+    gt_dir = ds_dir / gt_dirname
+    if not input_dir.exists() or not gt_dir.exists():
         return []
 
-    hazy_files = [p for p in hazy_dir.rglob("*") if _is_img(p)]
-    if not hazy_files:
+    input_files = [p for p in input_dir.rglob("*") if _is_img(p)]
+    if not input_files:
         return []
 
-    # æŒ‰ç›¸å¯¹è·¯å¾„/æ–‡ä»¶ååŒ¹é…ï¼šä¼˜å…ˆåŒ¹é…åŒåæ–‡ä»¶
-    pairs: List[DehazePair] = []
-    for hp in sorted(hazy_files)[: max(limit * 5, 50)]:  # å¤šæ‰«ä¸€ç‚¹é¿å…å‰é¢ä¸åŒ¹é…
-        gp = gt_dir / hp.name
+    # °´Ïà¶ÔÂ·¾¶/ÎÄ¼şÃûÆ¥Åä£ºÓÅÏÈÆ¥ÅäÍ¬ÃûÎÄ¼ş
+    pairs: List[PairedImage] = []
+    for ip in sorted(input_files)[: max(limit * 5, 50)]:
+        gp = gt_dir / ip.name
         if gp.exists() and _is_img(gp):
-            pairs.append(DehazePair(hazy_path=hp, gt_path=gp))
+            pairs.append(PairedImage(input_path=ip, gt_path=gp, name=ip.name))
             if len(pairs) >= limit:
                 break
 
     return pairs
+
+
+def find_dehaze_pairs(data_root: Path, dataset_id: str, limit: int = 5) -> List[PairedImage]:
+    return find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt", limit=limit)
