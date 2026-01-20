@@ -87,6 +87,35 @@ def _resize_to_match(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[np
     return gt_resized, pred_bgr_u8
 
 
+def _apply_gamma_bgr(img_bgr_u8: np.ndarray, gamma: float) -> np.ndarray:
+    g = max(0.05, float(gamma))
+    x = img_bgr_u8.astype(np.float32) / 255.0
+    y = np.clip(np.power(x, g), 0.0, 1.0)
+    return (y * 255.0 + 0.5).astype(np.uint8)
+
+
+def _apply_clahe_bgr(img_bgr_u8: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple[int, int] = (8, 8)) -> np.ndarray:
+    lab = cv2.cvtColor(img_bgr_u8, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=float(clip_limit), tileGridSize=tile_grid_size)
+    l2 = clahe.apply(l)
+    out = cv2.merge([l2, a, b])
+    return cv2.cvtColor(out, cv2.COLOR_LAB2BGR)
+
+
+def _unsharp_mask(img_bgr_u8: np.ndarray, sigma: float = 1.0, amount: float = 1.6) -> np.ndarray:
+    blur = cv2.GaussianBlur(img_bgr_u8, (0, 0), sigmaX=float(sigma))
+    return cv2.addWeighted(img_bgr_u8, float(amount), blur, -float(amount - 1.0), 0)
+
+
+def _laplacian_sharpen(img_bgr_u8: np.ndarray, strength: float = 0.8) -> np.ndarray:
+    g = cv2.cvtColor(img_bgr_u8, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(g, ddepth=cv2.CV_32F, ksize=3)
+    lap = cv2.convertScaleAbs(lap)
+    lap_bgr = cv2.cvtColor(lap, cv2.COLOR_GRAY2BGR)
+    return cv2.addWeighted(img_bgr_u8, 1.0, lap_bgr, float(strength), 0)
+
+
 def _compute_run_for_task_from_pairs(
     pairs: list[Any],
     compute_pred,
@@ -227,6 +256,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             from .vision.dataset_io import find_paired_images
 
             dataset_id = run.get("dataset_id") or ""
+            algorithm_id = (run.get("algorithm_id") or "").lower()
             data_root = Path(__file__).resolve().parents[1] / "data"  # backend/app/.. -> backend/data
 
             min_demo_seconds = 1.6
@@ -242,23 +272,67 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             input_dirname = input_dir_by_task.get(task_type, "hazy")
             pairs = find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
 
+            def pick_impl_name() -> str:
+                if task_type == "dehaze":
+                    if algorithm_id in {"alg_dehaze_clahe"}:
+                        return "CLAHE"
+                    if algorithm_id in {"alg_dehaze_gamma"}:
+                        return "Gamma"
+                    return "DCP"
+                if task_type == "denoise":
+                    if algorithm_id in {"alg_denoise_bilateral"}:
+                        return "Bilateral"
+                    if algorithm_id in {"alg_denoise_gaussian"}:
+                        return "Gaussian"
+                    if algorithm_id in {"alg_denoise_median"}:
+                        return "Median"
+                    return "FastNLMeans"
+                if task_type == "deblur":
+                    if algorithm_id in {"alg_deblur_laplacian"}:
+                        return "LaplacianSharpen"
+                    return "UnsharpMask"
+                if task_type == "sr":
+                    if algorithm_id in {"alg_sr_nearest"}:
+                        return "Nearest"
+                    if algorithm_id in {"alg_sr_lanczos"}:
+                        return "Lanczos"
+                    return "Bicubic"
+                if task_type == "lowlight":
+                    if algorithm_id in {"alg_lowlight_clahe"}:
+                        return "CLAHE"
+                    return "Gamma"
+                return "Baseline"
+
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
                 if task_type == "dehaze":
+                    if algorithm_id in {"alg_dehaze_clahe"}:
+                        return _apply_clahe_bgr(inp_u8, clip_limit=2.0)
+                    if algorithm_id in {"alg_dehaze_gamma"}:
+                        return _apply_gamma_bgr(inp_u8, gamma=0.75)
                     return dehaze_dcp(inp_u8, patch=15, omega=0.95, t0=0.1)
                 if task_type == "denoise":
+                    if algorithm_id in {"alg_denoise_bilateral"}:
+                        return cv2.bilateralFilter(inp_u8, d=7, sigmaColor=35, sigmaSpace=35)
+                    if algorithm_id in {"alg_denoise_gaussian"}:
+                        return cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=1.0)
+                    if algorithm_id in {"alg_denoise_median"}:
+                        return cv2.medianBlur(inp_u8, 3)
                     return cv2.fastNlMeansDenoisingColored(inp_u8, None, 10, 10, 7, 21)
                 if task_type == "deblur":
-                    blur = cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=1.0)
-                    return cv2.addWeighted(inp_u8, 1.6, blur, -0.6, 0)
+                    if algorithm_id in {"alg_deblur_laplacian"}:
+                        return _laplacian_sharpen(inp_u8, strength=0.7)
+                    return _unsharp_mask(inp_u8, sigma=1.0, amount=1.6)
                 if task_type == "sr":
                     h, w = gt_u8.shape[:2]
+                    if algorithm_id in {"alg_sr_nearest"}:
+                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_NEAREST)
+                    if algorithm_id in {"alg_sr_lanczos"}:
+                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LANCZOS4)
                     return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
                 if task_type == "lowlight":
-                    rgb = cv2.cvtColor(inp_u8, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-                    gamma = 0.6
-                    out = np.clip(np.power(rgb, gamma), 0, 1)
-                    out_u8 = (out * 255.0 + 0.5).astype(np.uint8)
-                    return cv2.cvtColor(out_u8, cv2.COLOR_RGB2BGR)
+                    if algorithm_id in {"alg_lowlight_clahe"}:
+                        return _apply_clahe_bgr(inp_u8, clip_limit=2.5)
+                    return _apply_gamma_bgr(inp_u8, gamma=0.6)
                 return inp_u8
 
             if pairs:
@@ -277,7 +351,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 run["metrics"] = metrics
                 params = run.get("params") or {}
                 params.update(params_patch)
-                params["real_algo"] = {"dehaze": "DCP", "denoise": "FastNLMeans", "deblur": "UnsharpMask", "sr": "Bicubic", "lowlight": "Gamma"}[task_type]
+                params["real_algo"] = pick_impl_name()
                 params["input_dir"] = input_dirname
                 run["params"] = params
                 run["samples"] = samples
@@ -306,7 +380,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             params = run.get("params") or {}
             params["data_mode"] = "synthetic_no_dataset"
             params["algo_elapsed"] = round(float(algo_elapsed), 3)
-            params["real_algo"] = {"dehaze": "DCP", "denoise": "FastNLMeans", "deblur": "UnsharpMask", "sr": "Bicubic", "lowlight": "Gamma"}[task_type]
+            params["real_algo"] = pick_impl_name()
             params["input_dir"] = input_dirname
             run["params"] = params
             run["samples"] = [{"name": "synthetic", "PSNR": round(float(psnr), 3), "SSIM": round(float(ssim), 4), "NIQE": round(float(niqe), 3)}]

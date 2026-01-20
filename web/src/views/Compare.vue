@@ -20,6 +20,9 @@
         <el-button @click="presetQuality">质量优先</el-button>
         <el-button @click="presetBalanced">平衡推荐</el-button>
         <el-button @click="presetSpeed">速度优先</el-button>
+        <el-button type="warning" :disabled="bulkRunning" @click="bulkRunBaselines">
+          {{ bulkRunning ? "批量运行中..." : "批量跑基线" }}
+        </el-button>
 
         <el-button @click="exportCsv">导出CSV</el-button>
         <el-button @click="exportXlsx">导出Excel</el-button>
@@ -284,6 +287,45 @@ function reset() {
   wSSIM.value = 3.5;
   wNIQE.value = 2.0;
   wTIME.value = 1.0;
+}
+
+const bulkRunning = ref(false);
+
+async function bulkRunBaselines() {
+  const taskLabel = task.value || taskOptions.value?.[0] || "";
+  const dsId = datasetId.value || store.datasets?.[0]?.id || "";
+  if (!taskLabel) return alert("请先选择任务类型");
+  if (!dsId) return alert("请先选择数据集");
+
+  const algs = (store.algorithms || []).filter((a) => a?.task === taskLabel);
+  if (!algs.length) return alert("当前任务类型下没有可用算法");
+
+  const ok = confirm(`将为【${taskLabel}】在数据集【${dsId}】批量创建 ${algs.length} 条评测任务。继续吗？`);
+  if (!ok) return;
+
+  task.value = taskLabel;
+  datasetId.value = dsId;
+
+  if (bulkRunning.value) return;
+  bulkRunning.value = true;
+  const failed = [];
+
+  for (const a of algs) {
+    try {
+      await store.createRun({
+        task: taskLabel,
+        datasetId: dsId,
+        algorithmId: a.id,
+        metrics: ["PSNR", "SSIM", "NIQE"],
+      });
+    } catch (e) {
+      failed.push(`${a?.name || a?.id}: ${e?.message || e}`);
+    }
+  }
+
+  bulkRunning.value = false;
+  if (failed.length) return alert(`部分创建失败：\n${failed.join("\n")}`);
+  alert("批量创建完成：请稍候在列表中查看结果。");
 }
 
 function mapTaskLabelToType(label) {

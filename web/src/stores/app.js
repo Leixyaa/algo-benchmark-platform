@@ -179,6 +179,40 @@ function nowStr() {
   )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function ensureBaselineAlgorithms(algs) {
+  const list = Array.isArray(algs) ? algs.slice() : [];
+  const byId = new Set(list.map((a) => a?.id).filter(Boolean));
+  const add = (x) => {
+    if (!x?.id) return;
+    if (byId.has(x.id)) return;
+    byId.add(x.id);
+    list.push(x);
+  };
+
+  const createdAt = nowStr();
+
+  add({ id: "alg_dn_cnn", task: "去噪", name: "FastNLMeans(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_denoise_bilateral", task: "去噪", name: "Bilateral(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_denoise_gaussian", task: "去噪", name: "Gaussian(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_denoise_median", task: "去噪", name: "Median(基线)", impl: "OpenCV", version: "v1", createdAt });
+
+  add({ id: "alg_dehaze_dcp", task: "去雾", name: "DCP暗通道先验(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_dehaze_clahe", task: "去雾", name: "CLAHE(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_dehaze_gamma", task: "去雾", name: "Gamma(基线)", impl: "OpenCV", version: "v1", createdAt });
+
+  add({ id: "alg_deblur_unsharp", task: "去模糊", name: "UnsharpMask(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_deblur_laplacian", task: "去模糊", name: "LaplacianSharpen(基线)", impl: "OpenCV", version: "v1", createdAt });
+
+  add({ id: "alg_sr_bicubic", task: "超分辨率", name: "Bicubic(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_sr_lanczos", task: "超分辨率", name: "Lanczos(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_sr_nearest", task: "超分辨率", name: "Nearest(基线)", impl: "OpenCV", version: "v1", createdAt });
+
+  add({ id: "alg_lowlight_gamma", task: "低照度增强", name: "Gamma(基线)", impl: "OpenCV", version: "v1", createdAt });
+  add({ id: "alg_lowlight_clahe", task: "低照度增强", name: "CLAHE(基线)", impl: "OpenCV", version: "v1", createdAt });
+
+  return list;
+}
+
 function isTerminal(statusCN) {
   return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
@@ -197,10 +231,7 @@ export const useAppStore = defineStore("app", {
       { id: "ds_demo", name: "Demo-样例数据集", type: "图像", size: "10 张", createdAt: nowStr() },
     ]),
 
-    algorithms: (loaded?.algorithms?.length ? loaded.algorithms : [
-      { id: "alg_dn_cnn", task: "去噪", name: "DnCNN(示例)", impl: "PyTorch", version: "v1", createdAt: nowStr() },
-      { id: "alg_dehaze_dcp", task: "去雾", name: "DCP暗通道先验(真实)", impl: "OpenCV", version: "v1", createdAt: nowStr() },
-    ]),
+    algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
 
     
 
