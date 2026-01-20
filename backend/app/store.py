@@ -6,7 +6,7 @@ import redis
 
 
 def make_redis() -> redis.Redis:
-    # é»˜è®¤æœ¬æœº Redis
+    # Ä¬ÈÏ±¾»ú Redis
     return redis.Redis(host="127.0.0.1", port=6379, db=0, decode_responses=True)
 
 
@@ -26,9 +26,9 @@ def load_run(r: redis.Redis, run_id: str) -> Optional[Dict[str, Any]]:
 
 
 def list_runs(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
-    # ç®€å•å®ç°ï¼šæ‰«æ keyï¼ˆæ¯•ä¸šè®¾è®¡å¤Ÿç”¨ï¼‰
+    # ¼òµ¥ÊµÏÖ£ºÉ¨Ãè key£¨±ÏÒµÉè¼Æ¹»ÓÃ£©
     keys = r.keys("run:*")
-    # æŒ‰åˆ›å»ºæ—¶é—´æ’åºï¼ˆdescï¼‰
+    # °´´´½¨Ê±¼äÅÅĞò£¨desc£©
     runs = []
     for k in keys:
         s = r.get(k)
@@ -37,3 +37,65 @@ def list_runs(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
         runs.append(json.loads(s))
     runs.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return runs[:limit]
+
+
+def dataset_key(dataset_id: str) -> str:
+    return f"dataset:{dataset_id}"
+
+
+def algorithm_key(algorithm_id: str) -> str:
+    return f"algorithm:{algorithm_id}"
+
+
+def save_dataset(r: redis.Redis, dataset_id: str, data: Dict[str, Any]) -> None:
+    r.set(dataset_key(dataset_id), json.dumps(data, ensure_ascii=False))
+
+
+def load_dataset(r: redis.Redis, dataset_id: str) -> Optional[Dict[str, Any]]:
+    s = r.get(dataset_key(dataset_id))
+    if not s:
+        return None
+    return json.loads(s)
+
+
+def delete_dataset(r: redis.Redis, dataset_id: str) -> None:
+    r.delete(dataset_key(dataset_id))
+
+
+def list_datasets(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
+    keys = r.keys("dataset:*")
+    items = []
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        items.append(json.loads(s))
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return items[:limit]
+
+
+def save_algorithm(r: redis.Redis, algorithm_id: str, data: Dict[str, Any]) -> None:
+    r.set(algorithm_key(algorithm_id), json.dumps(data, ensure_ascii=False))
+
+
+def load_algorithm(r: redis.Redis, algorithm_id: str) -> Optional[Dict[str, Any]]:
+    s = r.get(algorithm_key(algorithm_id))
+    if not s:
+        return None
+    return json.loads(s)
+
+
+def delete_algorithm(r: redis.Redis, algorithm_id: str) -> None:
+    r.delete(algorithm_key(algorithm_id))
+
+
+def list_algorithms(r: redis.Redis, limit: int = 500) -> list[Dict[str, Any]]:
+    keys = r.keys("algorithm:*")
+    items = []
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        items.append(json.loads(s))
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return items[:limit]

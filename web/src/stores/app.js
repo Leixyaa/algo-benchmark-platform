@@ -10,6 +10,8 @@
 
 import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
+import { datasetsApi } from "../api/datasets";
+import { algorithmsApi } from "../api/algorithms";
 
 const LS_KEY = "abp_state_v1";
 
@@ -244,47 +246,132 @@ export const useAppStore = defineStore("app", {
   },
 
   actions: {
-    // ====================== Demo 管理（保留） ======================
-    addDataset(ds) {
-      this.datasets.unshift({ ...ds, createdAt: nowStr() });
+    // ====================== Catalog：数据集/算法（后端持久化） ======================
+    async fetchDatasets(limit = 200) {
+      const list = await datasetsApi.listDatasets({ limit });
+      const mapped = (list ?? []).map((x) => ({
+        id: x.dataset_id,
+        name: x.name,
+        type: x.type,
+        size: x.size,
+        createdAt: formatTs(x.created_at),
+        raw: x,
+      }));
+      this.datasets = mapped.length ? mapped : this.datasets;
+      saveState({ datasets: this.datasets });
+      return this.datasets;
+    },
+
+    async fetchAlgorithms(limit = 500) {
+      const list = await algorithmsApi.listAlgorithms({ limit });
+      const mapped = (list ?? []).map((x) => ({
+        id: x.algorithm_id,
+        task: x.task,
+        name: x.name,
+        impl: x.impl,
+        version: x.version,
+        createdAt: formatTs(x.created_at),
+        raw: x,
+      }));
+      this.algorithms = mapped.length ? ensureBaselineAlgorithms(mapped) : this.algorithms;
+      saveState({ algorithms: this.algorithms });
+      return this.algorithms;
+    },
+
+    async createDataset(payload) {
+      const out = await datasetsApi.createDataset({
+        dataset_id: payload?.id,
+        name: payload?.name,
+        type: payload?.type,
+        size: payload?.size,
+      });
+      const ds = {
+        id: out.dataset_id,
+        name: out.name,
+        type: out.type,
+        size: out.size,
+        createdAt: formatTs(out.created_at),
+        raw: out,
+      };
+      const idx = this.datasets.findIndex((d) => d.id === ds.id);
+      if (idx === -1) this.datasets.unshift(ds);
+      else this.datasets[idx] = { ...this.datasets[idx], ...ds };
+      saveState({ datasets: this.datasets });
+      return ds;
+    },
+
+    async updateDataset(id, patch) {
+      const out = await datasetsApi.patchDataset(id, patch);
+      const ds = {
+        id: out.dataset_id,
+        name: out.name,
+        type: out.type,
+        size: out.size,
+        createdAt: formatTs(out.created_at),
+        raw: out,
+      };
+      const idx = this.datasets.findIndex((d) => d.id === id);
+      if (idx >= 0) this.datasets[idx] = { ...this.datasets[idx], ...ds };
+      saveState({ datasets: this.datasets });
+      return ds;
+    },
+
+    async removeDataset(id) {
+      await datasetsApi.deleteDataset(id);
+      const idx = this.datasets.findIndex((d) => d.id === id);
+      if (idx >= 0) this.datasets.splice(idx, 1);
       saveState({ datasets: this.datasets });
     },
 
-    addAlgorithm(alg) {
-      this.algorithms.unshift({ ...alg, createdAt: nowStr() });
+    async createAlgorithm(payload) {
+      const out = await algorithmsApi.createAlgorithm({
+        algorithm_id: payload?.id,
+        task: payload?.task,
+        name: payload?.name,
+        impl: payload?.impl,
+        version: payload?.version,
+      });
+      const alg = {
+        id: out.algorithm_id,
+        task: out.task,
+        name: out.name,
+        impl: out.impl,
+        version: out.version,
+        createdAt: formatTs(out.created_at),
+        raw: out,
+      };
+      const idx = this.algorithms.findIndex((a) => a.id === alg.id);
+      if (idx === -1) this.algorithms.unshift(alg);
+      else this.algorithms[idx] = { ...this.algorithms[idx], ...alg };
+      this.algorithms = ensureBaselineAlgorithms(this.algorithms);
       saveState({ algorithms: this.algorithms });
+      return alg;
     },
 
-    removeDataset(id) {
-      const idx = this.datasets.findIndex((d) => d.id === id);
-      if (idx >= 0) {
-        this.datasets.splice(idx, 1);
-        saveState({ datasets: this.datasets });
-      }
-    },
-
-    removeAlgorithm(id) {
+    async updateAlgorithm(id, patch) {
+      const out = await algorithmsApi.patchAlgorithm(id, patch);
+      const alg = {
+        id: out.algorithm_id,
+        task: out.task,
+        name: out.name,
+        impl: out.impl,
+        version: out.version,
+        createdAt: formatTs(out.created_at),
+        raw: out,
+      };
       const idx = this.algorithms.findIndex((a) => a.id === id);
-      if (idx >= 0) {
-        this.algorithms.splice(idx, 1);
-        saveState({ algorithms: this.algorithms });
-      }
+      if (idx >= 0) this.algorithms[idx] = { ...this.algorithms[idx], ...alg };
+      this.algorithms = ensureBaselineAlgorithms(this.algorithms);
+      saveState({ algorithms: this.algorithms });
+      return alg;
     },
 
-    updateDataset(id, patch) {
-      const idx = this.datasets.findIndex((d) => d.id === id);
-      if (idx >= 0) {
-        this.datasets[idx] = { ...this.datasets[idx], ...patch };
-        saveState({ datasets: this.datasets });
-      }
-    },
-
-    updateAlgorithm(id, patch) {
+    async removeAlgorithm(id) {
+      await algorithmsApi.deleteAlgorithm(id);
       const idx = this.algorithms.findIndex((a) => a.id === id);
-      if (idx >= 0) {
-        this.algorithms[idx] = { ...this.algorithms[idx], ...patch };
-        saveState({ algorithms: this.algorithms });
-      }
+      if (idx >= 0) this.algorithms.splice(idx, 1);
+      this.algorithms = ensureBaselineAlgorithms(this.algorithms);
+      saveState({ algorithms: this.algorithms });
     },
 
 

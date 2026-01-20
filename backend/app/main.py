@@ -17,8 +17,30 @@ from fastapi import Query
 
 from openpyxl import Workbook
 
-from .schemas import RunCreate, RunOut
-from .store import make_redis, save_run, load_run, list_runs
+from .schemas import (
+    RunCreate,
+    RunOut,
+    DatasetCreate,
+    DatasetOut,
+    DatasetPatch,
+    AlgorithmCreate,
+    AlgorithmOut,
+    AlgorithmPatch,
+)
+from .store import (
+    make_redis,
+    save_run,
+    load_run,
+    list_runs,
+    save_dataset,
+    load_dataset,
+    delete_dataset,
+    list_datasets,
+    save_algorithm,
+    load_algorithm,
+    delete_algorithm,
+    list_algorithms,
+)
 from .celery_app import celery_app
 from .tasks import execute_run, _stable_seed, _make_synthetic_pair_for_task
 
@@ -48,6 +70,154 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"ok": True, "ts": time.time()}
+
+
+def _ensure_catalog_defaults(r):
+    if not list_datasets(r, limit=1):
+        created = time.time()
+        save_dataset(
+            r,
+            "ds_demo",
+            {
+                "dataset_id": "ds_demo",
+                "name": "Demo-样例数据集",
+                "type": "图像",
+                "size": "10 张",
+                "created_at": created,
+            },
+        )
+
+    if not list_algorithms(r, limit=1):
+        created = time.time()
+        defaults = [
+            {"algorithm_id": "alg_dn_cnn", "task": "去噪", "name": "FastNLMeans(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_denoise_bilateral", "task": "去噪", "name": "Bilateral(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_denoise_gaussian", "task": "去噪", "name": "Gaussian(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_denoise_median", "task": "去噪", "name": "Median(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_dehaze_dcp", "task": "去雾", "name": "DCP暗通道先验(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_dehaze_clahe", "task": "去雾", "name": "CLAHE(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_dehaze_gamma", "task": "去雾", "name": "Gamma(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_deblur_unsharp", "task": "去模糊", "name": "UnsharpMask(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_deblur_laplacian", "task": "去模糊", "name": "LaplacianSharpen(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_sr_bicubic", "task": "超分辨率", "name": "Bicubic(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_sr_lanczos", "task": "超分辨率", "name": "Lanczos(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_sr_nearest", "task": "超分辨率", "name": "Nearest(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_lowlight_gamma", "task": "低照度增强", "name": "Gamma(基线)", "impl": "OpenCV", "version": "v1"},
+            {"algorithm_id": "alg_lowlight_clahe", "task": "低照度增强", "name": "CLAHE(基线)", "impl": "OpenCV", "version": "v1"},
+        ]
+        for x in defaults:
+            x2 = dict(x)
+            x2["created_at"] = created
+            save_algorithm(r, x2["algorithm_id"], x2)
+
+
+@app.get("/datasets")
+def get_datasets(limit: int = 200):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    return list_datasets(r, limit=limit)
+
+
+@app.post("/datasets", response_model=DatasetOut)
+def create_dataset(payload: DatasetCreate):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    dataset_id = (payload.dataset_id or "").strip() or f"ds_{uuid.uuid4().hex[:10]}"
+    if load_dataset(r, dataset_id):
+        raise HTTPException(status_code=409, detail="dataset_id_exists")
+    created = time.time()
+    data = {
+        "dataset_id": dataset_id,
+        "name": payload.name.strip(),
+        "type": payload.type,
+        "size": payload.size,
+        "created_at": created,
+    }
+    save_dataset(r, dataset_id, data)
+    return DatasetOut(**data)
+
+
+@app.patch("/datasets/{dataset_id}", response_model=DatasetOut)
+def patch_dataset(dataset_id: str, payload: DatasetPatch):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="dataset_not_found")
+    if payload.name is not None:
+        cur["name"] = payload.name.strip()
+    if payload.type is not None:
+        cur["type"] = payload.type
+    if payload.size is not None:
+        cur["size"] = payload.size
+    save_dataset(r, dataset_id, cur)
+    return DatasetOut(**cur)
+
+
+@app.delete("/datasets/{dataset_id}")
+def remove_dataset(dataset_id: str):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    if not load_dataset(r, dataset_id):
+        raise HTTPException(status_code=404, detail="dataset_not_found")
+    delete_dataset(r, dataset_id)
+    return {"ok": True, "dataset_id": dataset_id}
+
+
+@app.get("/algorithms")
+def get_algorithms(limit: int = 500):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    return list_algorithms(r, limit=limit)
+
+
+@app.post("/algorithms", response_model=AlgorithmOut)
+def create_algorithm(payload: AlgorithmCreate):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    algorithm_id = (payload.algorithm_id or "").strip() or f"alg_{uuid.uuid4().hex[:10]}"
+    if load_algorithm(r, algorithm_id):
+        raise HTTPException(status_code=409, detail="algorithm_id_exists")
+    created = time.time()
+    data = {
+        "algorithm_id": algorithm_id,
+        "task": payload.task,
+        "name": payload.name.strip(),
+        "impl": payload.impl,
+        "version": payload.version,
+        "created_at": created,
+    }
+    save_algorithm(r, algorithm_id, data)
+    return AlgorithmOut(**data)
+
+
+@app.patch("/algorithms/{algorithm_id}", response_model=AlgorithmOut)
+def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="algorithm_not_found")
+    if payload.task is not None:
+        cur["task"] = payload.task
+    if payload.name is not None:
+        cur["name"] = payload.name.strip()
+    if payload.impl is not None:
+        cur["impl"] = payload.impl
+    if payload.version is not None:
+        cur["version"] = payload.version
+    save_algorithm(r, algorithm_id, cur)
+    return AlgorithmOut(**cur)
+
+
+@app.delete("/algorithms/{algorithm_id}")
+def remove_algorithm(algorithm_id: str):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    if not load_algorithm(r, algorithm_id):
+        raise HTTPException(status_code=404, detail="algorithm_not_found")
+    delete_algorithm(r, algorithm_id)
+    return {"ok": True, "algorithm_id": algorithm_id}
 
 
 @app.post("/runs", response_model=RunOut)

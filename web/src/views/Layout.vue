@@ -31,10 +31,12 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
+import { useAppStore } from "../stores/app";
 
 const route = useRoute();
+const store = useAppStore();
 
 const active = computed(() => route.path);
 
@@ -47,5 +49,13 @@ const title = computed(() => {
     "/compare": "结果对比",
   };
   return map[route.path] ?? "算法评测平台";
+});
+
+onMounted(async () => {
+  try {
+    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+  } catch {
+    // ignore
+  }
 });
 </script>

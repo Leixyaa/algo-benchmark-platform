@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, List
@@ -28,3 +29,48 @@ class RunOut(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
     samples: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[str] = None
+
+
+class DatasetCreate(BaseModel):
+    dataset_id: Optional[str] = None
+    name: str
+    type: str = "图像"
+    size: str = "-"
+
+
+class DatasetPatch(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    size: Optional[str] = None
+
+
+class DatasetOut(BaseModel):
+    dataset_id: str
+    name: str
+    type: str
+    size: str
+    created_at: float
+
+
+class AlgorithmCreate(BaseModel):
+    algorithm_id: Optional[str] = None
+    task: str
+    name: str
+    impl: str = "OpenCV"
+    version: str = "v1"
+
+
+class AlgorithmPatch(BaseModel):
+    task: Optional[str] = None
+    name: Optional[str] = None
+    impl: Optional[str] = None
+    version: Optional[str] = None
+
+
+class AlgorithmOut(BaseModel):
+    algorithm_id: str
+    task: str
+    name: str
+    impl: str
+    version: str
+    created_at: float

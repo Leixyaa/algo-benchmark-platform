@@ -91,7 +91,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
@@ -102,6 +102,14 @@ const form = reactive({
   name: "",
   impl: "PyTorch",
   version: "v1",
+});
+
+onMounted(async () => {
+  try {
+    await store.fetchAlgorithms();
+  } catch {
+    // ignore
+  }
 });
 
 function openCreate() {
@@ -115,30 +123,40 @@ function closeCreate() {
   showCreate.value = false;
 }
 
-function submitCreate() {
+async function submitCreate() {
   if (!form.name.trim()) {
     alert("请填写算法名称");
     return;
   }
-  // 这里先直接调用 store 的 addAlgorithm（你 app.js 里已有）
-  store.addAlgorithm({
-    id: `alg_${Date.now()}`,
-    task: form.task,
-    name: form.name.trim(),
-    impl: form.impl,
-    version: form.version.trim() || "v1",
-  });
-  showCreate.value = false;
+  try {
+    await store.createAlgorithm({
+      task: form.task,
+      name: form.name.trim(),
+      impl: form.impl,
+      version: form.version.trim() || "v1",
+    });
+    showCreate.value = false;
+  } catch (e) {
+    alert(`新增失败：${e?.message || e}`);
+  }
 }
 
-function remove(id) {
+async function remove(id) {
   const ok = confirm("确定删除该算法条目吗？");
   if (!ok) return;
-  store.removeAlgorithm(id);
+  try {
+    await store.removeAlgorithm(id);
+  } catch (e) {
+    alert(`删除失败：${e?.message || e}`);
+  }
 }
 
-function seedDemo() {
-  store.addAlgorithm({ id: `alg_${Date.now()}_1`, task: "去雾", name: "Dark Channel Prior(示例)", impl: "OpenCV", version: "2009" });
-  store.addAlgorithm({ id: `alg_${Date.now()}_2`, task: "低照度增强", name: "RetinexNet(示例)", impl: "PyTorch", version: "2018" });
+async function seedDemo() {
+  try {
+    await store.createAlgorithm({ task: "去雾", name: "Dark Channel Prior(示例)", impl: "OpenCV", version: "2009" });
+    await store.createAlgorithm({ task: "低照度增强", name: "RetinexNet(示例)", impl: "PyTorch", version: "2018" });
+  } catch (e) {
+    alert(`填充失败：${e?.message || e}`);
+  }
 }
 </script>

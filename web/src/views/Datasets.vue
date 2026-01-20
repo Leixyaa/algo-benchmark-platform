@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { useAppStore } from "../stores/app";
 import { ElMessage, ElMessageBox } from "element-plus";
 
@@ -93,6 +93,14 @@ const form = reactive({
   size: "",
 });
 
+onMounted(async () => {
+  try {
+    await store.fetchDatasets();
+  } catch {
+    // ignore
+  }
+});
+
 function openCreate() {
   form.name = "";
   form.type = "图像";
@@ -104,24 +112,31 @@ function closeCreate() {
   showCreate.value = false;
 }
 
-function submitCreate() {
+async function submitCreate() {
   if (!form.name.trim()) {
     alert("请填写数据集名称");
     return;
   }
-  store.addDataset({
-    id: `ds_${Date.now()}`,
-    name: form.name.trim(),
-    type: form.type,
-    size: form.size.trim() || "-",
-  });
-  showCreate.value = false;
+  try {
+    await store.createDataset({
+      name: form.name.trim(),
+      type: form.type,
+      size: form.size.trim() || "-",
+    });
+    showCreate.value = false;
+  } catch (e) {
+    alert(`新增失败：${e?.message || e}`);
+  }
 }
 
-function remove(id) {
+async function remove(id) {
   const ok = confirm("确定删除该数据集吗？");
   if (!ok) return;
-  store.removeDataset(id);
+  try {
+    await store.removeDataset(id);
+  } catch (e) {
+    alert(`删除失败：${e?.message || e}`);
+  }
 }
 
 function fakeUpload() {
