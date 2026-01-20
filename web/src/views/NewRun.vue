@@ -2,7 +2,7 @@
   <div style="padding:16px;">
     <h2 style="margin:0 0 8px;">发起评测</h2>
     <div style="color:#666; margin-bottom:12px;">
-      选择任务类别、数据集、算法与指标，创建一次评测任务。当前为前端模拟，后续接后端异步执行。
+      选择任务类别、数据集、算法与指标，创建一次评测任务。任务由后端异步执行，可在任务中心查看状态与结果。
     </div>
 
     <div style="display:grid; grid-template-columns: 140px 1fr; gap:10px; max-width:680px;">
@@ -49,7 +49,7 @@
     <div style="margin-top:14px; color:#666;">
       <div>提示：</div>
       <div>1）算法会按任务类别过滤（例如去雾只显示去雾算法）。</div>
-      <div>2）后续接后端后：创建任务会进入 Celery 队列，状态从排队中→运行中→完成/失败。</div>
+      <div>2）创建任务会进入队列，状态从排队中→运行中→完成/失败。</div>
     </div>
   </div>
 </template>
@@ -99,41 +99,33 @@ const filteredAlgorithms = computed(() =>
   store.algorithms.filter((a) => a.task === form.task)
 );
 
-function create() {
+watch(
+  () => form.task,
+  () => {
+    if (!filteredAlgorithms.value.some((a) => a.id === form.algorithmId)) {
+      form.algorithmId = "";
+    }
+  }
+);
+
+async function create() {
   if (!form.datasetId) return alert("请先选择数据集");
   if (!form.algorithmId) return alert("请先选择算法");
   if (!form.metrics.length) return alert("请至少选择一个指标");
 
-  const ds = store.datasets.find((d) => d.id === form.datasetId);
-  const alg = store.algorithms.find((a) => a.id === form.algorithmId);
-
-  const runId = store.createRun({
-    task: form.task,
-    datasetId: ds.id,
-    datasetName: ds.name,
-    algorithmId: alg.id,
-    algorithmName: alg.name,
-    metrics: [...form.metrics],
-  });
-
-// 前端模拟：2秒后运行中，5秒后完成并生成指标
-setTimeout(() => store.updateRunStatus(runId, "运行中"), 2000);
-
-setTimeout(() => {
-  store.updateRunStatus(runId, "已完成");
-  // 模拟结果（后续接后端这里会被真实结果替代）
-  store.attachRunResult(runId, {
-    psnr: +(28 + Math.random() * 6).toFixed(2),
-    ssim: +(0.80 + Math.random() * 0.18).toFixed(3),
-    niqe: +(3 + Math.random() * 2.5).toFixed(2),
-    elapsed: `${(2 + Math.random() * 6).toFixed(1)}s`,
-  });
-}, 5000);
-
-  localStorage.removeItem(NEWRUN_CACHE_KEY);
-
-  alert("任务已创建（模拟执行中），已进入任务中心");
-  router.push("/runs");
+  try {
+    await store.createRun({
+      task: form.task,
+      datasetId: form.datasetId,
+      algorithmId: form.algorithmId,
+      metrics: [...form.metrics],
+    });
+    localStorage.removeItem(NEWRUN_CACHE_KEY);
+    alert("任务已创建，正在后端异步执行，可在任务中心查看");
+    router.push("/runs");
+  } catch (e) {
+    alert(`创建失败：${e?.message || e}`);
+  }
 }
 
 function goRuns() {
