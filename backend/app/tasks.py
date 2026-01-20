@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import random
@@ -11,7 +11,7 @@ import hashlib
 from .celery_app import celery_app
 from .store import make_redis, load_run, save_run
 
-# ÕæÊµËã·¨ + Ö¸±ê£¨½×¶ÎE£©
+# çœŸå®ç®—æ³• + æŒ‡æ ‡ï¼ˆé˜¶æ®µEï¼‰
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
@@ -39,8 +39,8 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
 
 def _make_synthetic_dehaze_pair(h: int = 360, w: int = 640) -> tuple[np.ndarray, np.ndarray]:
     """
-    Éú³ÉÒ»¶Ô£¨ÇåÎúGT, ÓĞÎíÊäÈë£©£¬ÓÃÓÚÃ»ÓĞÕæÊµÊı¾İ¼¯Ê±Ò²ÄÜÅÜ³ö¡°ÕæÊµÖ¸±ê¡±
-    GT: Ëæ»ú×ÔÈ»ÎÆÀí + ½¥±ä
+    ç”Ÿæˆä¸€å¯¹ï¼ˆæ¸…æ™°GT, æœ‰é›¾è¾“å…¥ï¼‰ï¼Œç”¨äºæ²¡æœ‰çœŸå®æ•°æ®é›†æ—¶ä¹Ÿèƒ½è·‘å‡ºâ€œçœŸå®æŒ‡æ ‡â€
+    GT: éšæœºè‡ªç„¶çº¹ç† + æ¸å˜
     Hazy: I = J * t + A * (1 - t)
     """
     # base texture
@@ -76,8 +76,8 @@ def _compute_psnr_ssim(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[
 
 def _resize_to_match(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    ±£Ö¤Á½ÕÅÍ¼³ß´çÒ»ÖÂÔÙËãÖ¸±ê¡£
-    Ä¬ÈÏ°Ñ gt resize µ½ pred µÄ³ß´ç£¨¸üºÏÀí£ºpred ÊÇËã·¨Êä³öµÄÊµ¼Ê³ß´ç£©¡£
+    ä¿è¯ä¸¤å¼ å›¾å°ºå¯¸ä¸€è‡´å†ç®—æŒ‡æ ‡ã€‚
+    é»˜è®¤æŠŠ gt resize åˆ° pred çš„å°ºå¯¸ï¼ˆæ›´åˆç†ï¼špred æ˜¯ç®—æ³•è¾“å‡ºçš„å®é™…å°ºå¯¸ï¼‰ã€‚
     """
     if gt_bgr_u8.shape[:2] == pred_bgr_u8.shape[:2]:
         return gt_bgr_u8, pred_bgr_u8
@@ -208,7 +208,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "ÒÑÈ¡Ïû"
+        run["error"] = "å·²å–æ¶ˆ"
         save_run(r, run_id, run)
         return {"ok": False, "run_id": run_id, "error": run["error"]}
 
@@ -343,7 +343,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or finished), 3)
-        run["error"] = "ÒÑÈ¡Ïû"
+        run["error"] = "å·²å–æ¶ˆ"
         save_run(r, run_id, run)
         return {"ok": False, "run_id": run_id, "error": run["error"]}
 

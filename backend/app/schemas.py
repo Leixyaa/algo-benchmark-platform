@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class RunCreate(BaseModel):
-    # ÕâĞ©×Ö¶Î¾¡Á¿Ìù½üÄãÇ°¶Ë NewRun µÄ payload
+    # è¿™äº›å­—æ®µå°½é‡è´´è¿‘ä½ å‰ç«¯ NewRun çš„ payload
     task_type: str = Field(..., description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr")
     dataset_id: str
     algorithm_id: str

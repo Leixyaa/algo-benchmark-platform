@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,9 +28,9 @@ def find_paired_images(
     limit: int = 5,
 ) -> List[PairedImage]:
     """
-    ÔÚ backend/data/<dataset_id>/<input_dirname> Óë <gt_dirname> ÖĞÕÒÍ¬ÃûÎÄ¼şÅä¶Ô
-    - ·µ»Ø×î¶à limit ¶Ô
-    - ÕÒ²»µ½Ôò·µ»Ø []
+    åœ¨ backend/data/<dataset_id>/<input_dirname> ä¸ <gt_dirname> ä¸­æ‰¾åŒåæ–‡ä»¶é…å¯¹
+    - è¿”å›æœ€å¤š limit å¯¹
+    - æ‰¾ä¸åˆ°åˆ™è¿”å› []
     """
     ds_dir = data_root / dataset_id
     input_dir = ds_dir / input_dirname
@@ -42,7 +42,7 @@ def find_paired_images(
     if not input_files:
         return []
 
-    # °´Ïà¶ÔÂ·¾¶/ÎÄ¼şÃûÆ¥Åä£ºÓÅÏÈÆ¥ÅäÍ¬ÃûÎÄ¼ş
+    # æŒ‰ç›¸å¯¹è·¯å¾„/æ–‡ä»¶ååŒ¹é…ï¼šä¼˜å…ˆåŒ¹é…åŒåæ–‡ä»¶
     pairs: List[PairedImage] = []
     for ip in sorted(input_files)[: max(limit * 5, 50)]:
         gp = gt_dir / ip.name

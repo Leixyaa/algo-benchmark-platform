@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import time
@@ -84,9 +84,9 @@ def export_runs(
     limit: int = Query(500, ge=1, le=5000),
 ):
     """
-    µ¼³ö runs£¨CSV / Excel£©
-    - ±¾½×¶Î£ºÖ»¶Á Redis µÄÀúÊ· runs
-    - ¹ıÂËÌõ¼ş£ºstatus/task_type/dataset_id/algorithm_id
+    å¯¼å‡º runsï¼ˆCSV / Excelï¼‰
+    - æœ¬é˜¶æ®µï¼šåªè¯» Redis çš„å†å² runs
+    - è¿‡æ»¤æ¡ä»¶ï¼šstatus/task_type/dataset_id/algorithm_id
     """
     fmt = (format or "").lower().strip()
     if fmt not in ("csv", "xlsx"):
@@ -95,7 +95,7 @@ def export_runs(
     r = make_redis()
     runs = list_runs(r, limit=limit)
 
-    # ===== ¹ıÂË =====
+    # ===== è¿‡æ»¤ =====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -109,7 +109,7 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== ±âÆ½»¯±íÍ·£¨ÎÈ¶¨×Ö¶Î£¬Ç°¶Ë/ÂÛÎÄºÃ½âÊÍ£©=====
+    # ===== æ‰å¹³åŒ–è¡¨å¤´ï¼ˆç¨³å®šå­—æ®µï¼Œå‰ç«¯/è®ºæ–‡å¥½è§£é‡Šï¼‰=====
     headers = [
         "run_id",
         "task_type",
@@ -202,9 +202,9 @@ def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
 ):
     """
-    ÇåÀí runs ÀúÊ·¼ÇÂ¼£¨Ä¬ÈÏÇåÀíÒÑÍê³É done£©
-    - status=done£ºÖ»É¾ÒÑÍê³É
-    - status=all£ºÈ«²¿É¾³ı
+    æ¸…ç† runs å†å²è®°å½•ï¼ˆé»˜è®¤æ¸…ç†å·²å®Œæˆ doneï¼‰
+    - status=doneï¼šåªåˆ å·²å®Œæˆ
+    - status=allï¼šå…¨éƒ¨åˆ é™¤
     """
     r = make_redis()
     keys = r.keys("run:*")
@@ -257,7 +257,7 @@ def cancel_run(run_id: str):
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "ÒÑÈ¡Ïû"
+        run["error"] = "å·²å–æ¶ˆ"
         save_run(r, run_id, run)
         return {"ok": True, "run_id": run_id, "status": "canceled"}
 

@@ -1,11 +1,11 @@
 // web/src/api/runs.js
-// /runs Ïà¹Ø API ·â×°£ºÈÃ store/ÊÓÍ¼²ã²»Ö±½ÓÆ´ URL¡£
+// /runs ç›¸å…³ API å°è£…ï¼šè®© store/è§†å›¾å±‚ä¸ç›´æ¥æ‹¼ URLã€‚
 
 import { request } from "./http";
 
 export const runsApi = {
   /**
-   * ´´½¨Ò»´ÎÆÀ²â Run
+   * åˆ›å»ºä¸€æ¬¡è¯„æµ‹ Run
    * @param {{task_type:string,dataset_id:string,algorithm_id:string,params?:object}} payload
    */
   createRun(payload) {
@@ -13,7 +13,7 @@ export const runsApi = {
   },
 
   /**
-   * »ñÈ¡µ¥Ìõ Run
+   * è·å–å•æ¡ Run
    * @param {string} runId
    */
   getRun(runId) {
@@ -21,7 +21,7 @@ export const runsApi = {
   },
 
   /**
-   * »ñÈ¡ Run ÁĞ±í£¨ºó¶Ë°´ created_at µ¹Ğò·µ»Ø£©
+   * è·å– Run åˆ—è¡¨ï¼ˆåç«¯æŒ‰ created_at å€’åºè¿”å›ï¼‰
    * @param {{limit?:number}} query
    */
   listRuns(query = {}) {

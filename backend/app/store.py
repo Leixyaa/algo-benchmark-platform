@@ -6,7 +6,7 @@ import redis
 
 
 def make_redis() -> redis.Redis:
-    # Ä¬ÈÏ±¾»ú Redis
+    # é»˜è®¤æœ¬æœº Redis
     return redis.Redis(host="127.0.0.1", port=6379, db=0, decode_responses=True)
 
 
@@ -26,9 +26,9 @@ def load_run(r: redis.Redis, run_id: str) -> Optional[Dict[str, Any]]:
 
 
 def list_runs(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
-    # ¼òµ¥ÊµÏÖ£ºÉ¨Ãè key£¨±ÏÒµÉè¼Æ¹»ÓÃ£©
+    # ç®€å•å®ç°ï¼šæ‰«æ keyï¼ˆæ¯•ä¸šè®¾è®¡å¤Ÿç”¨ï¼‰
     keys = r.keys("run:*")
-    # °´´´½¨Ê±¼äÅÅĞò£¨desc£©
+    # æŒ‰åˆ›å»ºæ—¶é—´æ’åºï¼ˆdescï¼‰
     runs = []
     for k in keys:
         s = r.get(k)

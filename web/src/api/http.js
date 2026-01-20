@@ -1,11 +1,11 @@
 // web/src/api/http.js
-// ¼«¼ò HTTP ·â×°£ºÖ»´¦Àí JSON ÇëÇó/ÏìÓ¦ + Í³Ò»´íÎó¡£
-// Ä¿µÄ£ºÈÃ Pinia store / ÊÓÍ¼²ã²»¹ØĞÄ fetch Ï¸½Ú£¬×¨×¢ÒµÎñ×´Ì¬¡£
+// æç®€ HTTP å°è£…ï¼šåªå¤„ç† JSON è¯·æ±‚/å“åº” + ç»Ÿä¸€é”™è¯¯ã€‚
+// ç›®çš„ï¼šè®© Pinia store / è§†å›¾å±‚ä¸å…³å¿ƒ fetch ç»†èŠ‚ï¼Œä¸“æ³¨ä¸šåŠ¡çŠ¶æ€ã€‚
 
-const API_BASE = "http://127.0.0.1:8000"; // ºó¶Ë¶Ë¿Ú¹Ì¶¨ 8000£¨ÑÏ¸ñ²»¸Ä£©
+const API_BASE = "http://127.0.0.1:8000"; // åç«¯ç«¯å£å›ºå®š 8000ï¼ˆä¸¥æ ¼ä¸æ”¹ï¼‰
 
 /**
- * @param {string} path ÀıÈç "/runs"
+ * @param {string} path ä¾‹å¦‚ "/runs"
  * @param {{method?: string, query?: Record<string, any>, body?: any}} opts
  */
 export async function request(path, { method = "GET", query, body } = {}) {
@@ -25,7 +25,7 @@ export async function request(path, { method = "GET", query, body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-  // FastAPI Ä¬ÈÏ£º·Ç 2xx »á´ø detail¡£ÕâÀïÍ³Ò»Å×Ò»¸ö¿É¶Á´íÎó¡£
+  // FastAPI é»˜è®¤ï¼šé 2xx ä¼šå¸¦ detailã€‚è¿™é‡Œç»Ÿä¸€æŠ›ä¸€ä¸ªå¯è¯»é”™è¯¯ã€‚
   if (!res.ok) {
     let detail = "";
     try {
@@ -45,7 +45,7 @@ export async function request(path, { method = "GET", query, body } = {}) {
     throw err;
   }
 
-  // /health Ö®ÀàÊ¼ÖÕ JSON£»ÎªÁËÎÈÍ×£¬Èç¹ûÃ» body ¾Í·µ»Ø null
+  // /health ä¹‹ç±»å§‹ç»ˆ JSONï¼›ä¸ºäº†ç¨³å¦¥ï¼Œå¦‚æœæ²¡ body å°±è¿”å› null
   const text = await res.text();
   if (!text) return null;
   return JSON.parse(text);
