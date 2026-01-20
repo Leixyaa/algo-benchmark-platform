@@ -8,6 +8,7 @@ import csv
 import json
 
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,9 @@ from openpyxl import Workbook
 from .schemas import RunCreate, RunOut
 from .store import make_redis, save_run, load_run, list_runs
 from .celery_app import celery_app
-from .tasks import execute_run
+from .tasks import execute_run, _stable_seed, _make_synthetic_pair_for_task
+
+import cv2
 
 
 app = FastAPI(title="Algo Eval Platform API", version="0.1.0")
@@ -265,4 +268,55 @@ def cancel_run(run_id: str):
     save_run(r, run_id, run)
     celery_app.control.revoke(run_id, terminate=False)
     return {"ok": True, "run_id": run_id, "status": "canceling"}
+
+
+@app.post("/dev/datasets/{dataset_id}/generate")
+def dev_generate_dataset(
+    dataset_id: str,
+    task_type: str = Query("all", description="all|denoise|deblur|dehaze|sr|lowlight"),
+    count: int = Query(5, ge=1, le=50),
+):
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    input_dir_by_task = {
+        "dehaze": "hazy",
+        "denoise": "noisy",
+        "deblur": "blur",
+        "sr": "lr",
+        "lowlight": "dark",
+    }
+
+    task_type_norm = (task_type or "").strip().lower()
+    if task_type_norm == "all":
+        tasks = ["dehaze", "denoise", "deblur", "sr", "lowlight"]
+    else:
+        if task_type_norm not in input_dir_by_task:
+            raise HTTPException(status_code=400, detail="task_type_not_supported")
+        tasks = [task_type_norm]
+
+    created: dict[str, int] = {}
+    ds_dir = data_root / dataset_id
+    gt_dir = ds_dir / "gt"
+    gt_dir.mkdir(parents=True, exist_ok=True)
+
+    for t in tasks:
+        inp_dir = ds_dir / input_dir_by_task[t]
+        inp_dir.mkdir(parents=True, exist_ok=True)
+        n_ok = 0
+        for i in range(count):
+            seed = _stable_seed(f"{dataset_id}|{t}|{i}")
+            gt_u8, inp_u8 = _make_synthetic_pair_for_task(task_type=t, seed=seed)
+            name = f"{i:03d}.png"
+            ok1 = bool(cv2.imwrite(str(gt_dir / name), gt_u8))
+            ok2 = bool(cv2.imwrite(str(inp_dir / name), inp_u8))
+            if ok1 and ok2:
+                n_ok += 1
+        created[t] = n_ok
+
+    return {
+        "ok": True,
+        "dataset_id": dataset_id,
+        "task_type": task_type_norm,
+        "count": count,
+        "created": created,
+    }
 
