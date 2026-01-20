@@ -58,14 +58,30 @@ def niqe_score(img_bgr_u8: np.ndarray) -> float:
     - 使用预设的自然统计均值/方差（简化版，固定常量）
     - 计算特征向量与自然统计的马氏距离近似（用对角协方差）
     """
-    g = _to_gray_f32(img_bgr_u8)
+    if img_bgr_u8 is None:
+        raise ValueError("img_is_none")
+
+    img = np.asarray(img_bgr_u8)
+    if img.size == 0:
+        raise ValueError("img_is_empty")
+
+    if img.ndim == 3 and img.shape[2] > 3:
+        img = img[:, :, :3]
+
+    if img.dtype != np.uint8:
+        img = np.clip(img.astype(np.float32), 0, 255).astype(np.uint8)
+
+    img = np.ascontiguousarray(img)
+    g = _to_gray_f32(img)
 
     # 统一尺度：缩放到较稳定的尺寸，避免太小图不稳定
     h, w = g.shape[:2]
     target_min = 256
     if min(h, w) < target_min:
         scale = target_min / float(min(h, w))
-        g = cv2.resize(g, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+        new_w = max(8, int(w * scale))
+        new_h = max(8, int(h * scale))
+        g = cv2.resize(g, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
     mscn = _mscn_coefficients(g)
     feat = _agg_features(mscn)
@@ -77,4 +93,6 @@ def niqe_score(img_bgr_u8: np.ndarray) -> float:
     # 对角协方差的马氏距离
     d = (feat - mu_nat) / (np.sqrt(var_nat) + 1e-6)
     score = float(np.sqrt(np.sum(d * d)))
+    if not np.isfinite(score):
+        raise ValueError("niqe_score_not_finite")
     return score

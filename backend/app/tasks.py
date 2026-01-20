@@ -99,7 +99,6 @@ def _compute_run_for_task_from_pairs(
     ssim_list: list[float] = []
     niqe_list: list[float] = []
     algo_elapsed_list: list[float] = []
-    niqe_fallback_any = False
     samples: list[dict[str, Any]] = []
 
     for pair in pairs:
@@ -118,11 +117,7 @@ def _compute_run_for_task_from_pairs(
         psnr_list.append(psnr)
         ssim_list.append(ssim)
 
-        try:
-            niqe = float(niqe_score(pred_u8))
-        except Exception:
-            niqe = float(_simulate_metrics(seed)["NIQE"])
-            niqe_fallback_any = True
+        niqe = float(niqe_score(pred_u8))
         niqe_list.append(float(niqe))
 
         samples.append(
@@ -139,7 +134,7 @@ def _compute_run_for_task_from_pairs(
         if remain > 0:
             time.sleep(remain)
         metrics = _simulate_metrics(seed)
-        params = {"data_mode": "dataset_read_failed_or_empty", "niqe_fallback": True}
+        params = {"data_mode": "dataset_read_failed_or_empty"}
         return metrics, params, samples
 
     psnr_mean = float(np.mean(psnr_list))
@@ -160,7 +155,6 @@ def _compute_run_for_task_from_pairs(
         "data_mode": "real_dataset",
         "data_used": len(psnr_list),
         "algo_elapsed": round(float(algo_elapsed), 3),
-        "niqe_fallback": bool(niqe_fallback_any),
     }
     return metrics, params, samples
 
@@ -297,12 +291,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             algo_elapsed = time.time() - t0
             gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
             psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-            try:
-                niqe = float(niqe_score(pred_u8))
-                niqe_fallback = False
-            except Exception:
-                niqe = float(_simulate_metrics(seed)["NIQE"])
-                niqe_fallback = True
+            niqe = float(niqe_score(pred_u8))
 
             remain = min_demo_seconds - (time.time() - demo_start)
             if remain > 0:
@@ -317,7 +306,6 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             params = run.get("params") or {}
             params["data_mode"] = "synthetic_no_dataset"
             params["algo_elapsed"] = round(float(algo_elapsed), 3)
-            params["niqe_fallback"] = bool(niqe_fallback)
             params["real_algo"] = {"dehaze": "DCP", "denoise": "FastNLMeans", "deblur": "UnsharpMask", "sr": "Bicubic", "lowlight": "Gamma"}[task_type]
             params["input_dir"] = input_dirname
             run["params"] = params
