@@ -37,7 +37,16 @@ export function toTaskType(taskLabel) {
 }
 
 function hasBadText(v) {
-  return typeof v === "string" && v.includes("\uFFFD");
+  if (typeof v !== "string") return false;
+  if (v.includes("\uFFFD")) return true;
+  if (/\?{3,}/.test(v)) return true;
+  return false;
+}
+
+function normalizeBadString(v, fallback) {
+  if (typeof v !== "string") return v;
+  if (hasBadText(v)) return fallback;
+  return v;
 }
 
 function repairLoadedState(state) {
@@ -49,30 +58,50 @@ function repairLoadedState(state) {
   if (Array.isArray(next.datasets)) {
     next.datasets = next.datasets.map((d) => {
       if (!d || typeof d !== "object") return d;
-      if (d.id !== "ds_demo") return d;
-      const needsFix = hasBadText(d.name) || hasBadText(d.type) || hasBadText(d.size);
-      if (!needsFix) return d;
+      const isDemo = d.id === "ds_demo" || (typeof d.name === "string" && d.name.startsWith("Demo-"));
+      if (isDemo) {
+        const needsFix = hasBadText(d.name) || hasBadText(d.type) || hasBadText(d.size);
+        if (!needsFix) return d;
+        changed = true;
+        return { ...d, name: "Demo-样例数据集", type: "图像", size: "10 张" };
+      }
+
+      const name2 = normalizeBadString(d.name, "（名称乱码，请编辑）");
+      const type2 = normalizeBadString(d.type, "（类型乱码，请编辑）");
+      const size2 = normalizeBadString(d.size, "（大小乱码，请编辑）");
+      if (name2 === d.name && type2 === d.type && size2 === d.size) return d;
       changed = true;
-      return { ...d, name: "Demo-样例数据集", type: "图像", size: "10 张" };
+      return { ...d, name: name2, type: type2, size: size2 };
     });
   }
 
   if (Array.isArray(next.algorithms)) {
     next.algorithms = next.algorithms.map((a) => {
       if (!a || typeof a !== "object") return a;
-      if (a.id === "alg_dn_cnn") {
+      const name = typeof a.name === "string" ? a.name : "";
+      const isDncnn = a.id === "alg_dn_cnn" || name.toLowerCase().includes("dncnn");
+      const isDcp = a.id === "alg_dehaze_dcp" || name.toLowerCase().includes("dcp");
+
+      if (isDncnn) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
         return { ...a, task: "去噪", name: "DnCNN(示例)" };
       }
-      if (a.id === "alg_dehaze_dcp") {
+      if (isDcp) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
         return { ...a, task: "去雾", name: "DCP暗通道先验(真实)" };
       }
-      return a;
+
+      const task2 = normalizeBadString(a.task, "（任务乱码，请编辑）");
+      const name2 = normalizeBadString(a.name, "（算法名乱码，请编辑）");
+      const impl2 = normalizeBadString(a.impl, "（实现方式乱码）");
+      const ver2 = normalizeBadString(a.version, "（版本乱码）");
+      if (task2 === a.task && name2 === a.name && impl2 === a.impl && ver2 === a.version) return a;
+      changed = true;
+      return { ...a, task: task2, name: name2, impl: impl2, version: ver2 };
     });
   }
 
