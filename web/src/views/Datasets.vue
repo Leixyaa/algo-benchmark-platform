@@ -1,24 +1,30 @@
 <template>
   <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">Êı¾İ¼¯¹ÜÀí</h2>
+    <h2 style="margin: 0 0 8px;">æ•°æ®é›†ç®¡ç†</h2>
     <div style="color:#666; margin-bottom: 12px;">
-      ¹ÜÀíÆÀ²âÊı¾İ¼¯£ºĞÂÔö¡¢É¾³ı¡¢²é¿´ÔªĞÅÏ¢¡£ÉÏ´«¹¦ÄÜºóĞø½Óºó¶Ë¡£
+      ç®¡ç†è¯„æµ‹æ•°æ®é›†ï¼šæ–°å¢ã€åˆ é™¤ã€æŸ¥çœ‹å…ƒä¿¡æ¯ã€‚ä¸Šä¼ åŠŸèƒ½åç»­æ¥åç«¯ã€‚
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">ĞÂÔöÊı¾İ¼¯</button>
-      <button @click="fakeUpload" style="padding:6px 10px;">ÉÏ´«Êı¾İ¼¯£¨Õ¼Î»£©</button>
-      <button @click="generateDemoOnBackend" style="padding:6px 10px;">Éú³Éºó¶Ë Demo ÑùÀı</button>
+      <button @click="openCreate" style="padding:6px 10px;">æ–°å¢æ•°æ®é›†</button>
+      <button @click="fakeUpload" style="padding:6px 10px;">ä¸Šä¼ æ•°æ®é›†ï¼ˆå ä½ï¼‰</button>
+      <button
+        @click="generateDemoOnBackend"
+        :disabled="generating"
+        style="padding:6px 10px;"
+      >
+        {{ generating ? "ç”Ÿæˆä¸­..." : "ç”Ÿæˆåç«¯ Demo æ ·ä¾‹" }}
+      </button>
     </div>
 
     <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
       <thead>
         <tr style="background:#f6f6f6;">
-          <th align="left">Ãû³Æ</th>
-          <th align="left">ÀàĞÍ</th>
-          <th align="left">¹æÄ£</th>
-          <th align="left">´´½¨Ê±¼ä</th>
-          <th align="left" width="120">²Ù×÷</th>
+          <th align="left">åç§°</th>
+          <th align="left">ç±»å‹</th>
+          <th align="left">è§„æ¨¡</th>
+          <th align="left">åˆ›å»ºæ—¶é—´</th>
+          <th align="left" width="120">æ“ä½œ</th>
         </tr>
       </thead>
       <tbody>
@@ -28,44 +34,44 @@
           <td>{{ ds.size }}</td>
           <td>{{ ds.createdAt }}</td>
           <td>
-            <button @click="remove(ds.id)" style="padding:4px 8px;">É¾³ı</button>
+            <button @click="remove(ds.id)" style="padding:4px 8px;">åˆ é™¤</button>
           </td>
         </tr>
         <tr v-if="store.datasets.length === 0">
-          <td colspan="5" style="color:#888;">ÔİÎŞÊı¾İ¼¯</td>
+          <td colspan="5" style="color:#888;">æš‚æ— æ•°æ®é›†</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- ¼òµ¥µ¯´°£¨ÏÈ²»ÓÃ×é¼ş¿â£© -->
+    <!-- ç®€å•å¼¹çª—ï¼ˆå…ˆä¸ç”¨ç»„ä»¶åº“ï¼‰ -->
     <div v-if="showCreate"
       style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
       <div style="background:#fff; padding:16px; width:420px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">ĞÂÔöÊı¾İ¼¯</h3>
+        <h3 style="margin:0 0 12px;">æ–°å¢æ•°æ®é›†</h3>
 
         <div style="display:flex; flex-direction:column; gap:10px;">
           <label>
-            Ãû³Æ£º
-            <input v-model="form.name" placeholder="ÀıÈç£ºRESIDE-Indoor ×Ó¼¯" style="width:100%; padding:6px;" />
+            åç§°ï¼š
+            <input v-model="form.name" placeholder="ä¾‹å¦‚ï¼šRESIDE-Indoor å­é›†" style="width:100%; padding:6px;" />
           </label>
 
           <label>
-            ÀàĞÍ£º
+            ç±»å‹ï¼š
             <select v-model="form.type" style="width:100%; padding:6px;">
-              <option>Í¼Ïñ</option>
-              <option>ÊÓÆµ</option>
+              <option>å›¾åƒ</option>
+              <option>è§†é¢‘</option>
             </select>
           </label>
 
           <label>
-            ¹æÄ££º
-            <input v-model="form.size" placeholder="ÀıÈç£º500 ÕÅ / 30 ¶ÎÊÓÆµ" style="width:100%; padding:6px;" />
+            è§„æ¨¡ï¼š
+            <input v-model="form.size" placeholder="ä¾‹å¦‚ï¼š500 å¼  / 30 æ®µè§†é¢‘" style="width:100%; padding:6px;" />
           </label>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">È¡Ïû</button>
-          <button @click="submitCreate" style="padding:6px 10px;">È·ÈÏĞÂÔö</button>
+          <button @click="closeCreate" style="padding:6px 10px;">å–æ¶ˆ</button>
+          <button @click="submitCreate" style="padding:6px 10px;">ç¡®è®¤æ–°å¢</button>
         </div>
       </div>
     </div>
@@ -75,19 +81,21 @@
 <script setup>
 import { reactive, ref } from "vue";
 import { useAppStore } from "../stores/app";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 const store = useAppStore();
 
 const showCreate = ref(false);
+const generating = ref(false);
 const form = reactive({
   name: "",
-  type: "Í¼Ïñ",
+  type: "å›¾åƒ",
   size: "",
 });
 
 function openCreate() {
   form.name = "";
-  form.type = "Í¼Ïñ";
+  form.type = "å›¾åƒ";
   form.size = "";
   showCreate.value = true;
 }
@@ -98,7 +106,7 @@ function closeCreate() {
 
 function submitCreate() {
   if (!form.name.trim()) {
-    alert("ÇëÌîĞ´Êı¾İ¼¯Ãû³Æ");
+    alert("è¯·å¡«å†™æ•°æ®é›†åç§°");
     return;
   }
   store.addDataset({
@@ -111,28 +119,43 @@ function submitCreate() {
 }
 
 function remove(id) {
-  const ok = confirm("È·¶¨É¾³ı¸ÃÊı¾İ¼¯Âğ£¿");
+  const ok = confirm("ç¡®å®šåˆ é™¤è¯¥æ•°æ®é›†å—ï¼Ÿ");
   if (!ok) return;
   store.removeDataset(id);
 }
 
 function fakeUpload() {
-  alert("ÉÏ´«¹¦ÄÜºóĞø½Óºó¶Ë£ºÕâÀïÏÈ×öÕ¼Î»£¬ÏÈ°ÑÆ½Ì¨Á÷³ÌÅÜÍ¨¡£");
+  alert("ä¸Šä¼ åŠŸèƒ½åç»­æ¥åç«¯ï¼šè¿™é‡Œå…ˆåšå ä½ï¼Œå…ˆæŠŠå¹³å°æµç¨‹è·‘é€šã€‚");
 }
 
 async function generateDemoOnBackend() {
-  const ok = confirm("½«Îª ds_demo ÔÚºó¶ËÉú³É 5 ×éÑùÀı£¨gt + ¸÷ÈÎÎñÊäÈëÄ¿Â¼£©¡£¼ÌĞøÂğ£¿");
-  if (!ok) return;
+  try {
+    await ElMessageBox.confirm(
+      "å°†ä¸º ds_demo åœ¨åç«¯ç”Ÿæˆ 5 ç»„æ ·ä¾‹ï¼ˆgt + å„ä»»åŠ¡è¾“å…¥ç›®å½•ï¼‰ã€‚ç»§ç»­å—ï¼Ÿ",
+      "ç”Ÿæˆæ ·ä¾‹æ•°æ®",
+      { type: "warning", confirmButtonText: "ç»§ç»­", cancelButtonText: "å–æ¶ˆ" }
+    );
+  } catch {
+    return;
+  }
+
+  if (generating.value) return;
+  generating.value = true;
+  ElMessage({ type: "info", message: "å¼€å§‹ç”Ÿæˆï¼Œè¯·ç¨å€™â€¦" });
 
   try {
     const res = await fetch("http://127.0.0.1:8000/dev/datasets/ds_demo/generate?task_type=all&count=5", {
       method: "POST",
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(JSON.stringify(data));
-    alert(`ÒÑÉú³É£º${JSON.stringify(data.created)}`);
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    const data = ct.includes("application/json") ? await res.json() : await res.text();
+    if (!res.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+    const created = typeof data === "object" && data ? data.created : null;
+    ElMessage({ type: "success", message: `å·²ç”Ÿæˆï¼š${JSON.stringify(created ?? data)}` });
   } catch (e) {
-    alert(`Éú³ÉÊ§°Ü£º${e?.message || e}`);
+    ElMessage({ type: "error", message: `ç”Ÿæˆå¤±è´¥ï¼š${e?.message || e}` });
+  } finally {
+    generating.value = false;
   }
 }
 </script>
