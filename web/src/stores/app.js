@@ -36,11 +36,59 @@ export function toTaskType(taskLabel) {
   return TASK_TYPE_BY_LABEL[taskLabel] || taskLabel || "";
 }
 
+function hasBadText(v) {
+  return typeof v === "string" && v.includes("\uFFFD");
+}
+
+function repairLoadedState(state) {
+  if (!state || typeof state !== "object") return { state, changed: false };
+
+  let changed = false;
+  const next = { ...state };
+
+  if (Array.isArray(next.datasets)) {
+    next.datasets = next.datasets.map((d) => {
+      if (!d || typeof d !== "object") return d;
+      if (d.id !== "ds_demo") return d;
+      const needsFix = hasBadText(d.name) || hasBadText(d.type) || hasBadText(d.size);
+      if (!needsFix) return d;
+      changed = true;
+      return { ...d, name: "Demo-样例数据集", type: "图像", size: "10 张" };
+    });
+  }
+
+  if (Array.isArray(next.algorithms)) {
+    next.algorithms = next.algorithms.map((a) => {
+      if (!a || typeof a !== "object") return a;
+      if (a.id === "alg_dn_cnn") {
+        const needsFix = hasBadText(a.task) || hasBadText(a.name);
+        if (!needsFix) return a;
+        changed = true;
+        return { ...a, task: "去噪", name: "DnCNN(示例)" };
+      }
+      if (a.id === "alg_dehaze_dcp") {
+        const needsFix = hasBadText(a.task) || hasBadText(a.name);
+        if (!needsFix) return a;
+        changed = true;
+        return { ...a, task: "去雾", name: "DCP暗通道先验(真实)" };
+      }
+      return a;
+    });
+  }
+
+  return { state: next, changed };
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const repaired = repairLoadedState(parsed);
+    if (repaired.changed) {
+      localStorage.setItem(LS_KEY, JSON.stringify({ ...repaired.state, _savedAt: Date.now() }));
+    }
+    return repaired.state;
   } catch {
     return null;
   }
@@ -97,13 +145,15 @@ const _pollTimers = new Map();
 // ====================== Store ======================
 
 export const useAppStore = defineStore("app", {
-  state: () => ({
+  state: () => {
+    const loaded = loadState();
+    return ({
     // 你后面会把 dataset/algorithm 做成真正的管理功能；目前保留 Demo 数据以便流程可跑。
-    datasets: (loadState()?.datasets?.length ? loadState().datasets : [
+    datasets: (loaded?.datasets?.length ? loaded.datasets : [
       { id: "ds_demo", name: "Demo-样例数据集", type: "图像", size: "10 张", createdAt: nowStr() },
     ]),
 
-    algorithms: (loadState()?.algorithms?.length ? loadState().algorithms : [
+    algorithms: (loaded?.algorithms?.length ? loaded.algorithms : [
       { id: "alg_dn_cnn", task: "去噪", name: "DnCNN(示例)", impl: "PyTorch", version: "v1", createdAt: nowStr() },
       { id: "alg_dehaze_dcp", task: "去雾", name: "DCP暗通道先验(真实)", impl: "OpenCV", version: "v1", createdAt: nowStr() },
     ]),
@@ -114,8 +164,9 @@ export const useAppStore = defineStore("app", {
     tasks: [],
 
     // 核心：runs 由后端 Redis/Celery 驱动
-    runs: loadState()?.runs || [],
-  }),
+    runs: loaded?.runs || [],
+  });
+  },
 
   actions: {
     // ====================== Demo 管理（保留） ======================
