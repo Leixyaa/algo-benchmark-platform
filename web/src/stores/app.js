@@ -105,6 +105,21 @@ function repairLoadedState(state) {
     });
   }
 
+  if (Array.isArray(next.runs)) {
+    next.runs = next.runs.map((r) => {
+      if (!r || typeof r !== "object") return r;
+      const raw = r.raw;
+      if (!raw || typeof raw !== "object") return r;
+      const params = raw.params;
+      if (!params || typeof params !== "object") return r;
+      if (!Object.prototype.hasOwnProperty.call(params, "niqe_fallback")) return r;
+      const raw2 = { ...raw, params: { ...params } };
+      delete raw2.params.niqe_fallback;
+      changed = true;
+      return { ...r, raw: raw2 };
+    });
+  }
+
   return { state: next, changed };
 }
 
@@ -355,6 +370,15 @@ export const useAppStore = defineStore("app", {
       const metrics = out?.metrics ?? {};
 
       const taskType = String(out?.task_type ?? "");
+      const rawParams =
+        out?.params && typeof out.params === "object" && !Array.isArray(out.params)
+          ? { ...out.params }
+          : out?.params;
+      if (rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)) {
+        delete rawParams.niqe_fallback;
+      }
+      const raw = out ? { ...out, params: rawParams } : out;
+
       return {
         id: out.run_id,
 
@@ -378,7 +402,7 @@ export const useAppStore = defineStore("app", {
         error: out?.error ?? null,
 
         // 保留原始字段（未来导出/详情用）
-        raw: out,
+        raw,
       };
     },
 

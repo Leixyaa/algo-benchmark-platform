@@ -27,6 +27,15 @@ import cv2
 
 app = FastAPI(title="Algo Eval Platform API", version="0.1.0")
 
+def _sanitize_run_for_api(run: dict) -> dict:
+    out = dict(run)
+    params = out.get("params")
+    if isinstance(params, dict):
+        p2 = dict(params)
+        p2.pop("niqe_fallback", None)
+        out["params"] = p2
+    return out
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -75,7 +84,7 @@ def create_run(payload: RunCreate):
 def get_runs(limit: int = 200):
     r = make_redis()
     runs = list_runs(r, limit=limit)
-    return runs
+    return [_sanitize_run_for_api(x) for x in (runs or [])]
 
 @app.get("/runs/export")
 def export_runs(
@@ -133,7 +142,8 @@ def export_runs(
 
     def to_row(x: dict) -> dict:
         m = x.get("metrics") or {}
-        params = x.get("params") or {}
+        params = dict(x.get("params") or {})
+        params.pop("niqe_fallback", None)
         samples = x.get("samples") or []
         return {
             "run_id": x.get("run_id"),
@@ -239,7 +249,7 @@ def get_run(run_id: str):
     run = load_run(r, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run_not_found")
-    return run
+    return _sanitize_run_for_api(run)
 
 
 @app.post("/runs/{run_id}/cancel")
