@@ -90,7 +90,19 @@
         </div>
 
         <div class="chart-wrap">
-          <canvas ref="chartCanvas" class="chart-canvas"></canvas>
+          <canvas
+            ref="chartCanvas"
+            class="chart-canvas"
+            @mousemove="onChartMove"
+            @mouseleave="onChartLeave"
+          ></canvas>
+          <div
+            v-if="chartTip.visible"
+            class="chart-tooltip"
+            :style="{ left: chartTip.x + 'px', top: chartTip.y + 'px' }"
+          >
+            {{ chartTip.text }}
+          </div>
         </div>
       </div>
 
@@ -611,6 +623,44 @@ const chartCanvas = ref(null);
 const chartMetric = ref("score");
 const chartTopN = ref(10);
 
+let _chartHit = [];
+const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
+
+function _fmtValue(v) {
+  if (!Number.isFinite(v)) return "-";
+  if (chartMetric.value === "ssim") return v.toFixed(4);
+  if (chartMetric.value === "time") return `${v.toFixed(3)}s`;
+  if (chartMetric.value === "score") return v.toFixed(3);
+  return v.toFixed(3);
+}
+
+function onChartLeave() {
+  chartTip.value = { ...chartTip.value, visible: false };
+}
+
+function onChartMove(e) {
+  const canvas = chartCanvas.value;
+  if (!canvas) return;
+  const wrap = canvas.parentElement;
+  if (!wrap) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  const hit = (_chartHit || []).find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+  if (!hit) return onChartLeave();
+
+  const wRect = wrap.getBoundingClientRect();
+  const lx = Math.max(8, Math.min(wRect.width - 8, x + 12));
+  const ly = Math.max(8, Math.min(wRect.height - 8, y + 12));
+  chartTip.value = {
+    visible: true,
+    x: lx,
+    y: ly,
+    text: `${hit.name}：${hit.valueTxt}`,
+  };
+}
+
 function sanitizeChart() {
   const allowed = new Set(["score", "psnr", "ssim", "niqe", "time"]);
   if (!allowed.has(chartMetric.value)) chartMetric.value = "score";
@@ -670,7 +720,7 @@ function drawChart() {
   const items = chartItems.value || [];
   const wrap = canvas.parentElement;
   const cssW = Math.max(320, Math.floor(wrap?.clientWidth || 680));
-  const cssH = 260;
+  const cssH = items.length >= 10 ? 340 : 310;
 
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(cssW * dpr);
@@ -687,7 +737,7 @@ function drawChart() {
   const padL = 56;
   const padR = 14;
   const padT = 18;
-  const padB = 44;
+  const padB = 86;
   const plotW = cssW - padL - padR;
   const plotH = cssH - padT - padB;
 
@@ -731,10 +781,12 @@ function drawChart() {
   }
 
   const n = items.length;
-  const gap = 10;
+  const gap = n >= 12 ? 6 : 10;
   const bw = Math.max(10, Math.floor((plotW - gap * (n - 1)) / n));
   const totalBarsW = bw * n + gap * (n - 1);
   const startX = padL + Math.max(0, Math.floor((plotW - totalBarsW) / 2));
+
+  _chartHit = [];
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
@@ -749,20 +801,42 @@ function drawChart() {
     const h = Math.max(1, Math.round(nv * plotH));
     const y = padT + plotH - h;
 
+    const r = Math.min(6, Math.floor(bw / 3), Math.floor(h / 3));
     ctx.fillStyle = "#3b82f6";
-    ctx.fillRect(x, y, bw, h);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + bw - r, y);
+    ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
+    ctx.lineTo(x + bw, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
 
-    ctx.fillStyle = "#111827";
-    ctx.textBaseline = "bottom";
-    ctx.font = "11px var(--el-font-family, system-ui)";
-    const valueTxt = chartMetric.value === "ssim" ? v.toFixed(4) : v.toFixed(3);
-    ctx.fillText(valueTxt, x + bw / 2, y - 4);
+    const valueTxt = _fmtValue(v);
+    _chartHit.push({ x, y, w: bw, h, name: String(it.name || ""), valueTxt });
+    if (bw >= 26 && h >= 16) {
+      ctx.fillStyle = h >= 30 ? "#ffffff" : "#111827";
+      ctx.textBaseline = h >= 30 ? "middle" : "bottom";
+      ctx.font = "11px var(--el-font-family, system-ui)";
+      const vy = h >= 30 ? y + 12 : y - 4;
+      ctx.fillText(valueTxt, x + bw / 2, vy);
+    }
 
     ctx.fillStyle = "#374151";
     ctx.textBaseline = "top";
     ctx.font = "10px var(--el-font-family, system-ui)";
-    const label = String(it.name || "").slice(0, 14);
-    ctx.fillText(label, x + bw / 2, padT + plotH + 10);
+    const label = String(it.name || "").slice(0, 18);
+    const lx = x + bw / 2;
+    const ly = padT + plotH + 12;
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(-Math.PI / 4);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
   }
 
   ctx.fillStyle = "#111827";
@@ -800,8 +874,22 @@ onMounted(async () => {
 .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .chart-title { font-weight: 600; }
 .chart-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.chart-wrap { margin-top: 10px; width: 100%; }
-.chart-canvas { width: 100%; height: 260px; border-radius: 8px; border: 1px solid #ebeef5; background: #fff; }
+.chart-wrap { margin-top: 10px; width: 100%; position: relative; }
+.chart-canvas { width: 100%; height: 310px; border-radius: 8px; border: 1px solid #ebeef5; background: #fff; }
+.chart-tooltip {
+  position: absolute;
+  transform: translate(-8px, -8px);
+  max-width: 420px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: rgba(17, 24, 39, 0.92);
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.3;
+  pointer-events: none;
+  white-space: nowrap;
+}
 
 .weights { margin-top: 12px; padding-top: 10px; border-top: 1px solid #ebeef5; }
 .weights-title { font-weight: 600; margin-bottom: 8px; }
