@@ -64,6 +64,7 @@ class AlgorithmCreate(BaseModel):
     name: str
     impl: str = "OpenCV"
     version: str = "v1"
+    default_params: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AlgorithmPatch(BaseModel):
@@ -71,6 +72,7 @@ class AlgorithmPatch(BaseModel):
     name: Optional[str] = None
     impl: Optional[str] = None
     version: Optional[str] = None
+    default_params: Optional[Dict[str, Any]] = None
 
 
 class AlgorithmOut(BaseModel):
@@ -80,3 +82,4 @@ class AlgorithmOut(BaseModel):
     impl: str
     version: str
     created_at: float
+    default_params: Dict[str, Any] = Field(default_factory=dict)

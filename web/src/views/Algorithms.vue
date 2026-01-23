@@ -1,24 +1,24 @@
 <template>
   <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">Ëã·¨¿â</h2>
+    <h2 style="margin: 0 0 8px;">ç®—æ³•åº“</h2>
     <div style="color:#666; margin-bottom: 12px;">
-      ¹ÜÀíÆ½Ì¨ÄÚÖÃ/½ÓÈëµÄËã·¨ÌõÄ¿£¬ºóĞøÆÀ²âÊ±´ÓÕâÀïÑ¡ÔñËã·¨¡£
+      ç®¡ç†å¹³å°å†…ç½®/æ¥å…¥çš„ç®—æ³•æ¡ç›®ï¼Œåç»­è¯„æµ‹æ—¶ä»è¿™é‡Œé€‰æ‹©ç®—æ³•ã€‚
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">ĞÂÔöËã·¨</button>
-      <button @click="seedDemo" style="padding:6px 10px;">Ò»¼üÌî³ä Demo£¨Õ¼Î»£©</button>
+      <button @click="openCreate" style="padding:6px 10px;">æ–°å¢ç®—æ³•</button>
+      <button @click="seedDemo" style="padding:6px 10px;">ä¸€é”®å¡«å…… Demoï¼ˆå ä½ï¼‰</button>
     </div>
 
     <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
       <thead>
         <tr style="background:#f6f6f6;">
-          <th align="left">ÈÎÎñ</th>
-          <th align="left">Ëã·¨Ãû³Æ</th>
-          <th align="left">ÊµÏÖ·½Ê½</th>
-          <th align="left">°æ±¾</th>
-          <th align="left">´´½¨Ê±¼ä</th>
-          <th align="left" width="140">²Ù×÷</th>
+          <th align="left">ä»»åŠ¡</th>
+          <th align="left">ç®—æ³•åç§°</th>
+          <th align="left">å®ç°æ–¹å¼</th>
+          <th align="left">ç‰ˆæœ¬</th>
+          <th align="left">åˆ›å»ºæ—¶é—´</th>
+          <th align="left" width="220">æ“ä½œ</th>
         </tr>
       </thead>
       <tbody>
@@ -29,61 +29,130 @@
           <td>{{ a.version }}</td>
           <td>{{ a.createdAt }}</td>
           <td>
-            <button @click="remove(a.id)" style="padding:4px 8px;">É¾³ı</button>
+            <button @click="openEdit(a)" style="padding:4px 8px; margin-right:6px;">ç¼–è¾‘</button>
+            <button @click="remove(a.id)" style="padding:4px 8px;">åˆ é™¤</button>
           </td>
         </tr>
         <tr v-if="store.algorithms.length === 0">
-          <td colspan="6" style="color:#888;">ÔİÎŞËã·¨ÌõÄ¿</td>
+          <td colspan="6" style="color:#888;">æš‚æ— ç®—æ³•æ¡ç›®</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- ĞÂÔöËã·¨µ¯´° -->
+    <!-- æ–°å¢ç®—æ³•å¼¹çª— -->
     <div v-if="showCreate"
       style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
       <div style="background:#fff; padding:16px; width:460px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">ĞÂÔöËã·¨</h3>
+        <h3 style="margin:0 0 12px;">æ–°å¢ç®—æ³•</h3>
 
         <div style="display:flex; flex-direction:column; gap:10px;">
           <label>
-            ÈÎÎñÀà±ğ£º
+            ä»»åŠ¡ç±»åˆ«ï¼š
             <select v-model="form.task" style="width:100%; padding:6px;">
-              <option>È¥Ôë</option>
-              <option>È¥Ä£ºı</option>
-              <option>È¥Îí</option>
-              <option>³¬·Ö±æÂÊ</option>
-              <option>µÍÕÕ¶ÈÔöÇ¿</option>
-              <option>ÊÓÆµÈ¥Ôë</option>
-              <option>ÊÓÆµ³¬·Ö</option>
+              <option>å»å™ª</option>
+              <option>å»æ¨¡ç³Š</option>
+              <option>å»é›¾</option>
+              <option>è¶…åˆ†è¾¨ç‡</option>
+              <option>ä½ç…§åº¦å¢å¼º</option>
+              <option>è§†é¢‘å»å™ª</option>
+              <option>è§†é¢‘è¶…åˆ†</option>
             </select>
           </label>
 
           <label>
-            Ëã·¨Ãû³Æ£º
-            <input v-model="form.name" placeholder="ÀıÈç£ºDnCNN / DeblurGAN-v2 / RetinexNet"
+            ç®—æ³•åç§°ï¼š
+            <input v-model="form.name" placeholder="ä¾‹å¦‚ï¼šDnCNN / DeblurGAN-v2 / RetinexNet"
               style="width:100%; padding:6px;" />
           </label>
 
           <label>
-            ÊµÏÖ·½Ê½£º
+            å®ç°æ–¹å¼ï¼š
             <select v-model="form.impl" style="width:100%; padding:6px;">
               <option>PyTorch</option>
               <option>TensorFlow</option>
               <option>OpenCV</option>
-              <option>½Å±¾µ÷ÓÃ</option>
+              <option>è„šæœ¬è°ƒç”¨</option>
             </select>
           </label>
 
           <label>
-            °æ±¾£º
-            <input v-model="form.version" placeholder="ÀıÈç£ºv1 / commit id / ÂÛÎÄÄê·İ"
+            ç‰ˆæœ¬ï¼š
+            <input v-model="form.version" placeholder="ä¾‹å¦‚ï¼šv1 / commit id / è®ºæ–‡å¹´ä»½"
               style="width:100%; padding:6px;" />
+          </label>
+
+          <label>
+            é»˜è®¤å‚æ•°(JSON)ï¼š
+            <textarea
+              v-model="form.defaultParamsText"
+              rows="6"
+              style="width:100%; padding:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;"
+              placeholder='ä¾‹å¦‚ï¼š{ "dcp_patch": 15, "dcp_omega": 0.95 }'
+            />
           </label>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">È¡Ïû</button>
-          <button @click="submitCreate" style="padding:6px 10px;">È·ÈÏĞÂÔö</button>
+          <button @click="closeCreate" style="padding:6px 10px;">å–æ¶ˆ</button>
+          <button @click="submitCreate" style="padding:6px 10px;">ç¡®è®¤æ–°å¢</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ç¼–è¾‘ç®—æ³•å¼¹çª— -->
+    <div v-if="showEdit"
+      style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
+      <div style="background:#fff; padding:16px; width:520px; border-radius:10px;">
+        <h3 style="margin:0 0 12px;">ç¼–è¾‘ç®—æ³•</h3>
+
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div style="color:#666;">IDï¼š{{ editForm.id }}</div>
+          <label>
+            ä»»åŠ¡ç±»åˆ«ï¼š
+            <select v-model="editForm.task" style="width:100%; padding:6px;">
+              <option>å»å™ª</option>
+              <option>å»æ¨¡ç³Š</option>
+              <option>å»é›¾</option>
+              <option>è¶…åˆ†è¾¨ç‡</option>
+              <option>ä½ç…§åº¦å¢å¼º</option>
+              <option>è§†é¢‘å»å™ª</option>
+              <option>è§†é¢‘è¶…åˆ†</option>
+            </select>
+          </label>
+
+          <label>
+            ç®—æ³•åç§°ï¼š
+            <input v-model="editForm.name" style="width:100%; padding:6px;" />
+          </label>
+
+          <label>
+            å®ç°æ–¹å¼ï¼š
+            <select v-model="editForm.impl" style="width:100%; padding:6px;">
+              <option>PyTorch</option>
+              <option>TensorFlow</option>
+              <option>OpenCV</option>
+              <option>è„šæœ¬è°ƒç”¨</option>
+            </select>
+          </label>
+
+          <label>
+            ç‰ˆæœ¬ï¼š
+            <input v-model="editForm.version" style="width:100%; padding:6px;" />
+          </label>
+
+          <label>
+            é»˜è®¤å‚æ•°(JSON)ï¼š
+            <textarea
+              v-model="editForm.defaultParamsText"
+              rows="8"
+              style="width:100%; padding:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;"
+            />
+          </label>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+          <button @click="closeEdit" style="padding:6px 10px;">å–æ¶ˆ</button>
+          <button @click="submitEdit" style="padding:6px 10px;">ä¿å­˜</button>
         </div>
       </div>
     </div>
@@ -97,11 +166,22 @@ import { useAppStore } from "../stores/app";
 const store = useAppStore();
 
 const showCreate = ref(false);
+const showEdit = ref(false);
 const form = reactive({
-  task: "È¥Ôë",
+  task: "å»å™ª",
   name: "",
   impl: "PyTorch",
   version: "v1",
+  defaultParamsText: "{}",
+});
+
+const editForm = reactive({
+  id: "",
+  task: "å»å™ª",
+  name: "",
+  impl: "OpenCV",
+  version: "v1",
+  defaultParamsText: "{}",
 });
 
 onMounted(async () => {
@@ -113,20 +193,77 @@ onMounted(async () => {
 });
 
 function openCreate() {
-  form.task = "È¥Ôë";
+  form.task = "å»å™ª";
   form.name = "";
   form.impl = "PyTorch";
   form.version = "v1";
+  form.defaultParamsText = "{}";
   showCreate.value = true;
 }
 function closeCreate() {
   showCreate.value = false;
 }
 
+function openEdit(a) {
+  editForm.id = a?.id || "";
+  editForm.task = a?.task || "å»å™ª";
+  editForm.name = a?.name || "";
+  editForm.impl = a?.impl || "OpenCV";
+  editForm.version = a?.version || "v1";
+  const obj =
+    a?.defaultParams && typeof a.defaultParams === "object" && !Array.isArray(a.defaultParams)
+      ? a.defaultParams
+      : {};
+  editForm.defaultParamsText = JSON.stringify(obj, null, 2);
+  showEdit.value = true;
+}
+
+function closeEdit() {
+  showEdit.value = false;
+}
+
+async function submitEdit() {
+  if (!editForm.id) return alert("ç¼ºå°‘ç®—æ³• ID");
+  if (!editForm.name.trim()) return alert("è¯·å¡«å†™ç®—æ³•åç§°");
+  let defaultParams = {};
+  try {
+    const s = String(editForm.defaultParamsText || "").trim();
+    defaultParams = s ? JSON.parse(s) : {};
+  } catch (e) {
+    return alert(`é»˜è®¤å‚æ•°ä¸æ˜¯åˆæ³• JSONï¼š${e?.message || e}`);
+  }
+  if (!defaultParams || typeof defaultParams !== "object" || Array.isArray(defaultParams)) {
+    return alert("é»˜è®¤å‚æ•°å¿…é¡»æ˜¯ JSON å¯¹è±¡ï¼Œä¾‹å¦‚ï¼š{ \"dcp_patch\": 15 }");
+  }
+
+  try {
+    await store.updateAlgorithm(editForm.id, {
+      task: editForm.task,
+      name: editForm.name.trim(),
+      impl: editForm.impl,
+      version: editForm.version.trim() || "v1",
+      defaultParams,
+    });
+    showEdit.value = false;
+  } catch (e) {
+    alert(`ä¿å­˜å¤±è´¥ï¼š${e?.message || e}`);
+  }
+}
+
 async function submitCreate() {
   if (!form.name.trim()) {
-    alert("ÇëÌîĞ´Ëã·¨Ãû³Æ");
+    alert("è¯·å¡«å†™ç®—æ³•åç§°");
     return;
+  }
+  let defaultParams = {};
+  try {
+    const s = String(form.defaultParamsText || "").trim();
+    defaultParams = s ? JSON.parse(s) : {};
+  } catch (e) {
+    return alert(`é»˜è®¤å‚æ•°ä¸æ˜¯åˆæ³• JSONï¼š${e?.message || e}`);
+  }
+  if (!defaultParams || typeof defaultParams !== "object" || Array.isArray(defaultParams)) {
+    return alert("é»˜è®¤å‚æ•°å¿…é¡»æ˜¯ JSON å¯¹è±¡ï¼Œä¾‹å¦‚ï¼š{ \"dcp_patch\": 15 }");
   }
   try {
     await store.createAlgorithm({
@@ -134,29 +271,30 @@ async function submitCreate() {
       name: form.name.trim(),
       impl: form.impl,
       version: form.version.trim() || "v1",
+      defaultParams,
     });
     showCreate.value = false;
   } catch (e) {
-    alert(`ĞÂÔöÊ§°Ü£º${e?.message || e}`);
+    alert(`æ–°å¢å¤±è´¥ï¼š${e?.message || e}`);
   }
 }
 
 async function remove(id) {
-  const ok = confirm("È·¶¨É¾³ı¸ÃËã·¨ÌõÄ¿Âğ£¿");
+  const ok = confirm("ç¡®å®šåˆ é™¤è¯¥ç®—æ³•æ¡ç›®å—ï¼Ÿ");
   if (!ok) return;
   try {
     await store.removeAlgorithm(id);
   } catch (e) {
-    alert(`É¾³ıÊ§°Ü£º${e?.message || e}`);
+    alert(`åˆ é™¤å¤±è´¥ï¼š${e?.message || e}`);
   }
 }
 
 async function seedDemo() {
   try {
-    await store.createAlgorithm({ task: "È¥Îí", name: "Dark Channel Prior(Ê¾Àı)", impl: "OpenCV", version: "2009" });
-    await store.createAlgorithm({ task: "µÍÕÕ¶ÈÔöÇ¿", name: "RetinexNet(Ê¾Àı)", impl: "PyTorch", version: "2018" });
+    await store.createAlgorithm({ task: "å»é›¾", name: "Dark Channel Prior(ç¤ºä¾‹)", impl: "OpenCV", version: "2009" });
+    await store.createAlgorithm({ task: "ä½ç…§åº¦å¢å¼º", name: "RetinexNet(ç¤ºä¾‹)", impl: "PyTorch", version: "2018" });
   } catch (e) {
-    alert(`Ìî³äÊ§°Ü£º${e?.message || e}`);
+    alert(`å¡«å……å¤±è´¥ï¼š${e?.message || e}`);
   }
 }
 </script>

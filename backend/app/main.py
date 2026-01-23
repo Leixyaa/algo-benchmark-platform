@@ -15,8 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi import Query
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from openpyxl import Workbook
 
@@ -76,6 +75,11 @@ def health():
     return {"ok": True, "ts": time.time()}
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
+
+
 def _ensure_catalog_defaults(r):
     if not list_datasets(r, limit=1):
         created = time.time()
@@ -94,20 +98,118 @@ def _ensure_catalog_defaults(r):
     if not list_algorithms(r, limit=1):
         created = time.time()
         defaults = [
-            {"algorithm_id": "alg_dn_cnn", "task": "去噪", "name": "FastNLMeans(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_denoise_bilateral", "task": "去噪", "name": "Bilateral(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_denoise_gaussian", "task": "去噪", "name": "Gaussian(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_denoise_median", "task": "去噪", "name": "Median(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_dehaze_dcp", "task": "去雾", "name": "DCP暗通道先验(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_dehaze_clahe", "task": "去雾", "name": "CLAHE(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_dehaze_gamma", "task": "去雾", "name": "Gamma(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_deblur_unsharp", "task": "去模糊", "name": "UnsharpMask(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_deblur_laplacian", "task": "去模糊", "name": "LaplacianSharpen(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_sr_bicubic", "task": "超分辨率", "name": "Bicubic(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_sr_lanczos", "task": "超分辨率", "name": "Lanczos(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_sr_nearest", "task": "超分辨率", "name": "Nearest(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_lowlight_gamma", "task": "低照度增强", "name": "Gamma(基线)", "impl": "OpenCV", "version": "v1"},
-            {"algorithm_id": "alg_lowlight_clahe", "task": "低照度增强", "name": "CLAHE(基线)", "impl": "OpenCV", "version": "v1"},
+            {
+                "algorithm_id": "alg_dn_cnn",
+                "task": "去噪",
+                "name": "FastNLMeans(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
+            },
+            {
+                "algorithm_id": "alg_denoise_bilateral",
+                "task": "去噪",
+                "name": "Bilateral(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
+            },
+            {
+                "algorithm_id": "alg_denoise_gaussian",
+                "task": "去噪",
+                "name": "Gaussian(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"gaussian_sigma": 1.0},
+            },
+            {
+                "algorithm_id": "alg_denoise_median",
+                "task": "去噪",
+                "name": "Median(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"median_ksize": 3},
+            },
+            {
+                "algorithm_id": "alg_dehaze_dcp",
+                "task": "去雾",
+                "name": "DCP暗通道先验(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
+            },
+            {
+                "algorithm_id": "alg_dehaze_clahe",
+                "task": "去雾",
+                "name": "CLAHE(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"clahe_clip_limit": 2.0},
+            },
+            {
+                "algorithm_id": "alg_dehaze_gamma",
+                "task": "去雾",
+                "name": "Gamma(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"gamma": 0.75},
+            },
+            {
+                "algorithm_id": "alg_deblur_unsharp",
+                "task": "去模糊",
+                "name": "UnsharpMask(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
+            },
+            {
+                "algorithm_id": "alg_deblur_laplacian",
+                "task": "去模糊",
+                "name": "LaplacianSharpen(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"laplacian_strength": 0.7},
+            },
+            {
+                "algorithm_id": "alg_sr_bicubic",
+                "task": "超分辨率",
+                "name": "Bicubic(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {},
+            },
+            {
+                "algorithm_id": "alg_sr_lanczos",
+                "task": "超分辨率",
+                "name": "Lanczos(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {},
+            },
+            {
+                "algorithm_id": "alg_sr_nearest",
+                "task": "超分辨率",
+                "name": "Nearest(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {},
+            },
+            {
+                "algorithm_id": "alg_lowlight_gamma",
+                "task": "低照度增强",
+                "name": "Gamma(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"lowlight_gamma": 0.6},
+            },
+            {
+                "algorithm_id": "alg_lowlight_clahe",
+                "task": "低照度增强",
+                "name": "CLAHE(基线)",
+                "impl": "OpenCV",
+                "version": "v1",
+                "default_params": {"clahe_clip_limit": 2.5},
+            },
         ]
         for x in defaults:
             x2 = dict(x)
@@ -251,7 +353,30 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
 def get_algorithms(limit: int = 500):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    return list_algorithms(r, limit=limit)
+    defaults_by_id = {
+        "alg_dn_cnn": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
+        "alg_denoise_bilateral": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
+        "alg_denoise_gaussian": {"gaussian_sigma": 1.0},
+        "alg_denoise_median": {"median_ksize": 3},
+        "alg_dehaze_dcp": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
+        "alg_dehaze_clahe": {"clahe_clip_limit": 2.0},
+        "alg_dehaze_gamma": {"gamma": 0.75},
+        "alg_deblur_unsharp": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
+        "alg_deblur_laplacian": {"laplacian_strength": 0.7},
+        "alg_lowlight_gamma": {"lowlight_gamma": 0.6},
+        "alg_lowlight_clahe": {"clahe_clip_limit": 2.5},
+    }
+
+    items = list_algorithms(r, limit=limit) or []
+    out = []
+    for x in items:
+        alg_id = x.get("algorithm_id")
+        if isinstance(alg_id, str):
+            dp = x.get("default_params")
+            if not isinstance(dp, dict) or not dp:
+                x = {**x, "default_params": defaults_by_id.get(alg_id, {})}
+        out.append(AlgorithmOut(**x).model_dump())
+    return out
 
 
 @app.post("/algorithms", response_model=AlgorithmOut)
@@ -269,6 +394,7 @@ def create_algorithm(payload: AlgorithmCreate):
         "impl": payload.impl,
         "version": payload.version,
         "created_at": created,
+        "default_params": payload.default_params or {},
     }
     save_algorithm(r, algorithm_id, data)
     return AlgorithmOut(**data)
@@ -289,6 +415,8 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
         cur["impl"] = payload.impl
     if payload.version is not None:
         cur["version"] = payload.version
+    if payload.default_params is not None:
+        cur["default_params"] = payload.default_params
     save_algorithm(r, algorithm_id, cur)
     return AlgorithmOut(**cur)
 

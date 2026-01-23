@@ -116,6 +116,32 @@ def _laplacian_sharpen(img_bgr_u8: np.ndarray, strength: float = 0.8) -> np.ndar
     return cv2.addWeighted(img_bgr_u8, 1.0, lap_bgr, float(strength), 0)
 
 
+def _get_num(params: dict[str, Any], key: str, default: float, min_v: float | None = None, max_v: float | None = None) -> float:
+    v = params.get(key, default)
+    try:
+        x = float(v)
+    except Exception:
+        x = float(default)
+    if min_v is not None:
+        x = max(float(min_v), x)
+    if max_v is not None:
+        x = min(float(max_v), x)
+    return x
+
+
+def _get_int(params: dict[str, Any], key: str, default: int, min_v: int | None = None, max_v: int | None = None) -> int:
+    v = params.get(key, default)
+    try:
+        x = int(v)
+    except Exception:
+        x = int(default)
+    if min_v is not None:
+        x = max(int(min_v), x)
+    if max_v is not None:
+        x = min(int(max_v), x)
+    return x
+
+
 def _compute_run_for_task_from_pairs(
     pairs: list[Any],
     compute_pred,
@@ -257,6 +283,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
             dataset_id = run.get("dataset_id") or ""
             algorithm_id = (run.get("algorithm_id") or "").lower()
+            algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
             data_root = Path(__file__).resolve().parents[1] / "data"  # backend/app/.. -> backend/data
 
             min_demo_seconds = 1.6
@@ -306,22 +333,45 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
                 if task_type == "dehaze":
                     if algorithm_id in {"alg_dehaze_clahe"}:
-                        return _apply_clahe_bgr(inp_u8, clip_limit=2.0)
+                        clip = _get_num(algo_params, "clahe_clip_limit", 2.0, 0.1, 40.0)
+                        return _apply_clahe_bgr(inp_u8, clip_limit=clip)
                     if algorithm_id in {"alg_dehaze_gamma"}:
-                        return _apply_gamma_bgr(inp_u8, gamma=0.75)
-                    return dehaze_dcp(inp_u8, patch=15, omega=0.95, t0=0.1)
+                        gamma = _get_num(algo_params, "gamma", 0.75, 0.05, 5.0)
+                        return _apply_gamma_bgr(inp_u8, gamma=gamma)
+                    patch = _get_int(algo_params, "dcp_patch", 15, 3, 51)
+                    omega = _get_num(algo_params, "dcp_omega", 0.95, 0.0, 1.5)
+                    t0 = _get_num(algo_params, "dcp_t0", 0.1, 0.01, 0.5)
+                    return dehaze_dcp(inp_u8, patch=patch, omega=omega, t0=t0)
                 if task_type == "denoise":
                     if algorithm_id in {"alg_denoise_bilateral"}:
-                        return cv2.bilateralFilter(inp_u8, d=7, sigmaColor=35, sigmaSpace=35)
+                        d = _get_int(algo_params, "bilateral_d", 7, 1, 25)
+                        sc = _get_num(algo_params, "bilateral_sigmaColor", 35, 1, 200)
+                        ss = _get_num(algo_params, "bilateral_sigmaSpace", 35, 1, 200)
+                        return cv2.bilateralFilter(inp_u8, d=d, sigmaColor=sc, sigmaSpace=ss)
                     if algorithm_id in {"alg_denoise_gaussian"}:
-                        return cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=1.0)
+                        sigma = _get_num(algo_params, "gaussian_sigma", 1.0, 0.05, 20.0)
+                        return cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=sigma)
                     if algorithm_id in {"alg_denoise_median"}:
-                        return cv2.medianBlur(inp_u8, 3)
-                    return cv2.fastNlMeansDenoisingColored(inp_u8, None, 10, 10, 7, 21)
+                        k = _get_int(algo_params, "median_ksize", 3, 1, 31)
+                        if k % 2 == 0:
+                            k += 1
+                        return cv2.medianBlur(inp_u8, k)
+                    h = _get_num(algo_params, "nlm_h", 10, 1, 50)
+                    hc = _get_num(algo_params, "nlm_hColor", 10, 1, 50)
+                    tw = _get_int(algo_params, "nlm_templateWindowSize", 7, 3, 21)
+                    sw = _get_int(algo_params, "nlm_searchWindowSize", 21, 3, 51)
+                    if tw % 2 == 0:
+                        tw += 1
+                    if sw % 2 == 0:
+                        sw += 1
+                    return cv2.fastNlMeansDenoisingColored(inp_u8, None, h, hc, tw, sw)
                 if task_type == "deblur":
                     if algorithm_id in {"alg_deblur_laplacian"}:
-                        return _laplacian_sharpen(inp_u8, strength=0.7)
-                    return _unsharp_mask(inp_u8, sigma=1.0, amount=1.6)
+                        st = _get_num(algo_params, "laplacian_strength", 0.7, 0.0, 5.0)
+                        return _laplacian_sharpen(inp_u8, strength=st)
+                    sigma = _get_num(algo_params, "unsharp_sigma", 1.0, 0.05, 10.0)
+                    amount = _get_num(algo_params, "unsharp_amount", 1.6, 1.0, 5.0)
+                    return _unsharp_mask(inp_u8, sigma=sigma, amount=amount)
                 if task_type == "sr":
                     h, w = gt_u8.shape[:2]
                     if algorithm_id in {"alg_sr_nearest"}:
@@ -331,8 +381,10 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
                 if task_type == "lowlight":
                     if algorithm_id in {"alg_lowlight_clahe"}:
-                        return _apply_clahe_bgr(inp_u8, clip_limit=2.5)
-                    return _apply_gamma_bgr(inp_u8, gamma=0.6)
+                        clip = _get_num(algo_params, "clahe_clip_limit", 2.5, 0.1, 40.0)
+                        return _apply_clahe_bgr(inp_u8, clip_limit=clip)
+                    gamma = _get_num(algo_params, "lowlight_gamma", 0.6, 0.05, 5.0)
+                    return _apply_gamma_bgr(inp_u8, gamma=gamma)
                 return inp_u8
 
             if pairs:
