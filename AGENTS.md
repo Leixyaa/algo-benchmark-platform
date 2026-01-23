@@ -65,7 +65,7 @@
 - 停止：`.\scripts\dev.cmd down`
 - 重启并安装依赖：`.\scripts\dev.cmd restart -InstallDeps`
 - 可选跳过组件：`-SkipRedis` / `-SkipBackend` / `-SkipWorker` / `-SkipWeb`
-- Redis 默认策略：优先用 Docker 启动 `algo-redis`；若 Docker 不可用，则需自行保证 `127.0.0.1:6379` 可用
+- Redis 默认策略：优先用 Docker 启动 `algo-redis`（必要时会尝试启动 Docker Desktop）；若未安装 Docker，则尝试使用 `redis-server`；都不可用时需自行保证 `127.0.0.1:6379` 可用
 - 常用访问地址：`http://127.0.0.1:8000/docs`（后端 API 文档）、`http://localhost:5173/`（前端）
 
 ## 5. 开发日志 (Development Log)
@@ -77,7 +77,7 @@
 | 2026-01-18 | 保护毕设资料隐私 | 为 `docs/graduation/` 添加 `.gitignore`，避免误提交包含个人信息的原始材料 | 完成 |
 | 2026-01-19 | 扩展多任务基线评测 | 泛化数据集配对读取，补齐多任务基线算法，导出增加 params/samples 字段 | 完成 |
 | 2026-01-19 | 新增任务取消与原因展示 | 后端新增取消接口并支持软取消，前端增加取消按钮与失败/取消原因展示 | 完成 |
-| 2026-01-23 | 一键启动开发环境 | 新增 `scripts/dev.ps1`/`scripts/dev.cmd`，支持一键拉起 Redis/API/Worker/Web | 完成 |
+| 2026-01-23 | 一键启动开发环境 | 新增 `scripts/dev.ps1`/`scripts/dev.cmd`，支持自动准备后端 venv/依赖并一键拉起 Redis/API/Worker/Web；后端根路径跳转 `/docs` 并修复编码导致的启动问题 | 完成 |
 
 ## 6. 待办事项 (Todo)
 - [ ] 基于真实数据集补齐端到端测试与稳定性验证

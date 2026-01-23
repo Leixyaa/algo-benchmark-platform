@@ -25,5 +25,7 @@ reports/
 *.csv
 *.xlsx
 
+logs/
+
 # ===== Celery =====
 celerybeat-schedule
