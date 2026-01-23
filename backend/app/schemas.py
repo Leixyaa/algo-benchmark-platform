@@ -52,6 +52,12 @@ class DatasetOut(BaseModel):
     created_at: float
 
 
+class DatasetImportZip(BaseModel):
+    filename: str
+    data_b64: str
+    overwrite: bool = False
+
+
 class AlgorithmCreate(BaseModel):
     algorithm_id: Optional[str] = None
     task: str

@@ -6,6 +6,9 @@ import uuid
 import io
 import csv
 import json
+import base64
+import zipfile
+import shutil
 
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +26,7 @@ from .schemas import (
     DatasetCreate,
     DatasetOut,
     DatasetPatch,
+    DatasetImportZip,
     AlgorithmCreate,
     AlgorithmOut,
     AlgorithmPatch,
@@ -111,6 +115,37 @@ def _ensure_catalog_defaults(r):
             save_algorithm(r, x2["algorithm_id"], x2)
 
 
+def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for info in zf.infolist():
+            name = info.filename.replace("\\", "/")
+            if not name or name.endswith("/"):
+                continue
+            if name.startswith("/") or name.startswith("../") or "/../" in name:
+                raise HTTPException(status_code=400, detail="zip_path_traversal")
+            out_path = (dest_dir / name).resolve()
+            if dest_dir.resolve() not in out_path.parents and out_path != dest_dir.resolve():
+                raise HTTPException(status_code=400, detail="zip_path_traversal")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info, "r") as src, open(out_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
+def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str]:
+    ds_dir = data_root / dataset_id
+    gt_dir = ds_dir / "gt"
+    if not gt_dir.exists():
+        return "图像", "0 张"
+    n = 0
+    for p in gt_dir.iterdir():
+        if p.is_file():
+            suf = p.suffix.lower()
+            if suf in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
+                n += 1
+    return "图像", f"{n} 张"
+
+
 @app.get("/datasets")
 def get_datasets(limit: int = 200):
     r = make_redis()
@@ -162,6 +197,54 @@ def remove_dataset(dataset_id: str):
         raise HTTPException(status_code=404, detail="dataset_not_found")
     delete_dataset(r, dataset_id)
     return {"ok": True, "dataset_id": dataset_id}
+
+
+@app.post("/datasets/{dataset_id}/scan", response_model=DatasetOut)
+def scan_dataset(dataset_id: str):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="dataset_not_found")
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    t, size = _scan_dataset_on_disk(data_root, dataset_id)
+    cur["type"] = t
+    cur["size"] = size
+    save_dataset(r, dataset_id, cur)
+    return DatasetOut(**cur)
+
+
+@app.post("/datasets/{dataset_id}/import_zip", response_model=DatasetOut)
+def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        created = time.time()
+        cur = {
+            "dataset_id": dataset_id,
+            "name": dataset_id,
+            "type": "图像",
+            "size": "-",
+            "created_at": created,
+        }
+
+    try:
+        zip_bytes = base64.b64decode(payload.data_b64.encode("utf-8"), validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad_base64")
+
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    ds_dir = data_root / dataset_id
+    if payload.overwrite and ds_dir.exists():
+        shutil.rmtree(ds_dir)
+    _safe_extract_zip_bytes(zip_bytes, ds_dir)
+
+    t, size = _scan_dataset_on_disk(data_root, dataset_id)
+    cur["type"] = t
+    cur["size"] = size
+    save_dataset(r, dataset_id, cur)
+    return DatasetOut(**cur)
 
 
 @app.get("/algorithms")

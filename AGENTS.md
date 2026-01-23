@@ -1,74 +1,85 @@
 # AGENTS.md
 
-## æ ¸å¿ƒè¯´æ˜Ž (Core Instructions)
-æœ¬æ–‡æ¡£ç”¨äºŽè®°å½• `algo-benchmark-platform` é¡¹ç›®çš„æž¶æž„è®¾è®¡ã€æ¯•è®¾ç¡¬æ€§çº¦æŸã€å½“å‰å¼€å‘è¿›åº¦ä¸ŽåŽç»­è®¡åˆ’ã€‚
-**é¡¹ç›®æ€§è´¨**ï¼šæœ¬é¡¹ç›®ä¸ºç”¨æˆ·çš„æœ¬ç§‘æ¯•ä¸šè®¾è®¡ï¼ˆç³»ç»Ÿå¼€å‘ç±»ï¼‰ï¼Œéœ€æ³¨é‡ä»£ç è§„èŒƒã€æ–‡æ¡£å®Œæ•´æ€§ã€è¯„æµ‹å£å¾„ç»Ÿä¸€ä¸Žå¯å¤çŽ°ã€‚
-**AI åä½œçº¦å®š**ï¼šæ¯æ¬¡å¯åŠ¨ç¼–ç¨‹ä»»åŠ¡å‰å…ˆé˜…è¯»æœ¬æ–‡æ¡£ï¼›æ¯æ¬¡å®Œæˆä»£ç ä¿®æ”¹åŽåŒæ­¥æ›´æ–°æœ¬æ–‡æ¡£çš„â€œå¼€å‘æ—¥å¿—â€å’Œâ€œå½“å‰çŠ¶æ€â€ã€‚
+## ºËÐÄËµÃ÷ (Core Instructions)
+±¾ÎÄµµÓÃÓÚ¼ÇÂ¼ `algo-benchmark-platform` ÏîÄ¿µÄ¼Ü¹¹Éè¼Æ¡¢±ÏÉèÓ²ÐÔÔ¼Êø¡¢µ±Ç°¿ª·¢½ø¶ÈÓëºóÐø¼Æ»®¡£
+**ÏîÄ¿ÐÔÖÊ**£º±¾ÏîÄ¿ÎªÓÃ»§µÄ±¾¿Æ±ÏÒµÉè¼Æ£¨ÏµÍ³¿ª·¢Àà£©£¬Ðè×¢ÖØ´úÂë¹æ·¶¡¢ÎÄµµÍêÕûÐÔ¡¢ÆÀ²â¿Ú¾¶Í³Ò»Óë¿É¸´ÏÖ¡£
+**AI Ð­×÷Ô¼¶¨**£ºÃ¿´ÎÆô¶¯±à³ÌÈÎÎñÇ°ÏÈÔÄ¶Á±¾ÎÄµµ£»Ã¿´ÎÍê³É´úÂëÐÞ¸ÄºóÍ¬²½¸üÐÂ±¾ÎÄµµµÄ¡°¿ª·¢ÈÕÖ¾¡±ºÍ¡°µ±Ç°×´Ì¬¡±¡£
 
-## 1. é¡¹ç›®æž¶æž„ (Project Architecture)
-æœ¬é¡¹ç›®æ˜¯â€œç®—æ³•æ€§èƒ½æµ‹è¯•ä¸Žå¿«é€Ÿé€‰åž‹å¹³å°â€ï¼Œé‡‡ç”¨å‰åŽç«¯åˆ†ç¦»æž¶æž„ã€‚
+## 1. ÏîÄ¿¼Ü¹¹ (Project Architecture)
+±¾ÏîÄ¿ÊÇ¡°Ëã·¨ÐÔÄÜ²âÊÔÓë¿ìËÙÑ¡ÐÍÆ½Ì¨¡±£¬²ÉÓÃÇ°ºó¶Ë·ÖÀë¼Ü¹¹¡£
 
-### 1.1 åŽç«¯ (Backend)
-- è·¯å¾„ï¼š`backend/`
-- æŠ€æœ¯æ ˆï¼šPython 3.xï¼ŒFastAPIï¼ŒCelery + Redis
-- ä¾èµ–èƒ½åŠ›ï¼šOpenCVã€scikit-imageã€scikit-videoã€NumPyã€SciPy
-- å…³é”®æ¨¡å—ï¼š
-  - `app/main.py`ï¼šAPI å…¥å£
-  - `app/celery_app.py` / `app/tasks.py`ï¼šå¼‚æ­¥ä»»åŠ¡æ‰§è¡Œ
-  - `app/vision/`ï¼šç®—æ³•ä¸ŽæŒ‡æ ‡å®žçŽ°ï¼ˆå¦‚ DCPã€NIQEï¼‰
-  - `app/schemas.py`ï¼šæ•°æ®æ¨¡åž‹
-  - `app/store.py`ï¼šæ•°æ®å­˜å‚¨/è¯»å†™ï¼ˆçŽ°é˜¶æ®µä»¥è½»é‡æ–¹å¼ä¸ºä¸»ï¼‰
+### 1.1 ºó¶Ë (Backend)
+- Â·¾¶£º`backend/`
+- ¼¼ÊõÕ»£ºPython 3.x£¬FastAPI£¬Celery + Redis
+- ÒÀÀµÄÜÁ¦£ºOpenCV¡¢scikit-image¡¢scikit-video¡¢NumPy¡¢SciPy
+- ¹Ø¼üÄ£¿é£º
+  - `app/main.py`£ºAPI Èë¿Ú
+  - `app/celery_app.py` / `app/tasks.py`£ºÒì²½ÈÎÎñÖ´ÐÐ
+  - `app/vision/`£ºËã·¨ÓëÖ¸±êÊµÏÖ£¨Èç DCP¡¢NIQE£©
+  - `app/schemas.py`£ºÊý¾ÝÄ£ÐÍ
+  - `app/store.py`£ºÊý¾Ý´æ´¢/¶ÁÐ´£¨ÏÖ½×¶ÎÒÔÇáÁ¿·½Ê½ÎªÖ÷£©
 
-### 1.2 å‰ç«¯ (Frontend)
-- è·¯å¾„ï¼š`web/`
-- æŠ€æœ¯æ ˆï¼šVue3 + Viteï¼›Piniaï¼›Element Plusï¼›EChartsï¼›Axiosï¼›XLSXï¼ˆExcel å¯¼å‡ºï¼‰
-- ä¸»è¦é¡µé¢ï¼š
-  - `views/Algorithms.vue`ï¼šç®—æ³•åº“ç®¡ç†
-  - `views/Datasets.vue`ï¼šæ•°æ®é›†ç®¡ç†
-  - `views/NewRun.vue` / `views/Runs.vue`ï¼šæ–°å»ºè¯„æµ‹ä¸Žè¿è¡Œåˆ—è¡¨
-  - `views/Compare.vue`ï¼šç»“æžœå¯¹æ¯”ä¸Žå¿«é€Ÿé€‰åž‹ï¼ˆå«å¯¼å‡ºï¼‰
-  - `views/Tasks.vue`ï¼šä»»åŠ¡é¡µï¼ˆåŽç»­å¯è°ƒæ•´å®šä½ï¼‰
+### 1.2 Ç°¶Ë (Frontend)
+- Â·¾¶£º`web/`
+- ¼¼ÊõÕ»£ºVue3 + Vite£»Pinia£»Element Plus£»ECharts£»Axios£»XLSX£¨Excel µ¼³ö£©
+- Ö÷ÒªÒ³Ãæ£º
+  - `views/Algorithms.vue`£ºËã·¨¿â¹ÜÀí
+  - `views/Datasets.vue`£ºÊý¾Ý¼¯¹ÜÀí
+  - `views/NewRun.vue` / `views/Runs.vue`£ºÐÂ½¨ÆÀ²âÓëÔËÐÐÁÐ±í
+  - `views/Compare.vue`£º½á¹û¶Ô±ÈÓë¿ìËÙÑ¡ÐÍ£¨º¬µ¼³ö£©
+  - `views/Tasks.vue`£ºÈÎÎñÒ³£¨ºóÐø¿Éµ÷Õû¶¨Î»£©
 
-## 2. æ¯•è®¾èµ„æ–™åŒæ­¥ (Graduation Docs Sync)
-- èµ„æ–™ç›®å½•ï¼š`docs/graduation/`
-- ä¸Šä¼ æ–¹å¼æŒ‡å—ï¼š`docs/UPLOAD_GUIDE.md`
-- å·²åŒæ­¥æ‘˜å½•ï¼š`docs/graduation/REQUIREMENTS_EXTRACTED_TEMPLATE.md`
+## 2. ±ÏÉè×ÊÁÏÍ¬²½ (Graduation Docs Sync)
+- ×ÊÁÏÄ¿Â¼£º`docs/graduation/`
+- ÉÏ´«·½Ê½Ö¸ÄÏ£º`docs/UPLOAD_GUIDE.md`
+- ÒÑÍ¬²½ÕªÂ¼£º`docs/graduation/REQUIREMENTS_EXTRACTED_TEMPLATE.md`
 
-## 3. æ¯•è®¾éœ€æ±‚ä¸Žçº¦æŸï¼ˆå·²åŒæ­¥ï¼‰
-- èŒƒå›´ï¼šå›¾åƒï¼ˆåŽ»å™ª/åŽ»æ¨¡ç³Š/åŽ»é›¾/è¶…åˆ†/ä½Žç…§åº¦å¢žå¼ºï¼‰+ è§†é¢‘ï¼ˆè§†é¢‘åŽ»å™ª/è§†é¢‘è¶…åˆ†ï¼‰
-- è¯„æµ‹é—­çŽ¯ï¼šæ•°æ®é›†ç®¡ç† â†’ ç®—æ³•åº“ç®¡ç† â†’ å‘èµ·è¯„æµ‹ï¼ˆRunï¼‰â†’ å¼‚æ­¥æ‰§è¡Œ â†’ æŒ‡æ ‡è®¡ç®—ï¼ˆPSNR/SSIM + NIQEï¼‰â†’ å¯¹æ¯”ä¸Žå¿«é€ŸæŽ¨è â†’ å¯¼å‡ºæŠ¥å‘Šï¼ˆCSV/Excelï¼‰
-- åŽŸåˆ™ï¼šä¸åšç®—æ³•åˆ›æ–°ï¼›ç»Ÿä¸€è¯„æµ‹åè®®ä¿è¯å¯æ¯”æ€§ä¸Žå¯å¤çŽ°æ€§ï¼›è®°å½•é…ç½®/è€—æ—¶/é”™è¯¯ä¿¡æ¯ä¾¿äºŽè¿½æº¯
-- è®ºæ–‡çº¦æŸï¼ˆç³»ç»Ÿå¼€å‘ç±»ï¼‰ï¼šå‚è€ƒæ–‡çŒ® â‰¥15ï¼ˆå¤–æ–‡ â‰¥5ã€è¿‘ä¸‰å¹´ â‰¥3ï¼‰ï¼›å¼€é¢˜æŠ¥å‘Š â‰¥3000 å­—ï¼›éœ€ä¸Šä¼ ã€Šä»»åŠ¡ä¹¦ã€‹ã€Šå¼€é¢˜æŠ¥å‘Šã€‹ã€Šè®ºæ–‡æ­£æ–‡ã€‹ã€ŠAIå·¥å…·ä½¿ç”¨è´£ä»»ä¹¦ã€‹
-- è¿‡ç¨‹ç®¡ç†è®°å½•æœ¬ï¼šè‡³å°‘å¡«å†™ 6 æ¬¡æŒ‡å¯¼è®°å½•å¹¶ç­¾å­—ï¼Œææ–™éœ€ç•™å­˜å¹¶æŒ‰è¦æ±‚ä¸Šäº¤
-- AI å·¥å…·åˆè§„ï¼šæŒ‰å­¦æ ¡â€œè¯•è¡Œâ€æ„è§æ‰§è¡Œï¼ˆç¦æ­¢ç›´æŽ¥ç”Ÿæˆè®ºæ–‡æ­£æ–‡/å¼€é¢˜æŠ¥å‘Šç­‰ï¼›å…è®¸ç”¨äºŽä»£ç è¾…åŠ©ã€æ–‡çŒ®æ£€ç´¢/æ•´ç†ã€æ ¼å¼æ£€æŸ¥ä¸Žè¾…åŠ©åˆ¶å›¾ï¼›éœ€æ ¸æŸ¥å¹¶æŒ‰è¦æ±‚æŠ«éœ²ï¼‰
-- å…³é”®æ—¶é—´ç‚¹ï¼ˆå­¦é™¢å®‰æŽ’ï¼‰ï¼šç³»ç»ŸéªŒæ”¶ 2026-04-07~04-18ï¼›è®ºæ–‡ç»ˆç‰ˆæˆªæ­¢ 2026-05-03 08:00ï¼›ç­”è¾© 2026-05-19~05-21ï¼ˆè¯¦è§èµ„æ–™æ‘˜å½•ï¼‰
+## 3. ±ÏÉèÐèÇóÓëÔ¼Êø£¨ÒÑÍ¬²½£©
+- ·¶Î§£ºÍ¼Ïñ£¨È¥Ôë/È¥Ä£ºý/È¥Îí/³¬·Ö/µÍÕÕ¶ÈÔöÇ¿£©+ ÊÓÆµ£¨ÊÓÆµÈ¥Ôë/ÊÓÆµ³¬·Ö£©
+- ÆÀ²â±Õ»·£ºÊý¾Ý¼¯¹ÜÀí ¡ú Ëã·¨¿â¹ÜÀí ¡ú ·¢ÆðÆÀ²â£¨Run£©¡ú Òì²½Ö´ÐÐ ¡ú Ö¸±ê¼ÆËã£¨PSNR/SSIM + NIQE£©¡ú ¶Ô±ÈÓë¿ìËÙÍÆ¼ö ¡ú µ¼³ö±¨¸æ£¨CSV/Excel£©
+- Ô­Ôò£º²»×öËã·¨´´ÐÂ£»Í³Ò»ÆÀ²âÐ­Òé±£Ö¤¿É±ÈÐÔÓë¿É¸´ÏÖÐÔ£»¼ÇÂ¼ÅäÖÃ/ºÄÊ±/´íÎóÐÅÏ¢±ãÓÚ×·ËÝ
+- ÂÛÎÄÔ¼Êø£¨ÏµÍ³¿ª·¢Àà£©£º²Î¿¼ÎÄÏ× ¡Ý15£¨ÍâÎÄ ¡Ý5¡¢½üÈýÄê ¡Ý3£©£»¿ªÌâ±¨¸æ ¡Ý3000 ×Ö£»ÐèÉÏ´«¡¶ÈÎÎñÊé¡·¡¶¿ªÌâ±¨¸æ¡·¡¶ÂÛÎÄÕýÎÄ¡·¡¶AI¹¤¾ßÊ¹ÓÃÔðÈÎÊé¡·
+- ¹ý³Ì¹ÜÀí¼ÇÂ¼±¾£ºÖÁÉÙÌîÐ´ 6 ´ÎÖ¸µ¼¼ÇÂ¼²¢Ç©×Ö£¬²ÄÁÏÐèÁô´æ²¢°´ÒªÇóÉÏ½»
+- AI ¹¤¾ßºÏ¹æ£º°´Ñ§Ð£¡°ÊÔÐÐ¡±Òâ¼ûÖ´ÐÐ£¨½ûÖ¹Ö±½ÓÉú³ÉÂÛÎÄÕýÎÄ/¿ªÌâ±¨¸æµÈ£»ÔÊÐíÓÃÓÚ´úÂë¸¨Öú¡¢ÎÄÏ×¼ìË÷/ÕûÀí¡¢¸ñÊ½¼ì²éÓë¸¨ÖúÖÆÍ¼£»ÐèºË²é²¢°´ÒªÇóÅûÂ¶£©
+- ¹Ø¼üÊ±¼äµã£¨Ñ§Ôº°²ÅÅ£©£ºÏµÍ³ÑéÊÕ 2026-04-07~04-18£»ÂÛÎÄÖÕ°æ½ØÖ¹ 2026-05-03 08:00£»´ð±ç 2026-05-19~05-21£¨Ïê¼û×ÊÁÏÕªÂ¼£©
 
-## 4. å½“å‰çŠ¶æ€ (Current Status)
-- æ—¥æœŸï¼š2026-01-19
-- çŠ¶æ€ï¼šå·²æœ‰åŸºç¡€å¯è¿è¡Œé—­çŽ¯ï¼ˆå‰åŽç«¯ + å¼‚æ­¥é˜Ÿåˆ— + æŒ‡æ ‡è®¡ç®—ä¸Žå¯¹æ¯”å¯¼å‡ºï¼‰
-- å·²å…·å¤‡ï¼š
-  - å¼‚æ­¥è¯„æµ‹ä»»åŠ¡ï¼šqueued/running/done/failedï¼Œå¹¶æ”¯æŒ canceling/canceledï¼ˆå–æ¶ˆï¼‰
-  - æŒ‡æ ‡ï¼šPSNRã€SSIMã€NIQEï¼ˆæ”¯æŒè®°å½•è€—æ—¶ã€æ ·æœ¬çº§æ‘˜è¦ï¼‰
-  - å›¾åƒä»»åŠ¡åŸºçº¿å®žçŽ°ï¼šåŽ»é›¾ï¼ˆDCPï¼‰ã€åŽ»å™ªï¼ˆFastNLMeansï¼‰ã€åŽ»æ¨¡ç³Šï¼ˆUnsharp Maskï¼‰ã€è¶…åˆ†ï¼ˆBicubicï¼‰ã€ä½Žç…§åº¦å¢žå¼ºï¼ˆGammaï¼‰
-  - æ•°æ®é›†è¯»å–çº¦å®šï¼š`backend/data/<dataset_id>/{hazy|noisy|blur|lr|dark}/` + `gt/` åŒåé…å¯¹
-  - å‰ç«¯ï¼šæ•°æ®é›†/ç®—æ³•ç®¡ç†ï¼ˆæœ¬åœ°æŒä¹…åŒ–ï¼‰ã€ç»“æžœå¯¹æ¯”ã€å¿«é€Ÿé€‰åž‹ï¼ˆå¤šæŒ‡æ ‡åŠ æƒï¼‰ã€CSV/Excel å¯¼å‡ºï¼›æ”¯æŒå–æ¶ˆä»»åŠ¡ä¸Žå±•ç¤ºå¤±è´¥/å–æ¶ˆåŽŸå› 
-- å¾…å®Œå–„ï¼ˆæŒ‰èµ„æ–™æ‘˜å½•æŽ¨è¿›ï¼‰ï¼š
-  - æ•°æ®é›†/ç®—æ³•çš„å­˜å‚¨ä¸Žç±»åž‹ç®¡ç†è¿›ä¸€æ­¥å®Œå–„ï¼ˆå¤šä»»åŠ¡ã€å¤šç±»åž‹ã€æ›´çœŸå®žæ•°æ®éªŒè¯ï¼‰
-  - è¯„æµ‹æ‰§è¡Œçš„é²æ£’æ€§ï¼šç»“æž„åŒ–é”™è¯¯ç /é‡è¯•ç­–ç•¥ã€è¿è¡Œè€—æ—¶/èµ„æºç»Ÿè®¡ç­‰
-  - æŠ¥å‘Šå¯¼å‡ºæ›´è¯¦ç»†ï¼šåŒ…å«æ‰§è¡Œæ—¶é—´ã€å¤±è´¥åŽŸå› ã€é…ç½®å¿«ç…§ï¼ˆå½“å‰å·²æ”¯æŒå¯¼å‡º params_json ä¸Ž samples_jsonï¼‰
-  - è§†é¢‘ä»»åŠ¡ï¼ˆè§†é¢‘åŽ»å™ª/è§†é¢‘è¶…åˆ†ï¼‰çš„æ•°æ®æ ¼å¼ä¸Žè¯„æµ‹æµç¨‹è½åœ°
+## 4. µ±Ç°×´Ì¬ (Current Status)
+- ÈÕÆÚ£º2026-01-23
+- ×´Ì¬£ºÒÑÓÐ»ù´¡¿ÉÔËÐÐ±Õ»·£¨Ç°ºó¶Ë + Òì²½¶ÓÁÐ + Ö¸±ê¼ÆËãÓë¶Ô±Èµ¼³ö£©
+- ÒÑ¾ß±¸£º
+  - Òì²½ÆÀ²âÈÎÎñ£ºqueued/running/done/failed£¬²¢Ö§³Ö canceling/canceled£¨È¡Ïû£©
+  - Ö¸±ê£ºPSNR¡¢SSIM¡¢NIQE£¨Ö§³Ö¼ÇÂ¼ºÄÊ±¡¢Ñù±¾¼¶ÕªÒª£©
+  - Í¼ÏñÈÎÎñ»ùÏßÊµÏÖ£ºÈ¥Îí£¨DCP£©¡¢È¥Ôë£¨FastNLMeans£©¡¢È¥Ä£ºý£¨Unsharp Mask£©¡¢³¬·Ö£¨Bicubic£©¡¢µÍÕÕ¶ÈÔöÇ¿£¨Gamma£©
+  - Êý¾Ý¼¯¶ÁÈ¡Ô¼¶¨£º`backend/data/<dataset_id>/{hazy|noisy|blur|lr|dark}/` + `gt/` Í¬ÃûÅä¶Ô
+  - Ç°¶Ë£ºÊý¾Ý¼¯/Ëã·¨¹ÜÀí£¨±¾µØ³Ö¾Ã»¯£©¡¢½á¹û¶Ô±È¡¢¿ìËÙÑ¡ÐÍ£¨¶àÖ¸±ê¼ÓÈ¨£©¡¢CSV/Excel µ¼³ö£»Ö§³ÖÈ¡ÏûÈÎÎñÓëÕ¹Ê¾Ê§°Ü/È¡ÏûÔ­Òò
+  - Windows ±¾µØÒ»¼üÆô¶¯½Å±¾£º`scripts/dev.cmd`£¨À­Æð Redis/API/Worker/Web£©
+- ´ýÍêÉÆ£¨°´×ÊÁÏÕªÂ¼ÍÆ½ø£©£º
+  - Êý¾Ý¼¯/Ëã·¨µÄ´æ´¢ÓëÀàÐÍ¹ÜÀí½øÒ»²½ÍêÉÆ£¨¶àÈÎÎñ¡¢¶àÀàÐÍ¡¢¸üÕæÊµÊý¾ÝÑéÖ¤£©
+  - ÆÀ²âÖ´ÐÐµÄÂ³°ôÐÔ£º½á¹¹»¯´íÎóÂë/ÖØÊÔ²ßÂÔ¡¢ÔËÐÐºÄÊ±/×ÊÔ´Í³¼ÆµÈ
+  - ±¨¸æµ¼³ö¸üÏêÏ¸£º°üº¬Ö´ÐÐÊ±¼ä¡¢Ê§°ÜÔ­Òò¡¢ÅäÖÃ¿ìÕÕ£¨µ±Ç°ÒÑÖ§³Öµ¼³ö params_json Óë samples_json£©
+  - ÊÓÆµÈÎÎñ£¨ÊÓÆµÈ¥Ôë/ÊÓÆµ³¬·Ö£©µÄÊý¾Ý¸ñÊ½ÓëÆÀ²âÁ÷³ÌÂäµØ
 
-## 5. å¼€å‘æ—¥å¿— (Development Log)
-| æ—¥æœŸ | ä»»åŠ¡ | è¯¦æƒ… | çŠ¶æ€ |
+## 4.1 ±¾µØ¿ª·¢Ò»¼üÆô¶¯ (Dev Bootstrap)
+- Windows£¨ÍÆ¼ö£©£ºÔÚÏîÄ¿¸ùÄ¿Â¼Ö´ÐÐ `.\scripts\dev.cmd`£¨Ä¬ÈÏÖ´ÐÐ restart£©
+- ½öÆô¶¯£º`.\scripts\dev.cmd up`
+- Í£Ö¹£º`.\scripts\dev.cmd down`
+- ÖØÆô²¢°²×°ÒÀÀµ£º`.\scripts\dev.cmd restart -InstallDeps`
+- ¿ÉÑ¡Ìø¹ý×é¼þ£º`-SkipRedis` / `-SkipBackend` / `-SkipWorker` / `-SkipWeb`
+- Redis Ä¬ÈÏ²ßÂÔ£ºÓÅÏÈÓÃ Docker Æô¶¯ `algo-redis`£»Èô Docker ²»¿ÉÓÃ£¬ÔòÐè×ÔÐÐ±£Ö¤ `127.0.0.1:6379` ¿ÉÓÃ
+- ³£ÓÃ·ÃÎÊµØÖ·£º`http://127.0.0.1:8000/docs`£¨ºó¶Ë API ÎÄµµ£©¡¢`http://localhost:5173/`£¨Ç°¶Ë£©
+
+## 5. ¿ª·¢ÈÕÖ¾ (Development Log)
+| ÈÕÆÚ | ÈÎÎñ | ÏêÇé | ×´Ì¬ |
 | :--- | :--- | :--- | :--- |
-| 2026-01-18 | åˆå§‹åŒ–åä½œæ–‡æ¡£ | å»ºç«‹ AI åä½œæµç¨‹ä¸Žé¡¹ç›®æž¶æž„è¯´æ˜Ž | å®Œæˆ |
-| 2026-01-18 | å»ºç«‹èµ„æ–™ç›®å½•ä¸Žä¸Šä¼ æŒ‡å— | æ–°å¢ž `docs/graduation/` ä¸Žä¸Šä¼ è¯´æ˜Žã€æ‘˜å½•æ¨¡æ¿ | å®Œæˆ |
-| 2026-01-18 | åŒæ­¥æ¯•è®¾èµ„æ–™ä¸Žç¡¬æ€§çº¦æŸ | è¯»å–å¼€é¢˜/ä»»åŠ¡ä¹¦/å­¦æ ¡è§„èŒƒå¹¶æ•´ç†ä¸ºå¯æ‰§è¡Œæ¸…å• | å®Œæˆ |
-| 2026-01-18 | ä¿æŠ¤æ¯•è®¾èµ„æ–™éšç§ | ä¸º `docs/graduation/` æ·»åŠ  `.gitignore`ï¼Œé¿å…è¯¯æäº¤åŒ…å«ä¸ªäººä¿¡æ¯çš„åŽŸå§‹ææ–™ | å®Œæˆ |
-| 2026-01-19 | æ‰©å±•å¤šä»»åŠ¡åŸºçº¿è¯„æµ‹ | æ³›åŒ–æ•°æ®é›†é…å¯¹è¯»å–ï¼Œè¡¥é½å¤šä»»åŠ¡åŸºçº¿ç®—æ³•ï¼Œå¯¼å‡ºå¢žåŠ  params/samples å­—æ®µ | å®Œæˆ |
-| 2026-01-19 | æ–°å¢žä»»åŠ¡å–æ¶ˆä¸ŽåŽŸå› å±•ç¤º | åŽç«¯æ–°å¢žå–æ¶ˆæŽ¥å£å¹¶æ”¯æŒè½¯å–æ¶ˆï¼Œå‰ç«¯å¢žåŠ å–æ¶ˆæŒ‰é’®ä¸Žå¤±è´¥/å–æ¶ˆåŽŸå› å±•ç¤º | å®Œæˆ |
+| 2026-01-18 | ³õÊ¼»¯Ð­×÷ÎÄµµ | ½¨Á¢ AI Ð­×÷Á÷³ÌÓëÏîÄ¿¼Ü¹¹ËµÃ÷ | Íê³É |
+| 2026-01-18 | ½¨Á¢×ÊÁÏÄ¿Â¼ÓëÉÏ´«Ö¸ÄÏ | ÐÂÔö `docs/graduation/` ÓëÉÏ´«ËµÃ÷¡¢ÕªÂ¼Ä£°å | Íê³É |
+| 2026-01-18 | Í¬²½±ÏÉè×ÊÁÏÓëÓ²ÐÔÔ¼Êø | ¶ÁÈ¡¿ªÌâ/ÈÎÎñÊé/Ñ§Ð£¹æ·¶²¢ÕûÀíÎª¿ÉÖ´ÐÐÇåµ¥ | Íê³É |
+| 2026-01-18 | ±£»¤±ÏÉè×ÊÁÏÒþË½ | Îª `docs/graduation/` Ìí¼Ó `.gitignore`£¬±ÜÃâÎóÌá½»°üº¬¸öÈËÐÅÏ¢µÄÔ­Ê¼²ÄÁÏ | Íê³É |
+| 2026-01-19 | À©Õ¹¶àÈÎÎñ»ùÏßÆÀ²â | ·º»¯Êý¾Ý¼¯Åä¶Ô¶ÁÈ¡£¬²¹Æë¶àÈÎÎñ»ùÏßËã·¨£¬µ¼³öÔö¼Ó params/samples ×Ö¶Î | Íê³É |
+| 2026-01-19 | ÐÂÔöÈÎÎñÈ¡ÏûÓëÔ­ÒòÕ¹Ê¾ | ºó¶ËÐÂÔöÈ¡Ïû½Ó¿Ú²¢Ö§³ÖÈíÈ¡Ïû£¬Ç°¶ËÔö¼ÓÈ¡Ïû°´Å¥ÓëÊ§°Ü/È¡ÏûÔ­ÒòÕ¹Ê¾ | Íê³É |
+| 2026-01-23 | Ò»¼üÆô¶¯¿ª·¢»·¾³ | ÐÂÔö `scripts/dev.ps1`/`scripts/dev.cmd`£¬Ö§³ÖÒ»¼üÀ­Æð Redis/API/Worker/Web | Íê³É |
 
-## 6. å¾…åŠžäº‹é¡¹ (Todo)
-- [ ] åŸºäºŽçœŸå®žæ•°æ®é›†è¡¥é½ç«¯åˆ°ç«¯æµ‹è¯•ä¸Žç¨³å®šæ€§éªŒè¯
-- [ ] å®Œå–„å¤±è´¥è·¯å¾„ï¼ˆç»“æž„åŒ–é”™è¯¯ç /é‡è¯•ç­–ç•¥ï¼‰ä¸Žèµ„æºç»Ÿè®¡
-- [ ] å®Œå–„è®ºæ–‡æ‰€éœ€çš„ç³»ç»Ÿæž¶æž„å›¾ã€æµç¨‹å›¾ã€æ•°æ®æ¨¡åž‹ï¼ˆERï¼‰ä¸Žå®žéªŒè®¾è®¡è¯´æ˜Ž
+## 6. ´ý°ìÊÂÏî (Todo)
+- [ ] »ùÓÚÕæÊµÊý¾Ý¼¯²¹Æë¶Ëµ½¶Ë²âÊÔÓëÎÈ¶¨ÐÔÑéÖ¤
+- [ ] ÍêÉÆÊ§°ÜÂ·¾¶£¨½á¹¹»¯´íÎóÂë/ÖØÊÔ²ßÂÔ£©Óë×ÊÔ´Í³¼Æ
+- [ ] ÍêÉÆÂÛÎÄËùÐèµÄÏµÍ³¼Ü¹¹Í¼¡¢Á÷³ÌÍ¼¡¢Êý¾ÝÄ£ÐÍ£¨ER£©ÓëÊµÑéÉè¼ÆËµÃ÷

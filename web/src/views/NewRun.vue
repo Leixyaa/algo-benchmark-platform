@@ -1,55 +1,55 @@
 <template>
   <div style="padding:16px;">
-    <h2 style="margin:0 0 8px;">å‘èµ·è¯„æµ‹</h2>
+    <h2 style="margin:0 0 8px;">·¢ÆğÆÀ²â</h2>
     <div style="color:#666; margin-bottom:12px;">
-      é€‰æ‹©ä»»åŠ¡ç±»åˆ«ã€æ•°æ®é›†ã€ç®—æ³•ä¸æŒ‡æ ‡ï¼Œåˆ›å»ºä¸€æ¬¡è¯„æµ‹ä»»åŠ¡ã€‚ä»»åŠ¡ç”±åç«¯å¼‚æ­¥æ‰§è¡Œï¼Œå¯åœ¨ä»»åŠ¡ä¸­å¿ƒæŸ¥çœ‹çŠ¶æ€ä¸ç»“æœã€‚
+      Ñ¡ÔñÈÎÎñÀà±ğ¡¢Êı¾İ¼¯¡¢Ëã·¨ÓëÖ¸±ê£¬´´½¨Ò»´ÎÆÀ²âÈÎÎñ¡£ÈÎÎñÓÉºó¶ËÒì²½Ö´ĞĞ£¬¿ÉÔÚÈÎÎñÖĞĞÄ²é¿´×´Ì¬Óë½á¹û¡£
     </div>
 
     <div style="display:grid; grid-template-columns: 140px 1fr; gap:10px; max-width:680px;">
-      <div>ä»»åŠ¡ç±»åˆ«</div>
+      <div>ÈÎÎñÀà±ğ</div>
       <select v-model="form.task" style="padding:6px;">
-        <option>å»å™ª</option>
-        <option>å»æ¨¡ç³Š</option>
-        <option>å»é›¾</option>
-        <option>è¶…åˆ†è¾¨ç‡</option>
-        <option>ä½ç…§åº¦å¢å¼º</option>
-        <option>è§†é¢‘å»å™ª</option>
-        <option>è§†é¢‘è¶…åˆ†</option>
+        <option>È¥Ôë</option>
+        <option>È¥Ä£ºı</option>
+        <option>È¥Îí</option>
+        <option>³¬·Ö±æÂÊ</option>
+        <option>µÍÕÕ¶ÈÔöÇ¿</option>
+        <option>ÊÓÆµÈ¥Ôë</option>
+        <option>ÊÓÆµ³¬·Ö</option>
       </select>
 
-      <div>æ•°æ®é›†</div>
+      <div>Êı¾İ¼¯</div>
       <select v-model="form.datasetId" style="padding:6px;">
-        <option value="" disabled>è¯·é€‰æ‹©æ•°æ®é›†</option>
+        <option value="" disabled>ÇëÑ¡ÔñÊı¾İ¼¯</option>
         <option v-for="d in store.datasets" :key="d.id" :value="d.id">
-          {{ d.name }}ï¼ˆ{{ d.type }}ï¼‰
+          {{ d.name }}£¨{{ d.type }}£©
         </option>
       </select>
 
-      <div>ç®—æ³•</div>
+      <div>Ëã·¨</div>
       <select v-model="form.algorithmId" style="padding:6px;">
-        <option value="" disabled>è¯·é€‰æ‹©ç®—æ³•</option>
+        <option value="" disabled>ÇëÑ¡ÔñËã·¨</option>
         <option v-for="a in filteredAlgorithms" :key="a.id" :value="a.id">
-          {{ a.name }}ï¼ˆ{{ a.impl }} / {{ a.version }}ï¼‰
+          {{ a.name }}£¨{{ a.impl }} / {{ a.version }}£©
         </option>
       </select>
 
-      <div>æŒ‡æ ‡</div>
+      <div>Ö¸±ê</div>
       <div style="display:flex; gap:12px; flex-wrap:wrap;">
         <label><input type="checkbox" value="PSNR" v-model="form.metrics" /> PSNR</label>
         <label><input type="checkbox" value="SSIM" v-model="form.metrics" /> SSIM</label>
-        <label><input type="checkbox" value="NIQE" v-model="form.metrics" /> NIQEï¼ˆæ— å‚è€ƒï¼‰</label>
+        <label><input type="checkbox" value="NIQE" v-model="form.metrics" /> NIQE£¨ÎŞ²Î¿¼£©</label>
       </div>
     </div>
 
     <div style="margin-top:14px; display:flex; gap:10px;">
-      <button @click="create" style="padding:8px 12px;">åˆ›å»ºè¯„æµ‹ä»»åŠ¡</button>
-      <button @click="goRuns" style="padding:8px 12px;">æŸ¥çœ‹ä»»åŠ¡ä¸­å¿ƒ</button>
+      <button @click="create" style="padding:8px 12px;">´´½¨ÆÀ²âÈÎÎñ</button>
+      <button @click="goRuns" style="padding:8px 12px;">²é¿´ÈÎÎñÖĞĞÄ</button>
     </div>
 
     <div style="margin-top:14px; color:#666;">
-      <div>æç¤ºï¼š</div>
-      <div>1ï¼‰ç®—æ³•ä¼šæŒ‰ä»»åŠ¡ç±»åˆ«è¿‡æ»¤ï¼ˆä¾‹å¦‚å»é›¾åªæ˜¾ç¤ºå»é›¾ç®—æ³•ï¼‰ã€‚</div>
-      <div>2ï¼‰åˆ›å»ºä»»åŠ¡ä¼šè¿›å…¥é˜Ÿåˆ—ï¼ŒçŠ¶æ€ä»æ’é˜Ÿä¸­â†’è¿è¡Œä¸­â†’å®Œæˆ/å¤±è´¥ã€‚</div>
+      <div>ÌáÊ¾£º</div>
+      <div>1£©Ëã·¨»á°´ÈÎÎñÀà±ğ¹ıÂË£¨ÀıÈçÈ¥ÎíÖ»ÏÔÊ¾È¥ÎíËã·¨£©¡£</div>
+      <div>2£©´´½¨ÈÎÎñ»á½øÈë¶ÓÁĞ£¬×´Ì¬´ÓÅÅ¶ÓÖĞ¡úÔËĞĞÖĞ¡úÍê³É/Ê§°Ü¡£</div>
     </div>
   </div>
 </template>
@@ -64,19 +64,19 @@ const router = useRouter();
 const store = useAppStore();
 
 const form = reactive({
-  task: "å»å™ª",
+  task: "È¥Ôë",
   datasetId: "",
   algorithmId: "",
   metrics: ["PSNR", "SSIM"],
 });
 
-// æ¢å¤ä¸Šæ¬¡é€‰æ‹©
+// »Ö¸´ÉÏ´ÎÑ¡Ôñ
 try {
   const raw = localStorage.getItem(NEWRUN_CACHE_KEY);
   if (raw) {
     const cached = JSON.parse(raw);
 
-    // åªæ¢å¤ä½ è¡¨å•é‡Œå·²æœ‰å­—æ®µï¼Œé¿å…è„æ•°æ®
+    // Ö»»Ö¸´Äã±íµ¥ÀïÒÑÓĞ×Ö¶Î£¬±ÜÃâÔàÊı¾İ
     if (cached.task) form.task = cached.task;
     if (cached.datasetId) form.datasetId = cached.datasetId;
     if (cached.algorithmId) form.algorithmId = cached.algorithmId;
@@ -109,9 +109,9 @@ watch(
 );
 
 async function create() {
-  if (!form.datasetId) return alert("è¯·å…ˆé€‰æ‹©æ•°æ®é›†");
-  if (!form.algorithmId) return alert("è¯·å…ˆé€‰æ‹©ç®—æ³•");
-  if (!form.metrics.length) return alert("è¯·è‡³å°‘é€‰æ‹©ä¸€ä¸ªæŒ‡æ ‡");
+  if (!form.datasetId) return alert("ÇëÏÈÑ¡ÔñÊı¾İ¼¯");
+  if (!form.algorithmId) return alert("ÇëÏÈÑ¡ÔñËã·¨");
+  if (!form.metrics.length) return alert("ÇëÖÁÉÙÑ¡ÔñÒ»¸öÖ¸±ê");
 
   try {
     await store.createRun({
@@ -121,10 +121,10 @@ async function create() {
       metrics: [...form.metrics],
     });
     localStorage.removeItem(NEWRUN_CACHE_KEY);
-    alert("ä»»åŠ¡å·²åˆ›å»ºï¼Œæ­£åœ¨åç«¯å¼‚æ­¥æ‰§è¡Œï¼Œå¯åœ¨ä»»åŠ¡ä¸­å¿ƒæŸ¥çœ‹");
+    alert("ÈÎÎñÒÑ´´½¨£¬ÕıÔÚºó¶ËÒì²½Ö´ĞĞ£¬¿ÉÔÚÈÎÎñÖĞĞÄ²é¿´");
     router.push("/runs");
   } catch (e) {
-    alert(`åˆ›å»ºå¤±è´¥ï¼š${e?.message || e}`);
+    alert(`´´½¨Ê§°Ü£º${e?.message || e}`);
   }
 }
 

@@ -6,7 +6,6 @@ import redis
 
 
 def make_redis() -> redis.Redis:
-    # 默认本机 Redis
     return redis.Redis(host="127.0.0.1", port=6379, db=0, decode_responses=True)
 
 
@@ -26,9 +25,7 @@ def load_run(r: redis.Redis, run_id: str) -> Optional[Dict[str, Any]]:
 
 
 def list_runs(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
-    # 简单实现：扫描 key（毕业设计够用）
     keys = r.keys("run:*")
-    # 按创建时间排序（desc）
     runs = []
     for k in keys:
         s = r.get(k)

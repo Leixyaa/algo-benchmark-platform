@@ -1,30 +1,45 @@
 <template>
   <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">æ•°æ®é›†ç®¡ç†</h2>
+    <h2 style="margin: 0 0 8px;">Êı¾İ¼¯¹ÜÀí</h2>
     <div style="color:#666; margin-bottom: 12px;">
-      ç®¡ç†è¯„æµ‹æ•°æ®é›†ï¼šæ–°å¢ã€åˆ é™¤ã€æŸ¥çœ‹å…ƒä¿¡æ¯ã€‚ä¸Šä¼ åŠŸèƒ½åç»­æ¥åç«¯ã€‚
+      ¹ÜÀíÆÀ²âÊı¾İ¼¯£ºĞÂÔö¡¢É¾³ı¡¢²é¿´ÔªĞÅÏ¢¡£Ö§³Öµ¼Èë ZIP£¨gt/ + ¸÷ÈÎÎñÊäÈëÄ¿Â¼£©¡£
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">æ–°å¢æ•°æ®é›†</button>
-      <button @click="fakeUpload" style="padding:6px 10px;">ä¸Šä¼ æ•°æ®é›†ï¼ˆå ä½ï¼‰</button>
+      <button @click="openCreate" style="padding:6px 10px;">ĞÂÔöÊı¾İ¼¯</button>
+      <button @click="chooseZipForNew" style="padding:6px 10px;">µ¼ÈëZIPµ½Ñ¡ÖĞÊı¾İ¼¯</button>
       <button
         @click="generateDemoOnBackend"
         :disabled="generating"
         style="padding:6px 10px;"
       >
-        {{ generating ? "ç”Ÿæˆä¸­..." : "ç”Ÿæˆåç«¯ Demo æ ·ä¾‹" }}
+        {{ generating ? "Éú³ÉÖĞ..." : "Éú³Éºó¶Ë Demo ÑùÀı" }}
       </button>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center; margin-bottom: 12px;">
+      <div style="color:#666;">µ¼ÈëÄ¿±ê£º</div>
+      <select v-model="selectedDatasetId" style="padding:6px; min-width:220px;">
+        <option value="" disabled>ÇëÑ¡ÔñÊı¾İ¼¯</option>
+        <option v-for="d in store.datasets" :key="d.id" :value="d.id">
+          {{ d.name }}£¨{{ d.id }}£©
+        </option>
+      </select>
+      <label style="display:flex; gap:6px; align-items:center; color:#666;">
+        <input type="checkbox" v-model="overwriteOnImport" />
+        ¸²¸Çµ¼Èë£¨»áÇå¿Õºó¶ËÄ¿Â¼£©
+      </label>
+      <button @click="scanSelected" style="padding:6px 10px;">É¨Ãè²¢Ë¢ĞÂ¹æÄ£</button>
     </div>
 
     <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
       <thead>
         <tr style="background:#f6f6f6;">
-          <th align="left">åç§°</th>
-          <th align="left">ç±»å‹</th>
-          <th align="left">è§„æ¨¡</th>
-          <th align="left">åˆ›å»ºæ—¶é—´</th>
-          <th align="left" width="120">æ“ä½œ</th>
+          <th align="left">Ãû³Æ</th>
+          <th align="left">ÀàĞÍ</th>
+          <th align="left">¹æÄ£</th>
+          <th align="left">´´½¨Ê±¼ä</th>
+          <th align="left" width="120">²Ù×÷</th>
         </tr>
       </thead>
       <tbody>
@@ -34,44 +49,46 @@
           <td>{{ ds.size }}</td>
           <td>{{ ds.createdAt }}</td>
           <td>
-            <button @click="remove(ds.id)" style="padding:4px 8px;">åˆ é™¤</button>
+            <button @click="scanOne(ds.id)" style="padding:4px 8px; margin-right:6px;">É¨Ãè</button>
+            <button @click="chooseZipFor(ds.id)" style="padding:4px 8px; margin-right:6px;">µ¼ÈëZIP</button>
+            <button @click="remove(ds.id)" style="padding:4px 8px;">É¾³ı</button>
           </td>
         </tr>
         <tr v-if="store.datasets.length === 0">
-          <td colspan="5" style="color:#888;">æš‚æ— æ•°æ®é›†</td>
+          <td colspan="5" style="color:#888;">ÔİÎŞÊı¾İ¼¯</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- ç®€å•å¼¹çª—ï¼ˆå…ˆä¸ç”¨ç»„ä»¶åº“ï¼‰ -->
+    <!-- ¼òµ¥µ¯´°£¨ÏÈ²»ÓÃ×é¼ş¿â£© -->
     <div v-if="showCreate"
       style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
       <div style="background:#fff; padding:16px; width:420px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">æ–°å¢æ•°æ®é›†</h3>
+        <h3 style="margin:0 0 12px;">ĞÂÔöÊı¾İ¼¯</h3>
 
         <div style="display:flex; flex-direction:column; gap:10px;">
           <label>
-            åç§°ï¼š
-            <input v-model="form.name" placeholder="ä¾‹å¦‚ï¼šRESIDE-Indoor å­é›†" style="width:100%; padding:6px;" />
+            Ãû³Æ£º
+            <input v-model="form.name" placeholder="ÀıÈç£ºRESIDE-Indoor ×Ó¼¯" style="width:100%; padding:6px;" />
           </label>
 
           <label>
-            ç±»å‹ï¼š
+            ÀàĞÍ£º
             <select v-model="form.type" style="width:100%; padding:6px;">
-              <option>å›¾åƒ</option>
-              <option>è§†é¢‘</option>
+              <option>Í¼Ïñ</option>
+              <option>ÊÓÆµ</option>
             </select>
           </label>
 
           <label>
-            è§„æ¨¡ï¼š
-            <input v-model="form.size" placeholder="ä¾‹å¦‚ï¼š500 å¼  / 30 æ®µè§†é¢‘" style="width:100%; padding:6px;" />
+            ¹æÄ££º
+            <input v-model="form.size" placeholder="ÀıÈç£º500 ÕÅ / 30 ¶ÎÊÓÆµ" style="width:100%; padding:6px;" />
           </label>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">å–æ¶ˆ</button>
-          <button @click="submitCreate" style="padding:6px 10px;">ç¡®è®¤æ–°å¢</button>
+          <button @click="closeCreate" style="padding:6px 10px;">È¡Ïû</button>
+          <button @click="submitCreate" style="padding:6px 10px;">È·ÈÏĞÂÔö</button>
         </div>
       </div>
     </div>
@@ -87,15 +104,22 @@ const store = useAppStore();
 
 const showCreate = ref(false);
 const generating = ref(false);
+const selectedDatasetId = ref("");
+const overwriteOnImport = ref(false);
+const importTargetId = ref("");
+const fileInputRef = ref(null);
 const form = reactive({
   name: "",
-  type: "å›¾åƒ",
+  type: "Í¼Ïñ",
   size: "",
 });
 
 onMounted(async () => {
   try {
     await store.fetchDatasets();
+    if (!selectedDatasetId.value && store.datasets?.length) {
+      selectedDatasetId.value = store.datasets[0].id;
+    }
   } catch {
     // ignore
   }
@@ -103,7 +127,7 @@ onMounted(async () => {
 
 function openCreate() {
   form.name = "";
-  form.type = "å›¾åƒ";
+  form.type = "Í¼Ïñ";
   form.size = "";
   showCreate.value = true;
 }
@@ -114,7 +138,7 @@ function closeCreate() {
 
 async function submitCreate() {
   if (!form.name.trim()) {
-    alert("è¯·å¡«å†™æ•°æ®é›†åç§°");
+    alert("ÇëÌîĞ´Êı¾İ¼¯Ãû³Æ");
     return;
   }
   try {
@@ -125,30 +149,93 @@ async function submitCreate() {
     });
     showCreate.value = false;
   } catch (e) {
-    alert(`æ–°å¢å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`ĞÂÔöÊ§°Ü£º${e?.message || e}`);
   }
 }
 
 async function remove(id) {
-  const ok = confirm("ç¡®å®šåˆ é™¤è¯¥æ•°æ®é›†å—ï¼Ÿ");
+  const ok = confirm("È·¶¨É¾³ı¸ÃÊı¾İ¼¯Âğ£¿");
   if (!ok) return;
   try {
     await store.removeDataset(id);
   } catch (e) {
-    alert(`åˆ é™¤å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`É¾³ıÊ§°Ü£º${e?.message || e}`);
   }
 }
 
-function fakeUpload() {
-  alert("ä¸Šä¼ åŠŸèƒ½åç»­æ¥åç«¯ï¼šè¿™é‡Œå…ˆåšå ä½ï¼Œå…ˆæŠŠå¹³å°æµç¨‹è·‘é€šã€‚");
+function _ensureFileInput() {
+  if (fileInputRef.value) return;
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip,application/zip";
+  input.style.display = "none";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const dsId = importTargetId.value;
+    if (!dsId) return;
+
+    const ok = confirm(`½«µ¼Èë ZIP µ½Êı¾İ¼¯£º${dsId}${overwriteOnImport.value ? "£¨¸²¸Çµ¼Èë£©" : ""}¡£¼ÌĞøÂğ£¿`);
+    if (!ok) return;
+
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error("read_file_failed"));
+        fr.readAsDataURL(file);
+      });
+      const s = String(dataUrl || "");
+      const idx = s.indexOf(",");
+      const b64 = idx >= 0 ? s.slice(idx + 1) : "";
+      if (!b64) throw new Error("empty_base64");
+
+      await store.importDatasetZip(dsId, {
+        filename: file.name,
+        dataB64: b64,
+        overwrite: overwriteOnImport.value,
+      });
+      ElMessage({ type: "success", message: "µ¼Èë³É¹¦£¬ÒÑË¢ĞÂ¹æÄ£" });
+    } catch (e) {
+      ElMessage({ type: "error", message: `µ¼ÈëÊ§°Ü£º${e?.message || e}` });
+    }
+  });
+  document.body.appendChild(input);
+  fileInputRef.value = input;
+}
+
+function chooseZipFor(id) {
+  importTargetId.value = id;
+  _ensureFileInput();
+  fileInputRef.value.click();
+}
+
+function chooseZipForNew() {
+  if (!selectedDatasetId.value) return alert("ÇëÏÈÑ¡Ôñµ¼ÈëÄ¿±êÊı¾İ¼¯");
+  chooseZipFor(selectedDatasetId.value);
+}
+
+async function scanOne(id) {
+  try {
+    await store.scanDataset(id);
+    ElMessage({ type: "success", message: "ÒÑË¢ĞÂ¹æÄ£" });
+  } catch (e) {
+    ElMessage({ type: "error", message: `É¨ÃèÊ§°Ü£º${e?.message || e}` });
+  }
+}
+
+async function scanSelected() {
+  if (!selectedDatasetId.value) return alert("ÇëÏÈÑ¡ÔñÊı¾İ¼¯");
+  await scanOne(selectedDatasetId.value);
 }
 
 async function generateDemoOnBackend() {
   try {
     await ElMessageBox.confirm(
-      "å°†ä¸º ds_demo åœ¨åç«¯ç”Ÿæˆ 5 ç»„æ ·ä¾‹ï¼ˆgt + å„ä»»åŠ¡è¾“å…¥ç›®å½•ï¼‰ã€‚ç»§ç»­å—ï¼Ÿ",
-      "ç”Ÿæˆæ ·ä¾‹æ•°æ®",
-      { type: "warning", confirmButtonText: "ç»§ç»­", cancelButtonText: "å–æ¶ˆ" }
+      "½«Îª ds_demo ÔÚºó¶ËÉú³É 5 ×éÑùÀı£¨gt + ¸÷ÈÎÎñÊäÈëÄ¿Â¼£©¡£¼ÌĞøÂğ£¿",
+      "Éú³ÉÑùÀıÊı¾İ",
+      { type: "warning", confirmButtonText: "¼ÌĞø", cancelButtonText: "È¡Ïû" }
     );
   } catch {
     return;
@@ -156,7 +243,7 @@ async function generateDemoOnBackend() {
 
   if (generating.value) return;
   generating.value = true;
-  ElMessage({ type: "info", message: "å¼€å§‹ç”Ÿæˆï¼Œè¯·ç¨å€™â€¦" });
+  ElMessage({ type: "info", message: "¿ªÊ¼Éú³É£¬ÇëÉÔºò¡­" });
 
   try {
     const res = await fetch("http://127.0.0.1:8000/dev/datasets/ds_demo/generate?task_type=all&count=5", {
@@ -166,9 +253,9 @@ async function generateDemoOnBackend() {
     const data = ct.includes("application/json") ? await res.json() : await res.text();
     if (!res.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
     const created = typeof data === "object" && data ? data.created : null;
-    ElMessage({ type: "success", message: `å·²ç”Ÿæˆï¼š${JSON.stringify(created ?? data)}` });
+    ElMessage({ type: "success", message: `ÒÑÉú³É£º${JSON.stringify(created ?? data)}` });
   } catch (e) {
-    ElMessage({ type: "error", message: `ç”Ÿæˆå¤±è´¥ï¼š${e?.message || e}` });
+    ElMessage({ type: "error", message: `Éú³ÉÊ§°Ü£º${e?.message || e}` });
   } finally {
     generating.value = false;
   }

@@ -1,24 +1,24 @@
 <template>
   <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">ç®—æ³•åº“</h2>
+    <h2 style="margin: 0 0 8px;">Ëã·¨¿â</h2>
     <div style="color:#666; margin-bottom: 12px;">
-      ç®¡ç†å¹³å°å†…ç½®/æ¥å…¥çš„ç®—æ³•æ¡ç›®ï¼Œåç»­è¯„æµ‹æ—¶ä»è¿™é‡Œé€‰æ‹©ç®—æ³•ã€‚
+      ¹ÜÀíÆ½Ì¨ÄÚÖÃ/½ÓÈëµÄËã·¨ÌõÄ¿£¬ºóĞøÆÀ²âÊ±´ÓÕâÀïÑ¡ÔñËã·¨¡£
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">æ–°å¢ç®—æ³•</button>
-      <button @click="seedDemo" style="padding:6px 10px;">ä¸€é”®å¡«å…… Demoï¼ˆå ä½ï¼‰</button>
+      <button @click="openCreate" style="padding:6px 10px;">ĞÂÔöËã·¨</button>
+      <button @click="seedDemo" style="padding:6px 10px;">Ò»¼üÌî³ä Demo£¨Õ¼Î»£©</button>
     </div>
 
     <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
       <thead>
         <tr style="background:#f6f6f6;">
-          <th align="left">ä»»åŠ¡</th>
-          <th align="left">ç®—æ³•åç§°</th>
-          <th align="left">å®ç°æ–¹å¼</th>
-          <th align="left">ç‰ˆæœ¬</th>
-          <th align="left">åˆ›å»ºæ—¶é—´</th>
-          <th align="left" width="140">æ“ä½œ</th>
+          <th align="left">ÈÎÎñ</th>
+          <th align="left">Ëã·¨Ãû³Æ</th>
+          <th align="left">ÊµÏÖ·½Ê½</th>
+          <th align="left">°æ±¾</th>
+          <th align="left">´´½¨Ê±¼ä</th>
+          <th align="left" width="140">²Ù×÷</th>
         </tr>
       </thead>
       <tbody>
@@ -29,61 +29,61 @@
           <td>{{ a.version }}</td>
           <td>{{ a.createdAt }}</td>
           <td>
-            <button @click="remove(a.id)" style="padding:4px 8px;">åˆ é™¤</button>
+            <button @click="remove(a.id)" style="padding:4px 8px;">É¾³ı</button>
           </td>
         </tr>
         <tr v-if="store.algorithms.length === 0">
-          <td colspan="6" style="color:#888;">æš‚æ— ç®—æ³•æ¡ç›®</td>
+          <td colspan="6" style="color:#888;">ÔİÎŞËã·¨ÌõÄ¿</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- æ–°å¢ç®—æ³•å¼¹çª— -->
+    <!-- ĞÂÔöËã·¨µ¯´° -->
     <div v-if="showCreate"
       style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
       <div style="background:#fff; padding:16px; width:460px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">æ–°å¢ç®—æ³•</h3>
+        <h3 style="margin:0 0 12px;">ĞÂÔöËã·¨</h3>
 
         <div style="display:flex; flex-direction:column; gap:10px;">
           <label>
-            ä»»åŠ¡ç±»åˆ«ï¼š
+            ÈÎÎñÀà±ğ£º
             <select v-model="form.task" style="width:100%; padding:6px;">
-              <option>å»å™ª</option>
-              <option>å»æ¨¡ç³Š</option>
-              <option>å»é›¾</option>
-              <option>è¶…åˆ†è¾¨ç‡</option>
-              <option>ä½ç…§åº¦å¢å¼º</option>
-              <option>è§†é¢‘å»å™ª</option>
-              <option>è§†é¢‘è¶…åˆ†</option>
+              <option>È¥Ôë</option>
+              <option>È¥Ä£ºı</option>
+              <option>È¥Îí</option>
+              <option>³¬·Ö±æÂÊ</option>
+              <option>µÍÕÕ¶ÈÔöÇ¿</option>
+              <option>ÊÓÆµÈ¥Ôë</option>
+              <option>ÊÓÆµ³¬·Ö</option>
             </select>
           </label>
 
           <label>
-            ç®—æ³•åç§°ï¼š
-            <input v-model="form.name" placeholder="ä¾‹å¦‚ï¼šDnCNN / DeblurGAN-v2 / RetinexNet"
+            Ëã·¨Ãû³Æ£º
+            <input v-model="form.name" placeholder="ÀıÈç£ºDnCNN / DeblurGAN-v2 / RetinexNet"
               style="width:100%; padding:6px;" />
           </label>
 
           <label>
-            å®ç°æ–¹å¼ï¼š
+            ÊµÏÖ·½Ê½£º
             <select v-model="form.impl" style="width:100%; padding:6px;">
               <option>PyTorch</option>
               <option>TensorFlow</option>
               <option>OpenCV</option>
-              <option>è„šæœ¬è°ƒç”¨</option>
+              <option>½Å±¾µ÷ÓÃ</option>
             </select>
           </label>
 
           <label>
-            ç‰ˆæœ¬ï¼š
-            <input v-model="form.version" placeholder="ä¾‹å¦‚ï¼šv1 / commit id / è®ºæ–‡å¹´ä»½"
+            °æ±¾£º
+            <input v-model="form.version" placeholder="ÀıÈç£ºv1 / commit id / ÂÛÎÄÄê·İ"
               style="width:100%; padding:6px;" />
           </label>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">å–æ¶ˆ</button>
-          <button @click="submitCreate" style="padding:6px 10px;">ç¡®è®¤æ–°å¢</button>
+          <button @click="closeCreate" style="padding:6px 10px;">È¡Ïû</button>
+          <button @click="submitCreate" style="padding:6px 10px;">È·ÈÏĞÂÔö</button>
         </div>
       </div>
     </div>
@@ -98,7 +98,7 @@ const store = useAppStore();
 
 const showCreate = ref(false);
 const form = reactive({
-  task: "å»å™ª",
+  task: "È¥Ôë",
   name: "",
   impl: "PyTorch",
   version: "v1",
@@ -113,7 +113,7 @@ onMounted(async () => {
 });
 
 function openCreate() {
-  form.task = "å»å™ª";
+  form.task = "È¥Ôë";
   form.name = "";
   form.impl = "PyTorch";
   form.version = "v1";
@@ -125,7 +125,7 @@ function closeCreate() {
 
 async function submitCreate() {
   if (!form.name.trim()) {
-    alert("è¯·å¡«å†™ç®—æ³•åç§°");
+    alert("ÇëÌîĞ´Ëã·¨Ãû³Æ");
     return;
   }
   try {
@@ -137,26 +137,26 @@ async function submitCreate() {
     });
     showCreate.value = false;
   } catch (e) {
-    alert(`æ–°å¢å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`ĞÂÔöÊ§°Ü£º${e?.message || e}`);
   }
 }
 
 async function remove(id) {
-  const ok = confirm("ç¡®å®šåˆ é™¤è¯¥ç®—æ³•æ¡ç›®å—ï¼Ÿ");
+  const ok = confirm("È·¶¨É¾³ı¸ÃËã·¨ÌõÄ¿Âğ£¿");
   if (!ok) return;
   try {
     await store.removeAlgorithm(id);
   } catch (e) {
-    alert(`åˆ é™¤å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`É¾³ıÊ§°Ü£º${e?.message || e}`);
   }
 }
 
 async function seedDemo() {
   try {
-    await store.createAlgorithm({ task: "å»é›¾", name: "Dark Channel Prior(ç¤ºä¾‹)", impl: "OpenCV", version: "2009" });
-    await store.createAlgorithm({ task: "ä½ç…§åº¦å¢å¼º", name: "RetinexNet(ç¤ºä¾‹)", impl: "PyTorch", version: "2018" });
+    await store.createAlgorithm({ task: "È¥Îí", name: "Dark Channel Prior(Ê¾Àı)", impl: "OpenCV", version: "2009" });
+    await store.createAlgorithm({ task: "µÍÕÕ¶ÈÔöÇ¿", name: "RetinexNet(Ê¾Àı)", impl: "PyTorch", version: "2018" });
   } catch (e) {
-    alert(`å¡«å……å¤±è´¥ï¼š${e?.message || e}`);
+    alert(`Ìî³äÊ§°Ü£º${e?.message || e}`);
   }
 }
 </script>
