@@ -14,7 +14,13 @@
             {{ p.name }}（{{ toTaskLabel(p.taskType) }}）
           </option>
         </select>
-        <button @click="applyPreset" style="padding:6px 10px;">加载</button>
+        <button
+          @click="applyPreset"
+          :disabled="!form.presetId"
+          style="padding:6px 10px;"
+        >
+          重新加载
+        </button>
         <button @click="removePreset" style="padding:6px 10px;">删除</button>
       </div>
 
