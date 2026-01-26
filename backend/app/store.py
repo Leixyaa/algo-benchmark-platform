@@ -96,3 +96,34 @@ def list_algorithms(r: redis.Redis, limit: int = 500) -> list[Dict[str, Any]]:
         items.append(json.loads(s))
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
+
+
+def preset_key(preset_id: str) -> str:
+    return f"preset:{preset_id}"
+
+
+def save_preset(r: redis.Redis, preset_id: str, data: Dict[str, Any]) -> None:
+    r.set(preset_key(preset_id), json.dumps(data, ensure_ascii=False))
+
+
+def load_preset(r: redis.Redis, preset_id: str) -> Optional[Dict[str, Any]]:
+    s = r.get(preset_key(preset_id))
+    if not s:
+        return None
+    return json.loads(s)
+
+
+def delete_preset(r: redis.Redis, preset_id: str) -> None:
+    r.delete(preset_key(preset_id))
+
+
+def list_presets(r: redis.Redis, limit: int = 200) -> list[Dict[str, Any]]:
+    keys = r.keys("preset:*")
+    items = []
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        items.append(json.loads(s))
+    items.sort(key=lambda x: x.get("updated_at", x.get("created_at", 0)), reverse=True)
+    return items[:limit]

@@ -83,3 +83,34 @@ class AlgorithmOut(BaseModel):
     version: str
     created_at: float
     default_params: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PresetCreate(BaseModel):
+    preset_id: Optional[str] = None
+    name: str
+    task_type: str
+    dataset_id: str
+    algorithm_id: str
+    metrics: List[str] = Field(default_factory=list)
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PresetPatch(BaseModel):
+    name: Optional[str] = None
+    task_type: Optional[str] = None
+    dataset_id: Optional[str] = None
+    algorithm_id: Optional[str] = None
+    metrics: Optional[List[str]] = None
+    params: Optional[Dict[str, Any]] = None
+
+
+class PresetOut(BaseModel):
+    preset_id: str
+    name: str
+    task_type: str
+    dataset_id: str
+    algorithm_id: str
+    metrics: List[str] = Field(default_factory=list)
+    params: Dict[str, Any] = Field(default_factory=dict)
+    created_at: float
+    updated_at: float

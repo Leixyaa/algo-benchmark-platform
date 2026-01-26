@@ -1,96 +1,118 @@
 <template>
   <div style="padding:16px;">
-    <h2 style="margin:0 0 8px;">å‘èµ·è¯„æµ‹</h2>
+    <h2 style="margin:0 0 8px;">·¢ÆğÆÀ²â</h2>
     <div style="color:#666; margin-bottom:12px;">
-      é€‰æ‹©ä»»åŠ¡ç±»åˆ«ã€æ•°æ®é›†ã€ç®—æ³•ä¸æŒ‡æ ‡ï¼Œåˆ›å»ºä¸€æ¬¡è¯„æµ‹ä»»åŠ¡ã€‚ä»»åŠ¡ç”±åç«¯å¼‚æ­¥æ‰§è¡Œï¼Œå¯åœ¨ä»»åŠ¡ä¸­å¿ƒæŸ¥çœ‹çŠ¶æ€ä¸ç»“æœã€‚
+      Ñ¡ÔñÈÎÎñÀà±ğ¡¢Êı¾İ¼¯¡¢Ëã·¨ÓëÖ¸±ê£¬´´½¨Ò»´ÎÆÀ²âÈÎÎñ¡£ÈÎÎñÓÉºó¶ËÒì²½Ö´ĞĞ£¬¿ÉÔÚÈÎÎñÖĞĞÄ²é¿´×´Ì¬Óë½á¹û¡£
     </div>
 
     <div style="display:grid; grid-template-columns: 140px 1fr; gap:10px; max-width:680px;">
-      <div>ä»»åŠ¡ç±»åˆ«</div>
+      <div>ÊµÑéÔ¤Éè</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <select v-model="form.presetId" style="padding:6px; min-width:240px;">
+          <option value="">£¨²»Ê¹ÓÃÔ¤Éè£©</option>
+          <option v-for="p in presetsForTask" :key="p.id" :value="p.id">
+            {{ p.name }}
+          </option>
+        </select>
+        <button @click="applyPreset" style="padding:6px 10px;">¼ÓÔØ</button>
+        <button @click="removePreset" style="padding:6px 10px;">É¾³ı</button>
+      </div>
+
+      <div>Ô¤ÉèÃû³Æ</div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input v-model="form.presetName" placeholder="ÀıÈç£ºÈ¥Îí-DCP-Ä¬ÈÏ²ÎÊı" style="flex:1; padding:6px;" />
+        <button @click="savePreset" style="padding:6px 10px;">±£´æÎªÔ¤Éè</button>
+      </div>
+
+      <div>ÈÎÎñÀà±ğ</div>
       <select v-model="form.task" style="padding:6px;">
-        <option>å»å™ª</option>
-        <option>å»æ¨¡ç³Š</option>
-        <option>å»é›¾</option>
-        <option>è¶…åˆ†è¾¨ç‡</option>
-        <option>ä½ç…§åº¦å¢å¼º</option>
-        <option>è§†é¢‘å»å™ª</option>
-        <option>è§†é¢‘è¶…åˆ†</option>
+        <option>È¥Ôë</option>
+        <option>È¥Ä£ºı</option>
+        <option>È¥Îí</option>
+        <option>³¬·Ö±æÂÊ</option>
+        <option>µÍÕÕ¶ÈÔöÇ¿</option>
+        <option>ÊÓÆµÈ¥Ôë</option>
+        <option>ÊÓÆµ³¬·Ö</option>
       </select>
 
-      <div>æ•°æ®é›†</div>
+      <div>Êı¾İ¼¯</div>
       <select v-model="form.datasetId" style="padding:6px;">
-        <option value="" disabled>è¯·é€‰æ‹©æ•°æ®é›†</option>
+        <option value="" disabled>ÇëÑ¡ÔñÊı¾İ¼¯</option>
         <option v-for="d in store.datasets" :key="d.id" :value="d.id">
-          {{ d.name }}ï¼ˆ{{ d.type }}ï¼‰
+          {{ d.name }}£¨{{ d.type }}£©
         </option>
       </select>
 
-      <div>ç®—æ³•</div>
+      <div>Ëã·¨</div>
       <select v-model="form.algorithmId" style="padding:6px;">
-        <option value="" disabled>è¯·é€‰æ‹©ç®—æ³•</option>
+        <option value="" disabled>ÇëÑ¡ÔñËã·¨</option>
         <option v-for="a in filteredAlgorithms" :key="a.id" :value="a.id">
-          {{ a.name }}ï¼ˆ{{ a.impl }} / {{ a.version }}ï¼‰
+          {{ a.name }}£¨{{ a.impl }} / {{ a.version }}£©
         </option>
       </select>
 
-      <div>æŒ‡æ ‡</div>
+      <div>Ö¸±ê</div>
       <div style="display:flex; gap:12px; flex-wrap:wrap;">
         <label><input type="checkbox" value="PSNR" v-model="form.metrics" /> PSNR</label>
         <label><input type="checkbox" value="SSIM" v-model="form.metrics" /> SSIM</label>
-        <label><input type="checkbox" value="NIQE" v-model="form.metrics" /> NIQEï¼ˆæ— å‚è€ƒï¼‰</label>
+        <label><input type="checkbox" value="NIQE" v-model="form.metrics" /> NIQE£¨ÎŞ²Î¿¼£©</label>
       </div>
 
-      <div>å‚æ•°(JSON)</div>
+      <div>²ÎÊı(JSON)</div>
       <textarea
         v-model="form.paramsText"
         rows="8"
         style="width:100%; padding:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;"
-        placeholder="ä¾‹å¦‚ï¼š{&quot;dcp_patch&quot;:15,&quot;dcp_omega&quot;:0.95,&quot;dcp_t0&quot;:0.1}"
+        placeholder="ÀıÈç£º{&quot;dcp_patch&quot;:15,&quot;dcp_omega&quot;:0.95,&quot;dcp_t0&quot;:0.1}"
       />
     </div>
 
     <div style="margin-top:14px; display:flex; gap:10px;">
-      <button @click="create" style="padding:8px 12px;">åˆ›å»ºè¯„æµ‹ä»»åŠ¡</button>
-      <button @click="goRuns" style="padding:8px 12px;">æŸ¥çœ‹ä»»åŠ¡ä¸­å¿ƒ</button>
+      <button @click="create" style="padding:8px 12px;">´´½¨ÆÀ²âÈÎÎñ</button>
+      <button @click="goRuns" style="padding:8px 12px;">²é¿´ÈÎÎñÖĞĞÄ</button>
     </div>
 
     <div style="margin-top:14px; color:#666;">
-      <div>æç¤ºï¼š</div>
-      <div>1ï¼‰ç®—æ³•ä¼šæŒ‰ä»»åŠ¡ç±»åˆ«è¿‡æ»¤ï¼ˆä¾‹å¦‚å»é›¾åªæ˜¾ç¤ºå»é›¾ç®—æ³•ï¼‰ã€‚</div>
-      <div>2ï¼‰åˆ›å»ºä»»åŠ¡ä¼šè¿›å…¥é˜Ÿåˆ—ï¼ŒçŠ¶æ€ä»æ’é˜Ÿä¸­â†’è¿è¡Œä¸­â†’å®Œæˆ/å¤±è´¥ã€‚</div>
+      <div>ÌáÊ¾£º</div>
+      <div>1£©Ëã·¨»á°´ÈÎÎñÀà±ğ¹ıÂË£¨ÀıÈçÈ¥ÎíÖ»ÏÔÊ¾È¥ÎíËã·¨£©¡£</div>
+      <div>2£©´´½¨ÈÎÎñ»á½øÈë¶ÓÁĞ£¬×´Ì¬´ÓÅÅ¶ÓÖĞ¡úÔËĞĞÖĞ¡úÍê³É/Ê§°Ü¡£</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, watch } from "vue";
+import { computed, onMounted, reactive, watch } from "vue";
 import { useRouter } from "vue-router";
-import { useAppStore } from "../stores/app";
+import { useAppStore, toTaskLabel, toTaskType } from "../stores/app";
 
 const NEWRUN_CACHE_KEY = "newrun_form_v1";
 const router = useRouter();
 const store = useAppStore();
 
 const form = reactive({
-  task: "å»å™ª",
+  presetId: "",
+  presetName: "",
+  task: "È¥Ôë",
   datasetId: "",
   algorithmId: "",
   metrics: ["PSNR", "SSIM"],
   paramsText: "{}",
 });
 
-// æ¢å¤ä¸Šæ¬¡é€‰æ‹©
+// »Ö¸´ÉÏ´ÎÑ¡Ôñ
 try {
   const raw = localStorage.getItem(NEWRUN_CACHE_KEY);
   if (raw) {
     const cached = JSON.parse(raw);
 
-    // åªæ¢å¤ä½ è¡¨å•é‡Œå·²æœ‰å­—æ®µï¼Œé¿å…è„æ•°æ®
+    // Ö»»Ö¸´Äã±íµ¥ÀïÒÑÓĞ×Ö¶Î£¬±ÜÃâÔàÊı¾İ
     if (cached.task) form.task = cached.task;
     if (cached.datasetId) form.datasetId = cached.datasetId;
     if (cached.algorithmId) form.algorithmId = cached.algorithmId;
     if (Array.isArray(cached.metrics)) form.metrics = cached.metrics;
     if (typeof cached.paramsText === "string") form.paramsText = cached.paramsText;
+    if (typeof cached.presetId === "string") form.presetId = cached.presetId;
+    if (typeof cached.presetName === "string") form.presetName = cached.presetName;
   }
 } catch {
   // ignore
@@ -108,6 +130,11 @@ watch(
 const filteredAlgorithms = computed(() =>
   store.algorithms.filter((a) => a.task === form.task)
 );
+
+const presetsForTask = computed(() => {
+  const tt = toTaskType(form.task);
+  return (store.presets || []).filter((p) => p?.taskType === tt);
+});
 
 const selectedAlgorithm = computed(() =>
   store.algorithms.find((a) => a.id === form.algorithmId)
@@ -136,20 +163,88 @@ watch(
   }
 );
 
-async function create() {
-  if (!form.datasetId) return alert("è¯·å…ˆé€‰æ‹©æ•°æ®é›†");
-  if (!form.algorithmId) return alert("è¯·å…ˆé€‰æ‹©ç®—æ³•");
-  if (!form.metrics.length) return alert("è¯·è‡³å°‘é€‰æ‹©ä¸€ä¸ªæŒ‡æ ‡");
+onMounted(async () => {
+  try {
+    await store.fetchPresets();
+  } catch {
+    // ignore
+  }
+});
+
+function applyPreset() {
+  const pid = form.presetId;
+  if (!pid) return;
+  const p = (store.presets || []).find((x) => x.id === pid);
+  if (!p) return;
+  form.presetName = p.name || "";
+  form.task = toTaskLabel(p.taskType);
+  form.datasetId = p.datasetId || "";
+  form.algorithmId = p.algorithmId || "";
+  form.metrics = Array.isArray(p.metrics) && p.metrics.length ? [...p.metrics] : ["PSNR", "SSIM"];
+  const params = p.params && typeof p.params === "object" && !Array.isArray(p.params) ? p.params : {};
+  form.paramsText = JSON.stringify(params, null, 2);
+}
+
+async function savePreset() {
+  if (!form.presetName.trim()) return alert("ÇëÌîĞ´Ô¤ÉèÃû³Æ");
+  if (!form.datasetId) return alert("ÇëÏÈÑ¡ÔñÊı¾İ¼¯");
+  if (!form.algorithmId) return alert("ÇëÏÈÑ¡ÔñËã·¨");
+  if (!form.metrics.length) return alert("ÇëÖÁÉÙÑ¡ÔñÒ»¸öÖ¸±ê");
 
   let params = {};
   try {
     const s = String(form.paramsText || "").trim();
     params = s ? JSON.parse(s) : {};
   } catch (e) {
-    return alert(`å‚æ•°ä¸æ˜¯åˆæ³• JSONï¼š${e?.message || e}`);
+    return alert(`²ÎÊı²»ÊÇºÏ·¨ JSON£º${e?.message || e}`);
   }
   if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return alert("å‚æ•°å¿…é¡»æ˜¯ JSON å¯¹è±¡ï¼Œä¾‹å¦‚ï¼š{ \"dcp_patch\": 15 }");
+    return alert("²ÎÊı±ØĞëÊÇ JSON ¶ÔÏó£¬ÀıÈç£º{ \"dcp_patch\": 15 }");
+  }
+
+  try {
+    const out = await store.createPreset({
+      name: form.presetName.trim(),
+      task: form.task,
+      datasetId: form.datasetId,
+      algorithmId: form.algorithmId,
+      metrics: [...form.metrics],
+      params,
+    });
+    form.presetId = out?.id || "";
+    alert("Ô¤ÉèÒÑ±£´æ");
+  } catch (e) {
+    alert(`±£´æÔ¤ÉèÊ§°Ü£º${e?.message || e}`);
+  }
+}
+
+async function removePreset() {
+  if (!form.presetId) return;
+  const ok = confirm("È·¶¨É¾³ı¸ÃÔ¤ÉèÂğ£¿");
+  if (!ok) return;
+  try {
+    await store.removePreset(form.presetId);
+    form.presetId = "";
+    alert("Ô¤ÉèÒÑÉ¾³ı");
+  } catch (e) {
+    alert(`É¾³ıÔ¤ÉèÊ§°Ü£º${e?.message || e}`);
+  }
+}
+
+async function create() {
+  if (!form.datasetId) return alert("ÇëÏÈÑ¡ÔñÊı¾İ¼¯");
+  if (!form.algorithmId) return alert("ÇëÏÈÑ¡ÔñËã·¨");
+  if (!form.metrics.length) return alert("ÇëÖÁÉÙÑ¡ÔñÒ»¸öÖ¸±ê");
+
+  let params = {};
+  try {
+    const s = String(form.paramsText || "").trim();
+    params = s ? JSON.parse(s) : {};
+  } catch (e) {
+    return alert(`²ÎÊı²»ÊÇºÏ·¨ JSON£º${e?.message || e}`);
+  }
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return alert("²ÎÊı±ØĞëÊÇ JSON ¶ÔÏó£¬ÀıÈç£º{ \"dcp_patch\": 15 }");
   }
 
   try {
@@ -161,10 +256,10 @@ async function create() {
       params,
     });
     localStorage.removeItem(NEWRUN_CACHE_KEY);
-    alert("ä»»åŠ¡å·²åˆ›å»ºï¼Œæ­£åœ¨åç«¯å¼‚æ­¥æ‰§è¡Œï¼Œå¯åœ¨ä»»åŠ¡ä¸­å¿ƒæŸ¥çœ‹");
+    alert("ÈÎÎñÒÑ´´½¨£¬ÕıÔÚºó¶ËÒì²½Ö´ĞĞ£¬¿ÉÔÚÈÎÎñÖĞĞÄ²é¿´");
     router.push("/runs");
   } catch (e) {
-    alert(`åˆ›å»ºå¤±è´¥ï¼š${e?.message || e}`);
+    alert(`´´½¨Ê§°Ü£º${e?.message || e}`);
   }
 }
 

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- coding: gbk -*-
 from __future__ import annotations
 
 import time
@@ -29,6 +29,9 @@ from .schemas import (
     AlgorithmCreate,
     AlgorithmOut,
     AlgorithmPatch,
+    PresetCreate,
+    PresetOut,
+    PresetPatch,
 )
 from .store import (
     make_redis,
@@ -43,6 +46,10 @@ from .store import (
     load_algorithm,
     delete_algorithm,
     list_algorithms,
+    save_preset,
+    load_preset,
+    delete_preset,
+    list_presets,
 )
 from .celery_app import celery_app
 from .tasks import execute_run, _stable_seed, _make_synthetic_pair_for_task
@@ -88,9 +95,9 @@ def _ensure_catalog_defaults(r):
             "ds_demo",
             {
                 "dataset_id": "ds_demo",
-                "name": "Demo-æ ·ä¾‹æ•°æ®é›†",
-                "type": "å›¾åƒ",
-                "size": "10 å¼ ",
+                "name": "Demo-ÑùÀıÊı¾İ¼¯",
+                "type": "Í¼Ïñ",
+                "size": "10 ÕÅ",
                 "created_at": created,
             },
         )
@@ -100,112 +107,112 @@ def _ensure_catalog_defaults(r):
         defaults = [
             {
                 "algorithm_id": "alg_dn_cnn",
-                "task": "å»å™ª",
-                "name": "FastNLMeans(åŸºçº¿)",
+                "task": "È¥Ôë",
+                "name": "FastNLMeans(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
             },
             {
                 "algorithm_id": "alg_denoise_bilateral",
-                "task": "å»å™ª",
-                "name": "Bilateral(åŸºçº¿)",
+                "task": "È¥Ôë",
+                "name": "Bilateral(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
             },
             {
                 "algorithm_id": "alg_denoise_gaussian",
-                "task": "å»å™ª",
-                "name": "Gaussian(åŸºçº¿)",
+                "task": "È¥Ôë",
+                "name": "Gaussian(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"gaussian_sigma": 1.0},
             },
             {
                 "algorithm_id": "alg_denoise_median",
-                "task": "å»å™ª",
-                "name": "Median(åŸºçº¿)",
+                "task": "È¥Ôë",
+                "name": "Median(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"median_ksize": 3},
             },
             {
                 "algorithm_id": "alg_dehaze_dcp",
-                "task": "å»é›¾",
-                "name": "DCPæš—é€šé“å…ˆéªŒ(åŸºçº¿)",
+                "task": "È¥Îí",
+                "name": "DCP°µÍ¨µÀÏÈÑé(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
             },
             {
                 "algorithm_id": "alg_dehaze_clahe",
-                "task": "å»é›¾",
-                "name": "CLAHE(åŸºçº¿)",
+                "task": "È¥Îí",
+                "name": "CLAHE(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"clahe_clip_limit": 2.0},
             },
             {
                 "algorithm_id": "alg_dehaze_gamma",
-                "task": "å»é›¾",
-                "name": "Gamma(åŸºçº¿)",
+                "task": "È¥Îí",
+                "name": "Gamma(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"gamma": 0.75},
             },
             {
                 "algorithm_id": "alg_deblur_unsharp",
-                "task": "å»æ¨¡ç³Š",
-                "name": "UnsharpMask(åŸºçº¿)",
+                "task": "È¥Ä£ºı",
+                "name": "UnsharpMask(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
             },
             {
                 "algorithm_id": "alg_deblur_laplacian",
-                "task": "å»æ¨¡ç³Š",
-                "name": "LaplacianSharpen(åŸºçº¿)",
+                "task": "È¥Ä£ºı",
+                "name": "LaplacianSharpen(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"laplacian_strength": 0.7},
             },
             {
                 "algorithm_id": "alg_sr_bicubic",
-                "task": "è¶…åˆ†è¾¨ç‡",
-                "name": "Bicubic(åŸºçº¿)",
+                "task": "³¬·Ö±æÂÊ",
+                "name": "Bicubic(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {},
             },
             {
                 "algorithm_id": "alg_sr_lanczos",
-                "task": "è¶…åˆ†è¾¨ç‡",
-                "name": "Lanczos(åŸºçº¿)",
+                "task": "³¬·Ö±æÂÊ",
+                "name": "Lanczos(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {},
             },
             {
                 "algorithm_id": "alg_sr_nearest",
-                "task": "è¶…åˆ†è¾¨ç‡",
-                "name": "Nearest(åŸºçº¿)",
+                "task": "³¬·Ö±æÂÊ",
+                "name": "Nearest(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {},
             },
             {
                 "algorithm_id": "alg_lowlight_gamma",
-                "task": "ä½ç…§åº¦å¢å¼º",
-                "name": "Gamma(åŸºçº¿)",
+                "task": "µÍÕÕ¶ÈÔöÇ¿",
+                "name": "Gamma(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"lowlight_gamma": 0.6},
             },
             {
                 "algorithm_id": "alg_lowlight_clahe",
-                "task": "ä½ç…§åº¦å¢å¼º",
-                "name": "CLAHE(åŸºçº¿)",
+                "task": "µÍÕÕ¶ÈÔöÇ¿",
+                "name": "CLAHE(»ùÏß)",
                 "impl": "OpenCV",
                 "version": "v1",
                 "default_params": {"clahe_clip_limit": 2.5},
@@ -238,14 +245,14 @@ def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str]:
     ds_dir = data_root / dataset_id
     gt_dir = ds_dir / "gt"
     if not gt_dir.exists():
-        return "å›¾åƒ", "0 å¼ "
+        return "Í¼Ïñ", "0 ÕÅ"
     n = 0
     for p in gt_dir.iterdir():
         if p.is_file():
             suf = p.suffix.lower()
             if suf in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
                 n += 1
-    return "å›¾åƒ", f"{n} å¼ "
+    return "Í¼Ïñ", f"{n} ÕÅ"
 
 
 @app.get("/datasets")
@@ -326,7 +333,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
         cur = {
             "dataset_id": dataset_id,
             "name": dataset_id,
-            "type": "å›¾åƒ",
+            "type": "Í¼Ïñ",
             "size": "-",
             "created_at": created,
         }
@@ -431,6 +438,76 @@ def remove_algorithm(algorithm_id: str):
     return {"ok": True, "algorithm_id": algorithm_id}
 
 
+@app.get("/presets")
+def get_presets(limit: int = 200):
+    r = make_redis()
+    items = list_presets(r, limit=limit) or []
+    return [PresetOut(**x).model_dump() for x in items]
+
+
+@app.get("/presets/{preset_id}", response_model=PresetOut)
+def get_preset(preset_id: str):
+    r = make_redis()
+    cur = load_preset(r, preset_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="preset_not_found")
+    return PresetOut(**cur)
+
+
+@app.post("/presets", response_model=PresetOut)
+def create_preset(payload: PresetCreate):
+    r = make_redis()
+    preset_id = (payload.preset_id or "").strip() or f"pre_{uuid.uuid4().hex[:10]}"
+    if load_preset(r, preset_id):
+        raise HTTPException(status_code=409, detail="preset_id_exists")
+    created = time.time()
+    data = {
+        "preset_id": preset_id,
+        "name": payload.name.strip(),
+        "task_type": payload.task_type,
+        "dataset_id": payload.dataset_id,
+        "algorithm_id": payload.algorithm_id,
+        "metrics": payload.metrics or [],
+        "params": payload.params or {},
+        "created_at": created,
+        "updated_at": created,
+    }
+    save_preset(r, preset_id, data)
+    return PresetOut(**data)
+
+
+@app.patch("/presets/{preset_id}", response_model=PresetOut)
+def patch_preset(preset_id: str, payload: PresetPatch):
+    r = make_redis()
+    cur = load_preset(r, preset_id)
+    if not cur:
+        raise HTTPException(status_code=404, detail="preset_not_found")
+    if payload.name is not None:
+        cur["name"] = payload.name.strip()
+    if payload.task_type is not None:
+        cur["task_type"] = payload.task_type
+    if payload.dataset_id is not None:
+        cur["dataset_id"] = payload.dataset_id
+    if payload.algorithm_id is not None:
+        cur["algorithm_id"] = payload.algorithm_id
+    if payload.metrics is not None:
+        cur["metrics"] = payload.metrics
+    if payload.params is not None:
+        cur["params"] = payload.params
+    cur["updated_at"] = time.time()
+    save_preset(r, preset_id, cur)
+    return PresetOut(**cur)
+
+
+@app.delete("/presets/{preset_id}")
+def remove_preset(preset_id: str):
+    r = make_redis()
+    if not load_preset(r, preset_id):
+        raise HTTPException(status_code=404, detail="preset_not_found")
+    delete_preset(r, preset_id)
+    return {"ok": True, "preset_id": preset_id}
+
+
 @app.post("/runs", response_model=RunOut)
 def create_run(payload: RunCreate):
     r = make_redis()
@@ -477,9 +554,9 @@ def export_runs(
     limit: int = Query(500, ge=1, le=5000),
 ):
     """
-    å¯¼å‡º runsï¼ˆCSV / Excelï¼‰
-    - æœ¬é˜¶æ®µï¼šåªè¯» Redis çš„å†å² runs
-    - è¿‡æ»¤æ¡ä»¶ï¼šstatus/task_type/dataset_id/algorithm_id
+    µ¼³ö runs£¨CSV / Excel£©
+    - ±¾½×¶Î£ºÖ»¶Á Redis µÄÀúÊ· runs
+    - ¹ıÂËÌõ¼ş£ºstatus/task_type/dataset_id/algorithm_id
     """
     fmt = (format or "").lower().strip()
     if fmt not in ("csv", "xlsx"):
@@ -488,7 +565,7 @@ def export_runs(
     r = make_redis()
     runs = list_runs(r, limit=limit)
 
-    # ===== è¿‡æ»¤ =====
+    # ===== ¹ıÂË =====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -502,7 +579,7 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== æ‰å¹³åŒ–è¡¨å¤´ï¼ˆç¨³å®šå­—æ®µï¼Œå‰ç«¯/è®ºæ–‡å¥½è§£é‡Šï¼‰=====
+    # ===== ±âÆ½»¯±íÍ·£¨ÎÈ¶¨×Ö¶Î£¬Ç°¶Ë/ÂÛÎÄºÃ½âÊÍ£©=====
     headers = [
         "run_id",
         "task_type",
@@ -596,9 +673,9 @@ def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
 ):
     """
-    æ¸…ç† runs å†å²è®°å½•ï¼ˆé»˜è®¤æ¸…ç†å·²å®Œæˆ doneï¼‰
-    - status=doneï¼šåªåˆ å·²å®Œæˆ
-    - status=allï¼šå…¨éƒ¨åˆ é™¤
+    ÇåÀí runs ÀúÊ·¼ÇÂ¼£¨Ä¬ÈÏÇåÀíÒÑÍê³É done£©
+    - status=done£ºÖ»É¾ÒÑÍê³É
+    - status=all£ºÈ«²¿É¾³ı
     """
     r = make_redis()
     keys = r.keys("run:*")
@@ -651,7 +728,7 @@ def cancel_run(run_id: str):
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "å·²å–æ¶ˆ"
+        run["error"] = "ÒÑÈ¡Ïû"
         save_run(r, run_id, run)
         return {"ok": True, "run_id": run_id, "status": "canceled"}
 
