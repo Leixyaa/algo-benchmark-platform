@@ -29,3 +29,7 @@ logs/
 
 # ===== Celery =====
 celerybeat-schedule
+
+# ===== Local Datasets / Exports (Generated) =====
+数据集/
+docs/导出文件/

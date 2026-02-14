@@ -1,45 +1,45 @@
 <template>
   <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">Êı¾İ¼¯¹ÜÀí</h2>
+    <h2 style="margin: 0 0 8px;">æ•°æ®é›†ç®¡ç†</h2>
     <div style="color:#666; margin-bottom: 12px;">
-      ¹ÜÀíÆÀ²âÊı¾İ¼¯£ºĞÂÔö¡¢É¾³ı¡¢²é¿´ÔªĞÅÏ¢¡£Ö§³Öµ¼Èë ZIP£¨gt/ + ¸÷ÈÎÎñÊäÈëÄ¿Â¼£©¡£
+      ç”¨äºç®¡ç†æ•°æ®é›†çš„åˆ›å»º/åˆ é™¤/æŸ¥çœ‹å…ƒä¿¡æ¯ï¼Œæ”¯æŒå¯¼å…¥ ZIPï¼ˆéœ€è¦ gt/ ä¸é€€åŒ–å›¾åƒç›®å½•ï¼šhazy/noisy/blur/lr/darkï¼‰ã€‚
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">ĞÂÔöÊı¾İ¼¯</button>
-      <button @click="chooseZipForNew" style="padding:6px 10px;">µ¼ÈëZIPµ½Ñ¡ÖĞÊı¾İ¼¯</button>
+      <button @click="openCreate" style="padding:6px 10px;">æ–°å»ºæ•°æ®é›†</button>
+      <button @click="chooseZipForNew" style="padding:6px 10px;">å¯¼å…¥ ZIP åˆ°é€‰ä¸­æ•°æ®é›†</button>
       <button
         @click="generateDemoOnBackend"
         :disabled="generating"
         style="padding:6px 10px;"
       >
-        {{ generating ? "Éú³ÉÖĞ..." : "Éú³Éºó¶Ë Demo ÑùÀı" }}
+        {{ generating ? "ç”Ÿæˆä¸­..." : "ç”Ÿæˆåç«¯ Demo æ•°æ®" }}
       </button>
     </div>
 
     <div style="display:flex; gap:10px; align-items:center; margin-bottom: 12px;">
-      <div style="color:#666;">µ¼ÈëÄ¿±ê£º</div>
+      <div style="color:#666;">å½“å‰ç›®æ ‡ï¼š</div>
       <select v-model="selectedDatasetId" style="padding:6px; min-width:220px;">
-        <option value="" disabled>ÇëÑ¡ÔñÊı¾İ¼¯</option>
+        <option value="" disabled>è¯·é€‰æ‹©æ•°æ®é›†</option>
         <option v-for="d in store.datasets" :key="d.id" :value="d.id">
-          {{ d.name }}£¨{{ d.id }}£©
+          {{ d.name }}ï¼ˆ{{ d.id }}ï¼‰
         </option>
       </select>
       <label style="display:flex; gap:6px; align-items:center; color:#666;">
         <input type="checkbox" v-model="overwriteOnImport" />
-        ¸²¸Çµ¼Èë£¨»áÇå¿Õºó¶ËÄ¿Â¼£©
+        è¦†ç›–å¯¼å…¥ï¼ˆè¦†ç›–åŸç›®å½•ï¼Œæ¨èï¼‰
       </label>
-      <button @click="scanSelected" style="padding:6px 10px;">É¨Ãè²¢Ë¢ĞÂ¹æÄ£</button>
+      <button @click="scanSelected" style="padding:6px 10px;">æ‰«æå¹¶åˆ·æ–°è§„æ¨¡</button>
     </div>
 
     <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
       <thead>
         <tr style="background:#f6f6f6;">
-          <th align="left">Ãû³Æ</th>
-          <th align="left">ÀàĞÍ</th>
-          <th align="left">¹æÄ£</th>
-          <th align="left">´´½¨Ê±¼ä</th>
-          <th align="left" width="120">²Ù×÷</th>
+          <th align="left">åç§°</th>
+          <th align="left">ç±»å‹</th>
+          <th align="left">è§„æ¨¡</th>
+          <th align="left">åˆ›å»ºæ—¶é—´</th>
+          <th align="left" width="120">æ“ä½œ</th>
         </tr>
       </thead>
       <tbody>
@@ -49,46 +49,50 @@
           <td>{{ ds.size }}</td>
           <td>{{ ds.createdAt }}</td>
           <td>
-            <button @click="scanOne(ds.id)" style="padding:4px 8px; margin-right:6px;">É¨Ãè</button>
-            <button @click="chooseZipFor(ds.id)" style="padding:4px 8px; margin-right:6px;">µ¼ÈëZIP</button>
-            <button @click="remove(ds.id)" style="padding:4px 8px;">É¾³ı</button>
+            <button @click="scanOne(ds.id)" style="padding:4px 8px; margin-right:6px;">æ‰«æ</button>
+            <button @click="chooseZipFor(ds.id)" style="padding:4px 8px; margin-right:6px;">å¯¼å…¥ ZIP</button>
+            <button @click="remove(ds.id)" style="padding:4px 8px;">åˆ é™¤</button>
           </td>
         </tr>
         <tr v-if="store.datasets.length === 0">
-          <td colspan="5" style="color:#888;">ÔİÎŞÊı¾İ¼¯</td>
+          <td colspan="5" style="color:#888;">æš‚æ— æ•°æ®é›†</td>
         </tr>
       </tbody>
     </table>
 
-    <!-- ¼òµ¥µ¯´°£¨ÏÈ²»ÓÃ×é¼ş¿â£© -->
     <div v-if="showCreate"
       style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
       <div style="background:#fff; padding:16px; width:420px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">ĞÂÔöÊı¾İ¼¯</h3>
+        <h3 style="margin:0 0 12px;">æ–°å»ºæ•°æ®é›†</h3>
 
         <div style="display:flex; flex-direction:column; gap:10px;">
           <label>
-            Ãû³Æ£º
-            <input v-model="form.name" placeholder="ÀıÈç£ºRESIDE-Indoor ×Ó¼¯" style="width:100%; padding:6px;" />
+            IDï¼ˆå¯é€‰ï¼‰ï¼š
+            <input v-model="form.id" placeholder="ä¾‹å¦‚ï¼šds_gopro_deblur_test" style="width:100%; padding:6px;" />
           </label>
 
           <label>
-            ÀàĞÍ£º
+            åç§°ï¼š
+            <input v-model="form.name" placeholder="ä¾‹å¦‚ï¼šRESIDE-Indoor å­é›†" style="width:100%; padding:6px;" />
+          </label>
+
+          <label>
+            ç±»å‹ï¼š
             <select v-model="form.type" style="width:100%; padding:6px;">
-              <option>Í¼Ïñ</option>
-              <option>ÊÓÆµ</option>
+              <option>å›¾åƒ</option>
+              <option>è§†é¢‘</option>
             </select>
           </label>
 
           <label>
-            ¹æÄ££º
-            <input v-model="form.size" placeholder="ÀıÈç£º500 ÕÅ / 30 ¶ÎÊÓÆµ" style="width:100%; padding:6px;" />
+            è§„æ¨¡ï¼š
+            <input v-model="form.size" placeholder="ä¾‹å¦‚ï¼š500 å¼  / 30 æ®µè§†é¢‘" style="width:100%; padding:6px;" />
           </label>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">È¡Ïû</button>
-          <button @click="submitCreate" style="padding:6px 10px;">È·ÈÏĞÂÔö</button>
+          <button @click="closeCreate" style="padding:6px 10px;">å–æ¶ˆ</button>
+          <button @click="submitCreate" style="padding:6px 10px;">ç¡®è®¤åˆ›å»º</button>
         </div>
       </div>
     </div>
@@ -109,8 +113,9 @@ const overwriteOnImport = ref(false);
 const importTargetId = ref("");
 const fileInputRef = ref(null);
 const form = reactive({
+  id: "",
   name: "",
-  type: "Í¼Ïñ",
+  type: "å›¾åƒ",
   size: "",
 });
 
@@ -126,8 +131,9 @@ onMounted(async () => {
 });
 
 function openCreate() {
+  form.id = "";
   form.name = "";
-  form.type = "Í¼Ïñ";
+  form.type = "å›¾åƒ";
   form.size = "";
   showCreate.value = true;
 }
@@ -138,28 +144,29 @@ function closeCreate() {
 
 async function submitCreate() {
   if (!form.name.trim()) {
-    alert("ÇëÌîĞ´Êı¾İ¼¯Ãû³Æ");
+    alert("è¯·å¡«å†™æ•°æ®é›†åç§°");
     return;
   }
   try {
     await store.createDataset({
+      id: form.id.trim() || undefined,
       name: form.name.trim(),
       type: form.type,
       size: form.size.trim() || "-",
     });
     showCreate.value = false;
   } catch (e) {
-    alert(`ĞÂÔöÊ§°Ü£º${e?.message || e}`);
+    alert(`åˆ›å»ºå¤±è´¥ï¼š${e?.message || e}`);
   }
 }
 
 async function remove(id) {
-  const ok = confirm("È·¶¨É¾³ı¸ÃÊı¾İ¼¯Âğ£¿");
+  const ok = confirm("ç¡®è®¤åˆ é™¤è¯¥æ•°æ®é›†ï¼Ÿ");
   if (!ok) return;
   try {
     await store.removeDataset(id);
   } catch (e) {
-    alert(`É¾³ıÊ§°Ü£º${e?.message || e}`);
+    alert(`åˆ é™¤å¤±è´¥ï¼š${e?.message || e}`);
   }
 }
 
@@ -176,7 +183,9 @@ function _ensureFileInput() {
     const dsId = importTargetId.value;
     if (!dsId) return;
 
-    const ok = confirm(`½«µ¼Èë ZIP µ½Êı¾İ¼¯£º${dsId}${overwriteOnImport.value ? "£¨¸²¸Çµ¼Èë£©" : ""}¡£¼ÌĞøÂğ£¿`);
+    const ok = confirm(
+      `ç¡®è®¤å°† ZIP å¯¼å…¥åˆ°æ•°æ®é›† ${dsId}ï¼Ÿ${overwriteOnImport.value ? "ï¼ˆè¦†ç›–å¯¼å…¥ï¼šè¦†ç›–åŸç›®å½•ï¼‰" : "ï¼ˆä¸è¦†ç›–ï¼šä¸åŸç›®å½•åˆå¹¶ï¼Œè§„æ¨¡å¯èƒ½ä¸å‡†ï¼‰"}`
+    );
     if (!ok) return;
 
     try {
@@ -196,9 +205,9 @@ function _ensureFileInput() {
         dataB64: b64,
         overwrite: overwriteOnImport.value,
       });
-      ElMessage({ type: "success", message: "µ¼Èë³É¹¦£¬ÒÑË¢ĞÂ¹æÄ£" });
+      ElMessage({ type: "success", message: "å¯¼å…¥æˆåŠŸï¼Œè¯·åˆ·æ–°è§„æ¨¡" });
     } catch (e) {
-      ElMessage({ type: "error", message: `µ¼ÈëÊ§°Ü£º${e?.message || e}` });
+      ElMessage({ type: "error", message: `å¯¼å…¥å¤±è´¥ï¼š${e?.message || e}` });
     }
   });
   document.body.appendChild(input);
@@ -212,30 +221,31 @@ function chooseZipFor(id) {
 }
 
 function chooseZipForNew() {
-  if (!selectedDatasetId.value) return alert("ÇëÏÈÑ¡Ôñµ¼ÈëÄ¿±êÊı¾İ¼¯");
+  if (!selectedDatasetId.value) return alert("è¯·å…ˆé€‰æ‹©ç›®æ ‡æ•°æ®é›†");
   chooseZipFor(selectedDatasetId.value);
 }
 
 async function scanOne(id) {
   try {
     await store.scanDataset(id);
-    ElMessage({ type: "success", message: "ÒÑË¢ĞÂ¹æÄ£" });
+    ElMessage({ type: "success", message: "å·²åˆ·æ–°è§„æ¨¡" });
   } catch (e) {
-    ElMessage({ type: "error", message: `É¨ÃèÊ§°Ü£º${e?.message || e}` });
+    ElMessage({ type: "error", message: `æ‰«æå¤±è´¥ï¼š${e?.message || e}` });
   }
 }
 
 async function scanSelected() {
-  if (!selectedDatasetId.value) return alert("ÇëÏÈÑ¡ÔñÊı¾İ¼¯");
+  if (!selectedDatasetId.value) return alert("è¯·å…ˆé€‰æ‹©æ•°æ®é›†");
   await scanOne(selectedDatasetId.value);
 }
 
 async function generateDemoOnBackend() {
+  const targetId = selectedDatasetId.value || "ds_demo";
   try {
     await ElMessageBox.confirm(
-      "½«Îª ds_demo ÔÚºó¶ËÉú³É 5 ×éÑùÀı£¨gt + ¸÷ÈÎÎñÊäÈëÄ¿Â¼£©¡£¼ÌĞøÂğ£¿",
-      "Éú³ÉÑùÀıÊı¾İ",
-      { type: "warning", confirmButtonText: "¼ÌĞø", cancelButtonText: "È¡Ïû" }
+      `å°†ä¸º ${targetId} åœ¨åç«¯ç”Ÿæˆ 5 ç»„æ¼”ç¤ºæ•°æ®ï¼ˆgt + é€€åŒ–å›¾åƒå­ç›®å½•ï¼‰ã€‚`,
+      "ç”Ÿæˆæ¼”ç¤ºæ•°æ®",
+      { type: "warning", confirmButtonText: "ç”Ÿæˆ", cancelButtonText: "å–æ¶ˆ" }
     );
   } catch {
     return;
@@ -243,19 +253,23 @@ async function generateDemoOnBackend() {
 
   if (generating.value) return;
   generating.value = true;
-  ElMessage({ type: "info", message: "¿ªÊ¼Éú³É£¬ÇëÉÔºò¡­" });
+  ElMessage({ type: "info", message: "å¼€å§‹ç”Ÿæˆï¼Œè¯·ç¨å" });
 
   try {
-    const res = await fetch("http://127.0.0.1:8000/dev/datasets/ds_demo/generate?task_type=all&count=5", {
+    const res = await fetch(`http://127.0.0.1:8000/dev/datasets/${targetId}/generate?task_type=all&count=5`, {
       method: "POST",
     });
     const ct = (res.headers.get("content-type") || "").toLowerCase();
     const data = ct.includes("application/json") ? await res.json() : await res.text();
     if (!res.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
     const created = typeof data === "object" && data ? data.created : null;
-    ElMessage({ type: "success", message: `ÒÑÉú³É£º${JSON.stringify(created ?? data)}` });
+    ElMessage({ type: "success", message: `ç”ŸæˆæˆåŠŸï¼š${JSON.stringify(created ?? data)}` });
+    await store.fetchDatasets();
+    if (targetId) {
+      await scanOne(targetId);
+    }
   } catch (e) {
-    ElMessage({ type: "error", message: `Éú³ÉÊ§°Ü£º${e?.message || e}` });
+    ElMessage({ type: "error", message: `ç”Ÿæˆå¤±è´¥ï¼š${e?.message || e}` });
   } finally {
     generating.value = false;
   }

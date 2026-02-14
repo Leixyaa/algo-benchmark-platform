@@ -1,146 +1,153 @@
 <template>
-  <div>
-    <div
-      style="
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 12px;
-      "
-    >
-      <div>
-        <h2 style="margin: 0 0 6px">任务中心</h2>
-        <div style="color: #666">
-          展示评测任务的状态、参数与结果概览。状态由后端 Celery/Redis 驱动，会自动刷新。
+  <div class="page">
+    <el-card shadow="never" class="card">
+      <template #header>
+        <div class="header">
+          <div class="headerLeft">
+            <div class="titleRow">
+              <h2 class="title">任务中心</h2>
+              <el-tag size="small" type="info">{{ filteredRows.length }} 条</el-tag>
+            </div>
+            <div class="subtitle">展示评测任务的状态、参数与结果概览。状态由后端 Celery/Redis 驱动，会自动刷新。</div>
+          </div>
+          <div class="headerRight">
+            <el-button type="primary" @click="goNewRun">发起评测</el-button>
+          </div>
         </div>
-      </div>
-
-      <div style="display: flex; gap: 8px; flex-wrap: wrap">
-        <el-button type="primary" @click="goNewRun">发起评测</el-button>
-        <el-button @click="mockOne">添加一条示例任务</el-button>
-        <el-button @click="refresh">刷新</el-button>
-        <el-button @click="exportDoneCsv">导出已完成CSV</el-button>
-        <el-button @click="exportDoneXlsx">导出已完成Excel</el-button>
-        <el-button type="danger" @click="clearDone">清理已完成</el-button>
-      </div>
-    </div>
-
-    <el-table :data="rows" size="small" border style="width: 100%">
-      <el-table-column prop="name" label="任务名" min-width="160" />
-      <el-table-column prop="id" label="Run ID" min-width="160" />
-      <el-table-column prop="dataset" label="数据集" min-width="140" />
-      <el-table-column prop="algorithm" label="算法" min-width="140" />
-
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)">
-            {{ statusText(row.status) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="综合分" width="100">
-        <template #default="{ row }">
-          <span>{{ row.score ?? "-" }}</span>
-        </template>
-      </el-table-column>
-
-
-      <el-table-column prop="createdAt" label="创建时间" width="170" />
-
-      <el-table-column label="操作" width="320" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openDetail(row)">详情</el-button>
-          <el-button
-            v-if="canCancel(row)"
-            size="small"
-            type="warning"
-            @click="cancel(row.id)"
-          >
-            取消
-          </el-button>
-          <el-button size="small" type="danger" @click="remove(row.id)">从列表隐藏</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <div v-if="rows.length === 0" style="color: #888; margin-top: 12px">
-      还没有任务。你可以点击右上角“发起评测”创建第一条任务。
-    </div>
-
-    <el-dialog v-model="detailVisible" title="任务详情" width="680px">
-      <div v-if="detail">
-        <div
-          style="
-            display: grid;
-            grid-template-columns: 120px 1fr;
-            row-gap: 8px;
-            column-gap: 8px;
-            margin-bottom: 12px;
-          "
-        >
-          <div style="color: #666">任务名</div><div>{{ detail.name }}</div>
-          <div style="color: #666">Run ID</div><div>{{ detail.id }}</div>
-          <div style="color: #666">数据集</div><div>{{ detail.dataset }}</div>
-          <div style="color: #666">算法</div><div>{{ detail.algorithm }}</div>
-          <div style="color: #666">状态</div><div>{{ statusText(detail.status) }}</div>
-          <div style="color: #666">创建时间</div><div>{{ detail.createdAt }}</div>
-        </div>
-
-        <div style="color: #666; margin: 0 0 6px">参数（后端 params 原样展示）</div>
-        <pre
-          style="
-            background: #0b1020;
-            color: #e7e7e7;
-            padding: 12px;
-            border-radius: 8px;
-            overflow: auto;
-          "
-        >{{ detail.raw?.params ?? {} }}</pre>
-
-        <div v-if="detail.raw?.error" style="color: #666; margin: 12px 0 6px">失败/取消原因</div>
-        <pre
-          v-if="detail.raw?.error"
-          style="
-            background: #1a0f12;
-            color: #ffd7d7;
-            padding: 12px;
-            border-radius: 8px;
-            overflow: auto;
-          "
-        >{{ detail.raw?.error }}</pre>
-
-        <div style="color: #666; margin: 12px 0 6px">结果指标</div>
-        <div
-          style="
-            display: grid;
-            grid-template-columns: 120px 1fr;
-            row-gap: 8px;
-            column-gap: 8px;
-          "
-        >
-          <div style="color: #666">PSNR</div><div>{{ detail.psnr ?? "-" }}</div>
-          <div style="color: #666">SSIM</div><div>{{ detail.ssim ?? "-" }}</div>
-          <div style="color: #666">NIQE</div><div>{{ detail.niqe ?? "-" }}</div>
-          <div style="color: #666">耗时</div><div>{{ detail.elapsed ?? "-" }}</div>
-          <div style="color: #666">综合分</div><div>{{ detail.score ?? "-" }}</div>
-          <div style="color: #666">推荐原因</div><div>{{ detail.reason ?? "-" }}</div>
-
-        </div>
-      </div>
-
-      <template #footer>
-        <el-button @click="detailVisible = false">关闭</el-button>
       </template>
-    </el-dialog>
+
+      <div class="toolbar">
+        <div class="filters">
+          <el-select v-model="statusFilter" clearable size="small" placeholder="状态" style="width: 130px">
+            <el-option v-for="x in statusOptions" :key="x.value" :label="x.label" :value="x.value" />
+          </el-select>
+          <el-select v-model="taskFilter" clearable size="small" placeholder="任务类型" style="width: 140px">
+            <el-option v-for="x in taskOptions" :key="x.value" :label="x.label" :value="x.value" />
+          </el-select>
+          <el-input
+            v-model="keyword"
+            clearable
+            size="small"
+            placeholder="搜索 Run ID / 数据集 / 算法"
+            style="width: 260px"
+          />
+        </div>
+
+        <div class="actions">
+          <el-button-group>
+            <el-button size="small" @click="refresh">刷新</el-button>
+            <el-button size="small" @click="mockOne">示例</el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button size="small" @click="exportDoneCsv">导出CSV</el-button>
+            <el-button size="small" @click="exportDoneXlsx">导出Excel</el-button>
+          </el-button-group>
+          <el-button size="small" type="danger" @click="clearDone">清理已完成</el-button>
+        </div>
+      </div>
+
+      <el-table :data="filteredRows" size="small" stripe border style="width: 100%" row-key="id">
+        <el-table-column prop="name" label="任务名" min-width="180" show-overflow-tooltip />
+        <el-table-column label="Run ID" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="task" label="任务类型" width="110" show-overflow-tooltip />
+        <el-table-column prop="dataset" label="数据集" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="algorithm" label="算法" min-width="160" show-overflow-tooltip />
+
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)">
+              {{ statusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="综合分" width="100" align="right">
+          <template #default="{ row }">
+            <span>{{ row.score ?? "-" }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="createdAt" label="创建时间" width="180" />
+
+        <el-table-column label="操作" width="240" fixed="right">
+          <template #default="{ row }">
+            <div class="rowActions">
+              <el-button size="small" @click="openDetail(row)">详情</el-button>
+              <el-button v-if="canCancel(row)" size="small" type="warning" @click="cancel(row.id)">取消</el-button>
+              <el-button size="small" type="danger" plain @click="remove(row.id)">隐藏</el-button>
+            </div>
+          </template>
+        </el-table-column>
+
+        <template #empty>
+          <div class="empty">
+            <div class="emptyTitle">暂无任务</div>
+            <div class="emptySub">点击右上角“发起评测”创建第一条任务。</div>
+          </div>
+        </template>
+      </el-table>
+
+      <el-dialog v-model="detailVisible" title="任务详情" width="760px">
+        <div v-if="detail" class="detail">
+          <el-descriptions size="small" :column="2" border>
+            <el-descriptions-item label="任务名">{{ detail.name }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="statusTagType(detail.status)">
+                {{ statusText(detail.status) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Run ID">
+              <span class="mono">{{ detail.id }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ detail.createdAt }}</el-descriptions-item>
+            <el-descriptions-item label="数据集">{{ detail.dataset }}</el-descriptions-item>
+            <el-descriptions-item label="算法">{{ detail.algorithm }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div class="detailGrid">
+            <div class="detailBlock">
+              <div class="blockTitle">参数</div>
+              <pre class="code codeDark">{{ formatJson(detail.raw?.params ?? {}) }}</pre>
+            </div>
+            <div class="detailBlock">
+              <div class="blockTitle">结果指标</div>
+              <el-descriptions size="small" :column="1" border>
+                <el-descriptions-item label="PSNR">{{ detail.psnr ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="SSIM">{{ detail.ssim ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="NIQE">{{ detail.niqe ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="耗时">{{ detail.elapsed ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="综合分">{{ detail.score ?? "-" }}</el-descriptions-item>
+              </el-descriptions>
+            </div>
+          </div>
+
+          <div v-if="detail.reason" class="reason">
+            <div class="blockTitle">推荐原因</div>
+            <div class="reasonText">{{ detail.reason }}</div>
+          </div>
+
+          <div v-if="detail.raw?.error" class="errorBlock">
+            <div class="blockTitle">失败/取消原因</div>
+            <pre class="code codeError">{{ detail.raw?.error }}</pre>
+          </div>
+        </div>
+
+        <template #footer>
+          <el-button @click="detailVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+    </el-card>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useAppStore } from "../stores/app";
+import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
 const router = useRouter();
 const store = useAppStore();
@@ -217,8 +224,44 @@ const rows = computed(() => {
   });
 });
 
+const statusFilter = ref("");
+const taskFilter = ref("");
+const keyword = ref("");
+
+const statusOptions = [
+  { value: "已完成", label: "已完成" },
+  { value: "运行中", label: "运行中" },
+  { value: "排队中", label: "排队中" },
+  { value: "失败", label: "失败" },
+  { value: "取消中", label: "取消中" },
+  { value: "已取消", label: "已取消" },
+];
+
+const taskOptions = computed(() =>
+  Object.entries(TASK_LABEL_BY_TYPE).map(([value, label]) => ({ value, label }))
+);
+
+const filteredRows = computed(() => {
+  const kw = String(keyword.value || "").trim().toLowerCase();
+  return (rows.value ?? []).filter((r) => {
+    if (statusFilter.value && r.status !== statusFilter.value) return false;
+    if (taskFilter.value && r.taskType !== taskFilter.value) return false;
+    if (!kw) return true;
+    const hay = `${r.id ?? ""} ${r.dataset ?? ""} ${r.algorithm ?? ""} ${r.name ?? ""}`.toLowerCase();
+    return hay.includes(kw);
+  });
+});
+
 function goNewRun() {
   router.push("/new-run");
+}
+
+function formatJson(v) {
+  try {
+    return JSON.stringify(v ?? null, null, 2);
+  } catch {
+    return String(v ?? "");
+  }
 }
 
 function statusText(status) {
@@ -377,7 +420,7 @@ const detail = ref(null);
 
 function openDetail(row) {
   // 用当前列表（已过滤隐藏）作为评分范围；这样解释是“在当前可见 runs 中的相对表现”
-  const ctx = buildScoringContext(rows.value);
+  const ctx = buildScoringContext(filteredRows.value);
   const s = scoreOne(row, ctx);
 
   detail.value = {
@@ -389,3 +432,148 @@ function openDetail(row) {
 }
 
 </script>
+
+<style scoped>
+.page {
+  padding: 12px;
+}
+
+.card {
+  border-radius: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.rowActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.empty {
+  padding: 28px 0;
+  text-align: center;
+}
+
+.emptyTitle {
+  font-size: 14px;
+  color: #374151;
+}
+
+.emptySub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.detailBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blockTitle {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.code {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.codeDark {
+  background: #0b1020;
+  color: #e7e7e7;
+}
+
+.codeError {
+  background: #1a0f12;
+  color: #ffd7d7;
+}
+
+.reasonText {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fafafa;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

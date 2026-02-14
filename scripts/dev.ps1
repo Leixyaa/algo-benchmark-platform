@@ -36,9 +36,9 @@ function Get-ListeningPid([int]$Port) {
   return $null
 }
 
-function Get-ProcessCommandLine([int]$Pid) {
+function Get-ProcessCommandLine([int]$ProcessId) {
   try {
-    $p = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $Pid) -ErrorAction SilentlyContinue
+    $p = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $ProcessId) -ErrorAction SilentlyContinue
     if ($p) { return $p.CommandLine }
   } catch {
   }
@@ -96,12 +96,13 @@ function Start-ServiceWindow([string]$Name, [string]$Title, [string]$WorkingDir,
     return
   }
 
-  $cmd = @"
-$host.ui.RawUI.WindowTitle = '$Title'
-Set-Location -LiteralPath '$WorkingDir'
-$env:PYTHONUTF8 = '1'
-$InnerCommand
-"@
+  $cmd = @(
+    "`$host.ui.RawUI.WindowTitle = '$Title'"
+    "Set-Location -LiteralPath '$WorkingDir'"
+    "`$env:PYTHONUTF8 = '1'"
+    $InnerCommand
+  ) -join "`r`n"
+
   $bytes = [Text.Encoding]::Unicode.GetBytes($cmd)
   $encoded = [Convert]::ToBase64String($bytes)
   $p = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-EncodedCommand", $encoded -WorkingDirectory $WorkingDir -PassThru
@@ -111,44 +112,178 @@ $InnerCommand
 $repoRoot = Get-RepoRoot
 $backendDir = Join-Path $repoRoot "backend"
 $webDir = Join-Path $repoRoot "web"
-$stateDir = Join-Path $repoRoot "logs\dev"
+$stateDir = Join-Path $repoRoot "logs\\dev"
 Ensure-Dir $stateDir
 
+$pidRedis = Join-Path $stateDir "redis.pid"
 $pidApi = Join-Path $stateDir "api.pid"
 $pidWorker = Join-Path $stateDir "worker.pid"
 $pidWeb = Join-Path $stateDir "web.pid"
+
+function Test-BackendDeps([string]$PythonExe) {
+  if (-not $PythonExe) { return $false }
+  if (-not (Test-Path -LiteralPath $PythonExe)) { return $false }
+  & $PythonExe -c "import fastapi,uvicorn,redis,celery" 1>$null 2>$null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-BackendVenv {
+  if (-not (Test-Command "python")) {
+    return $null
+  }
+
+  $venvDir = Join-Path $backendDir ".venv"
+  $venvPy = Join-Path $venvDir "Scripts\\python.exe"
+
+  if (-not (Test-Path -LiteralPath $venvPy)) {
+    Write-Host "Creating backend venv (.venv)..."
+    if ($DryRun) {
+      Write-Host ("  cd {0}" -f $backendDir)
+      Write-Host "  python -m venv .venv"
+    } else {
+      Push-Location $backendDir
+      try {
+        & python -m venv .venv
+      } finally {
+        Pop-Location
+      }
+    }
+  }
+
+  if ($InstallDeps -or -not (Test-BackendDeps $venvPy)) {
+    Write-Host "Installing backend deps (venv)..."
+    if ($DryRun) {
+      Write-Host ("  cd {0}" -f $backendDir)
+      Write-Host "  .\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt"
+    } else {
+      Push-Location $backendDir
+      try {
+        & $venvPy -m pip install -r requirements.txt
+      } finally {
+        Pop-Location
+      }
+    }
+  }
+
+  if (Test-Path -LiteralPath $venvPy) { return $venvPy }
+  return $null
+}
+
+function Start-LocalRedis {
+  if (-not (Test-Command "redis-server")) {
+    return $false
+  }
+  Write-Host "Starting Redis (local redis-server)..."
+  if ($DryRun) {
+    Write-Host "  redis-server --port 6379"
+    return $true
+  }
+  try {
+    $p = Start-Process -FilePath "redis-server" -ArgumentList "--port", "6379" -PassThru
+    Set-Content -LiteralPath $pidRedis -Value $p.Id -Encoding ascii
+  } catch {
+    return $false
+  }
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 200
+    if (Get-ListeningPid 6379) { return $true }
+  }
+  return $false
+}
+
+function Start-DockerDesktopIfAvailable {
+  $candidates = @()
+  if ($env:ProgramFiles) {
+    $candidates += (Join-Path $env:ProgramFiles "Docker\\Docker\\Docker Desktop.exe")
+  }
+  if ($env:LocalAppData) {
+    $candidates += (Join-Path $env:LocalAppData "Programs\\Docker\\Docker\\Docker Desktop.exe")
+  }
+
+  foreach ($p in $candidates) {
+    if (Test-Path -LiteralPath $p) {
+      Write-Host "Starting Docker Desktop..."
+      if ($DryRun) {
+        Write-Host ("  {0}" -f $p)
+      } else {
+        Start-Process -FilePath $p | Out-Null
+      }
+      return $true
+    }
+  }
+  return $false
+}
+
+function Wait-DockerReady {
+  if ($DryRun) { return $true }
+  for ($i = 0; $i -lt 30; $i++) {
+    try {
+      & docker info 1>$null 2>$null
+      return $true
+    } catch {
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $false
+}
 
 function Up-Redis {
   if ($SkipRedis) { return $true }
   $listeningPid = Get-ListeningPid 6379
   if ($listeningPid) {
-    Write-Host ("Redis 端口 6379 已被占用（pid {0}），跳过自动启动" -f $listeningPid)
+    Write-Host ("Redis ??? 6379 ???????pid {0}???????????????" -f $listeningPid)
     return $true
   }
+
   if (-not (Test-Command "docker")) {
-    Write-Host "Docker 未安装或不可用：跳过 Redis 自动启动（请确保本机 127.0.0.1:6379 可用）"
+    if (Start-LocalRedis) { return $true }
+    Write-Host "Docker ?????????δ??? redis-server???????????? Redis"
+    Write-Host "????? 127.0.0.1:6379 ???ú??????С?"
     return $false
   }
-  Write-Host "Ensuring Redis (docker container: algo-redis)..."
+
+  if (-not $DryRun) {
+    try {
+      & docker info 1>$null 2>$null
+    } catch {
+      $startedDesktop = Start-DockerDesktopIfAvailable
+      if ($startedDesktop) {
+        $null = Wait-DockerReady
+      }
+    }
+  }
+
   if ($DryRun) {
+    Write-Host "Ensuring Redis (docker container: algo-redis)..."
     Write-Host "  docker rm -f algo-redis 2>$null"
     Write-Host "  docker run --name algo-redis -p 6379:6379 -d redis:7"
     return $true
   }
+
   try {
     & docker info 1>$null 2>$null
   } catch {
-    Write-Host "Docker 似乎未启动（Docker Desktop/daemon 不可用）：无法自动启动 Redis"
-    Write-Host "请先启动 Docker Desktop，或自行启动本地 Redis（127.0.0.1:6379）后再运行。"
+    if (Start-LocalRedis) { return $true }
+    Write-Host "Docker daemon ?????????δ??? redis-server???????????? Redis"
+    Write-Host "????? 127.0.0.1:6379 ???ú??????С?"
     return $false
   }
 
-  try {
-    & docker rm -f algo-redis 2>$null | Out-Null
-    & docker run --name algo-redis -p 6379:6379 -d redis:7 | Out-Null
-  } catch {
-    Write-Host "Docker 命令执行失败：无法自动启动 Redis"
-    Write-Host "请先启动 Docker Desktop，或自行启动本地 Redis（127.0.0.1:6379）后再运行。"
+  Write-Host "Ensuring Redis (docker container: algo-redis)..."
+  $started = $false
+  for ($i = 0; $i -lt 8; $i++) {
+    try {
+      & docker rm -f algo-redis 2>$null | Out-Null
+      & docker run --name algo-redis -p 6379:6379 -d redis:7 | Out-Null
+      $started = $true
+      break
+    } catch {
+      Start-Sleep -Seconds 2
+    }
+  }
+
+  if (-not $started) {
+    Write-Host "Docker ???? Redis ???????? Docker Desktop ??????"
     return $false
   }
 
@@ -156,58 +291,49 @@ function Up-Redis {
     Start-Sleep -Milliseconds 200
     if (Get-ListeningPid 6379) { return $true }
   }
-  Write-Host "Redis 启动超时：6379 端口仍未监听"
+  Write-Host "Redis ?????????6379 ?????δ????"
   return $false
 }
 
 function Down-Redis {
   if ($SkipRedis) { return }
+  Stop-Pid -Name "Redis (local)" -PidPath $pidRedis
   if (-not (Test-Command "docker")) { return }
-  Write-Host "Stopping Redis (docker container: algo-redis)..."
   if ($DryRun) {
+    Write-Host "Stopping Redis (docker container: algo-redis)..."
     Write-Host "  docker rm -f algo-redis 2>$null"
     return
   }
   try {
+    & docker info 1>$null 2>$null
     & docker rm -f algo-redis 2>$null | Out-Null
   } catch {
-    Write-Host "Docker 不可用（daemon 未启动或连接失败）：跳过停止 Redis 容器"
+    Write-Host "Docker ????????????? Redis ????"
   }
 }
 
 function Maybe-Install {
-  if (-not $InstallDeps) { return }
+  $needWebInstall = $InstallDeps -or (-not (Test-Path -LiteralPath (Join-Path $webDir "node_modules")))
 
-  if (-not (Test-Command "python")) {
-    Write-Host "python 不可用：跳过后端依赖安装"
-  } else {
-    Write-Host "Installing backend deps..."
-    if ($DryRun) {
-      Write-Host ("  cd {0}" -f $backendDir)
-      Write-Host "  python -m pip install -r requirements.txt"
-    } else {
-      Push-Location $backendDir
-      try {
-        & python -m pip install -r requirements.txt
-      } finally {
-        Pop-Location
-      }
-    }
+  if (-not $SkipBackend -or -not $SkipWorker) {
+    $null = Ensure-BackendVenv
   }
 
-  if (-not (Test-Command "npm")) {
-    Write-Host "npm 不可用：跳过前端依赖安装"
-  } else {
-    Write-Host "Installing web deps..."
-    if ($DryRun) {
-      Write-Host ("  cd {0}" -f $webDir)
-      Write-Host "  npm install"
+  if (-not $SkipWeb -and $needWebInstall) {
+    if (-not (Test-Command "npm")) {
+      Write-Host "npm ?????????????????????"
     } else {
-      Push-Location $webDir
-      try {
-        & npm install
-      } finally {
-        Pop-Location
+      Write-Host "Installing web deps..."
+      if ($DryRun) {
+        Write-Host ("  cd {0}" -f $webDir)
+        Write-Host "  npm install"
+      } else {
+        Push-Location $webDir
+        try {
+          & npm install
+        } finally {
+          Pop-Location
+        }
       }
     }
   }
@@ -219,34 +345,41 @@ function Up-Services {
   if (-not $redisOk) {
     if (-not $SkipBackend -or -not $SkipWorker) {
       Write-Host ""
-      Write-Host "Redis 未就绪：已终止启动流程（避免 Backend/Worker 无法连接而持续报错）。"
-      Write-Host "可选：先启动 Docker Desktop 或本地 Redis；或使用 -SkipBackend/-SkipWorker 临时只启前端。"
+      Write-Host "Redis δ???????????????????????? Backend/Worker ????????????"
+      Write-Host "??????????? Docker Desktop ??? Redis??????? -SkipBackend/-SkipWorker ??????????"
       exit 1
     }
   }
 
+  $backendPy = $null
+  if (-not $SkipBackend -or -not $SkipWorker) {
+    $backendPy = Ensure-BackendVenv
+    if (-not $backendPy) {
+      Write-Host ""
+      Write-Host "?????????δ????????????? Backend/Worker??"
+      exit 1
+    }
+  }
+
+  $apiLog = Join-Path $stateDir "api.log"
+  $workerLog = Join-Path $stateDir "worker.log"
+  $webLog = Join-Path $stateDir "web.log"
+
   if (-not $SkipBackend) {
     $pid8000 = Get-ListeningPid 8000
     if ($pid8000) {
-      $stopped = Stop-IfListeningMatchesRepo -Name "Backend API" -Port 8000 -RepoRootPath $repoRoot
-      $pid8000b = Get-ListeningPid 8000
-      if ($pid8000b) {
-        Write-Host ("端口 8000 已被占用（pid {0}），跳过启动 Backend API" -f $pid8000b)
-      } else {
-        Start-ServiceWindow `
-          -Name "Backend API" `
-          -Title "ABP - API (uvicorn)" `
-          -WorkingDir $backendDir `
-          -InnerCommand "python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000" `
-          -PidPath $pidApi
-      }
+      $null = Stop-IfListeningMatchesRepo -Name "Backend API" -Port 8000 -RepoRootPath $repoRoot
+    }
+
+    if (Get-ListeningPid 8000) {
+      Write-Host ("??? 8000 ???????pid {0}???????????? Backend API" -f (Get-ListeningPid 8000))
     } else {
-    Start-ServiceWindow `
-      -Name "Backend API" `
-      -Title "ABP - API (uvicorn)" `
-      -WorkingDir $backendDir `
-      -InnerCommand "python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000" `
-      -PidPath $pidApi
+      Start-ServiceWindow `
+        -Name "Backend API" `
+        -Title "ABP - API (uvicorn)" `
+        -WorkingDir $backendDir `
+        -InnerCommand ('"{0}" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 2>&1 | Tee-Object -FilePath ''{1}''' -f $backendPy, $apiLog) `
+        -PidPath $pidApi
     }
   }
 
@@ -255,40 +388,38 @@ function Up-Services {
       -Name "Celery Worker" `
       -Title "ABP - Worker (celery)" `
       -WorkingDir $backendDir `
-      -InnerCommand "python -m celery -A app.celery_app.celery_app worker -l info -P solo" `
+      -InnerCommand ('"{0}" -m celery -A app.celery_app.celery_app worker -l info -P solo 2>&1 | Tee-Object -FilePath ''{1}''' -f $backendPy, $workerLog) `
       -PidPath $pidWorker
   }
 
   if (-not $SkipWeb) {
     $pid5173 = Get-ListeningPid 5173
     if ($pid5173) {
-      $stopped = Stop-IfListeningMatchesRepo -Name "Web (Vite)" -Port 5173 -RepoRootPath $repoRoot
-      $pid5173b = Get-ListeningPid 5173
-      if ($pid5173b) {
-        Write-Host ("端口 5173 已被占用（pid {0}），跳过启动 Web" -f $pid5173b)
-      } else {
-        Start-ServiceWindow `
-          -Name "Web (Vite)" `
-          -Title "ABP - Web (vite)" `
-          -WorkingDir $webDir `
-          -InnerCommand "npm run dev" `
-          -PidPath $pidWeb
-      }
+      $null = Stop-IfListeningMatchesRepo -Name "Web (Vite)" -Port 5173 -RepoRootPath $repoRoot
+    }
+
+    if (Get-ListeningPid 5173) {
+      Write-Host ("??? 5173 ???????pid {0}???????????? Web" -f (Get-ListeningPid 5173))
     } else {
-    Start-ServiceWindow `
-      -Name "Web (Vite)" `
-      -Title "ABP - Web (vite)" `
-      -WorkingDir $webDir `
-      -InnerCommand "npm run dev" `
-      -PidPath $pidWeb
+      Start-ServiceWindow `
+        -Name "Web (Vite)" `
+        -Title "ABP - Web (vite)" `
+        -WorkingDir $webDir `
+        -InnerCommand ('npm run dev 2>&1 | Tee-Object -FilePath ''{0}''' -f $webLog) `
+        -PidPath $pidWeb
     }
   }
 
   Write-Host ""
   Write-Host "URLs:"
   Write-Host "  Backend health:  http://127.0.0.1:8000/health"
-  Write-Host "  Backend docs:   http://127.0.0.1:8000/docs"
-  Write-Host "  Frontend:       http://localhost:5173/"
+  Write-Host "  Backend docs:    http://127.0.0.1:8000/docs"
+  Write-Host "  Frontend:        http://localhost:5173/"
+  Write-Host ""
+  Write-Host "Logs:"
+  Write-Host ("  API:     {0}" -f (Join-Path $stateDir "api.log"))
+  Write-Host ("  Worker:  {0}" -f (Join-Path $stateDir "worker.log"))
+  Write-Host ("  Web:     {0}" -f (Join-Path $stateDir "web.log"))
 }
 
 function Down-Services {

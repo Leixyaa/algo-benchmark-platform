@@ -28,9 +28,9 @@ def find_paired_images(
     limit: int = 5,
 ) -> List[PairedImage]:
     """
-    在 backend/data/<dataset_id>/<input_dirname> 与 <gt_dirname> 中找同名文件配对
-    - 返回最多 limit 对
-    - 找不到则返回 []
+    在 backend/data/<dataset_id>/<input_dirname> 与 <gt_dirname> 之间按同名文件配对。
+    - 最多返回 limit 对
+    - 若无配对则返回 []
     """
     ds_dir = data_root / dataset_id
     input_dir = ds_dir / input_dirname
@@ -42,7 +42,7 @@ def find_paired_images(
     if not input_files:
         return []
 
-    # 按相对路径/文件名匹配：优先匹配同名文件
+    # 规则：输入目录与 gt/ 下同名文件配对
     pairs: List[PairedImage] = []
     for ip in sorted(input_files)[: max(limit * 5, 50)]:
         gp = gt_dir / ip.name
@@ -56,3 +56,28 @@ def find_paired_images(
 
 def find_dehaze_pairs(data_root: Path, dataset_id: str, limit: int = 5) -> List[PairedImage]:
     return find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt", limit=limit)
+
+
+def count_paired_images(
+    data_root: Path,
+    dataset_id: str,
+    input_dirname: str,
+    gt_dirname: str = "gt",
+) -> int:
+    ds_dir = data_root / dataset_id
+    input_dir = ds_dir / input_dirname
+    gt_dir = ds_dir / gt_dirname
+    if not input_dir.exists() or not gt_dir.exists():
+        return 0
+
+    gt_names = {p.name for p in gt_dir.rglob("*") if _is_img(p)}
+    if not gt_names:
+        return 0
+
+    n = 0
+    for ip in input_dir.rglob("*"):
+        if not _is_img(ip):
+            continue
+        if ip.name in gt_names:
+            n += 1
+    return n

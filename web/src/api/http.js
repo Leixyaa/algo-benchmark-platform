@@ -1,11 +1,10 @@
 // web/src/api/http.js
-// 极简 HTTP 封装：只处理 JSON 请求/响应 + 统一错误。
-// 目的：让 Pinia store / 视图层不关心 fetch 细节，专注业务状态。
+// ???? HTTP ?????JSON ????/??????????
 
-const API_BASE = "http://127.0.0.1:8000"; // 后端端口固定 8000（严格不改）
+const API_BASE = "http://127.0.0.1:8000";
 
 /**
- * @param {string} path 例如 "/runs"
+ * @param {string} path ???? "/runs"
  * @param {{method?: string, query?: Record<string, any>, body?: any}} opts
  */
 export async function request(path, { method = "GET", query, body } = {}) {
@@ -25,11 +24,11 @@ export async function request(path, { method = "GET", query, body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-  // FastAPI 默认：非 2xx 会带 detail。这里统一抛一个可读错误。
   if (!res.ok) {
+    let data = null;
     let detail = "";
     try {
-      const data = await res.json();
+      data = await res.json();
       detail = data?.detail ? JSON.stringify(data.detail) : JSON.stringify(data);
     } catch {
       try {
@@ -42,10 +41,13 @@ export async function request(path, { method = "GET", query, body } = {}) {
     const msg = `[${res.status}] ${method} ${path}${detail ? ` - ${detail}` : ""}`;
     const err = new Error(msg);
     err.status = res.status;
+    if (data && typeof data === "object") {
+      err.data = data;
+      err.detail = data.detail;
+    }
     throw err;
   }
 
-  // /health 之类始终 JSON；为了稳妥，如果没 body 就返回 null
   const text = await res.text();
   if (!text) return null;
   return JSON.parse(text);

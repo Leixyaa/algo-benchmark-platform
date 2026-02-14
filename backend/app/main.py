@@ -1,4 +1,4 @@
-# -*- coding: gbk -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import time
@@ -76,6 +76,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+TASK_LABEL_BY_TYPE = {
+    "denoise": "å»å™ª",
+    "deblur": "å»æ¨¡ç³Š",
+    "dehaze": "å»é›¾",
+    "sr": "è¶…åˆ†è¾¨ç‡",
+    "lowlight": "ä½ç…§åº¦å¢å¼º",
+    "video_denoise": "è§†é¢‘å»å™ª",
+    "video_sr": "è§†é¢‘è¶…åˆ†",
+}
+
+def api_error(status_code: int, error: str, message: str, **extra):
+    detail = {"error": error, "message": message}
+    if extra:
+        detail.update(extra)
+    raise HTTPException(status_code=status_code, detail=detail)
+
 
 @app.get("/health")
 def health():
@@ -88,140 +104,165 @@ def root():
 
 
 def _ensure_catalog_defaults(r):
-    if not list_datasets(r, limit=1):
-        created = time.time()
-        save_dataset(
-            r,
-            "ds_demo",
-            {
-                "dataset_id": "ds_demo",
-                "name": "Demo-ÑùÀıÊı¾İ¼¯",
-                "type": "Í¼Ïñ",
-                "size": "10 ÕÅ",
-                "created_at": created,
-            },
-        )
+    created = time.time()
 
-    if not list_algorithms(r, limit=1):
-        created = time.time()
-        defaults = [
-            {
-                "algorithm_id": "alg_dn_cnn",
-                "task": "È¥Ôë",
-                "name": "FastNLMeans(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
-            },
-            {
-                "algorithm_id": "alg_denoise_bilateral",
-                "task": "È¥Ôë",
-                "name": "Bilateral(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
-            },
-            {
-                "algorithm_id": "alg_denoise_gaussian",
-                "task": "È¥Ôë",
-                "name": "Gaussian(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"gaussian_sigma": 1.0},
-            },
-            {
-                "algorithm_id": "alg_denoise_median",
-                "task": "È¥Ôë",
-                "name": "Median(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"median_ksize": 3},
-            },
-            {
-                "algorithm_id": "alg_dehaze_dcp",
-                "task": "È¥Îí",
-                "name": "DCP°µÍ¨µÀÏÈÑé(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
-            },
-            {
-                "algorithm_id": "alg_dehaze_clahe",
-                "task": "È¥Îí",
-                "name": "CLAHE(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"clahe_clip_limit": 2.0},
-            },
-            {
-                "algorithm_id": "alg_dehaze_gamma",
-                "task": "È¥Îí",
-                "name": "Gamma(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"gamma": 0.75},
-            },
-            {
-                "algorithm_id": "alg_deblur_unsharp",
-                "task": "È¥Ä£ºı",
-                "name": "UnsharpMask(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
-            },
-            {
-                "algorithm_id": "alg_deblur_laplacian",
-                "task": "È¥Ä£ºı",
-                "name": "LaplacianSharpen(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"laplacian_strength": 0.7},
-            },
-            {
-                "algorithm_id": "alg_sr_bicubic",
-                "task": "³¬·Ö±æÂÊ",
-                "name": "Bicubic(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {},
-            },
-            {
-                "algorithm_id": "alg_sr_lanczos",
-                "task": "³¬·Ö±æÂÊ",
-                "name": "Lanczos(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {},
-            },
-            {
-                "algorithm_id": "alg_sr_nearest",
-                "task": "³¬·Ö±æÂÊ",
-                "name": "Nearest(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {},
-            },
-            {
-                "algorithm_id": "alg_lowlight_gamma",
-                "task": "µÍÕÕ¶ÈÔöÇ¿",
-                "name": "Gamma(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"lowlight_gamma": 0.6},
-            },
-            {
-                "algorithm_id": "alg_lowlight_clahe",
-                "task": "µÍÕÕ¶ÈÔöÇ¿",
-                "name": "CLAHE(»ùÏß)",
-                "impl": "OpenCV",
-                "version": "v1",
-                "default_params": {"clahe_clip_limit": 2.5},
-            },
-        ]
-        for x in defaults:
+    demo_ds = {
+        "dataset_id": "ds_demo",
+        "name": "Demo-æ ·ä¾‹æ•°æ®é›†",
+        "type": "å›¾åƒ",
+        "size": "10 å¼ ",
+        "created_at": created,
+        "meta": {},
+    }
+    cur_ds = load_dataset(r, "ds_demo")
+    if not cur_ds:
+        save_dataset(r, "ds_demo", demo_ds)
+    else:
+        need_patch = False
+        for k in ("name", "type", "size"):
+            v = str(cur_ds.get(k) or "")
+            if not v or "?" in v or "\ufffd" in v:
+                cur_ds[k] = demo_ds[k]
+                need_patch = True
+        if need_patch:
+            if not isinstance(cur_ds.get("meta"), dict):
+                cur_ds["meta"] = {}
+            save_dataset(r, "ds_demo", cur_ds)
+
+    defaults = [
+        {
+            "algorithm_id": "alg_dn_cnn",
+            "task": "å»å™ª",
+            "name": "FastNLMeans(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
+        },
+        {
+            "algorithm_id": "alg_denoise_bilateral",
+            "task": "å»å™ª",
+            "name": "Bilateral(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
+        },
+        {
+            "algorithm_id": "alg_denoise_gaussian",
+            "task": "å»å™ª",
+            "name": "Gaussian(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"gaussian_sigma": 1.0},
+        },
+        {
+            "algorithm_id": "alg_denoise_median",
+            "task": "å»å™ª",
+            "name": "Median(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"median_ksize": 3},
+        },
+        {
+            "algorithm_id": "alg_dehaze_dcp",
+            "task": "å»é›¾",
+            "name": "DCPæš—é€šé“å…ˆéªŒ(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
+        },
+        {
+            "algorithm_id": "alg_dehaze_clahe",
+            "task": "å»é›¾",
+            "name": "CLAHE(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"clahe_clip_limit": 2.0},
+        },
+        {
+            "algorithm_id": "alg_dehaze_gamma",
+            "task": "å»é›¾",
+            "name": "Gamma(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"gamma": 0.75},
+        },
+        {
+            "algorithm_id": "alg_deblur_unsharp",
+            "task": "å»æ¨¡ç³Š",
+            "name": "UnsharpMask(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
+        },
+        {
+            "algorithm_id": "alg_deblur_laplacian",
+            "task": "å»æ¨¡ç³Š",
+            "name": "LaplacianSharpen(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"laplacian_strength": 0.7},
+        },
+        {
+            "algorithm_id": "alg_sr_bicubic",
+            "task": "è¶…åˆ†è¾¨ç‡",
+            "name": "Bicubic(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {},
+        },
+        {
+            "algorithm_id": "alg_sr_lanczos",
+            "task": "è¶…åˆ†è¾¨ç‡",
+            "name": "Lanczos(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {},
+        },
+        {
+            "algorithm_id": "alg_sr_nearest",
+            "task": "è¶…åˆ†è¾¨ç‡",
+            "name": "Nearest(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {},
+        },
+        {
+            "algorithm_id": "alg_lowlight_gamma",
+            "task": "ä½ç…§åº¦å¢å¼º",
+            "name": "Gamma(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"lowlight_gamma": 0.6},
+        },
+        {
+            "algorithm_id": "alg_lowlight_clahe",
+            "task": "ä½ç…§åº¦å¢å¼º",
+            "name": "CLAHE(åŸºçº¿)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"clahe_clip_limit": 2.5},
+        },
+    ]
+    for x in defaults:
+        cur = load_algorithm(r, x["algorithm_id"])
+        if not cur:
             x2 = dict(x)
             x2["created_at"] = created
             save_algorithm(r, x2["algorithm_id"], x2)
+            continue
+        need_patch = False
+        for k in ("task", "name", "impl", "version"):
+            v = str(cur.get(k) or "")
+            if not v or "?" in v or "\ufffd" in v:
+                cur[k] = x[k]
+                need_patch = True
+        if not isinstance(cur.get("default_params"), dict) and isinstance(x.get("default_params"), dict):
+            cur["default_params"] = x["default_params"]
+            need_patch = True
+        if need_patch:
+            if not isinstance(cur.get("created_at"), (int, float)):
+                cur["created_at"] = created
+            save_algorithm(r, x["algorithm_id"], cur)
 
 
 def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
@@ -241,18 +282,40 @@ def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
                 shutil.copyfileobj(src, dst)
 
 
-def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str]:
+def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str, dict]:
     ds_dir = data_root / dataset_id
     gt_dir = ds_dir / "gt"
     if not gt_dir.exists():
-        return "Í¼Ïñ", "0 ÕÅ"
+        return "å›¾åƒ", "0 å¼ ", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
     n = 0
     for p in gt_dir.iterdir():
         if p.is_file():
             suf = p.suffix.lower()
             if suf in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
                 n += 1
-    return "Í¼Ïñ", f"{n} ÕÅ"
+    from .vision.dataset_io import IMG_EXTS, count_paired_images
+
+    input_dir_by_task = {
+        "dehaze": "hazy",
+        "denoise": "noisy",
+        "deblur": "blur",
+        "sr": "lr",
+        "lowlight": "dark",
+        "video_denoise": "noisy",
+        "video_sr": "lr",
+    }
+    counts_by_dir = {}
+    for d in {"gt", *input_dir_by_task.values()}:
+        dd = ds_dir / d
+        if not dd.exists():
+            counts_by_dir[d] = 0
+            continue
+        counts_by_dir[d] = sum(1 for p in dd.rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTS)
+
+    pairs_by_task = {t: count_paired_images(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt") for t, dirn in input_dir_by_task.items()}
+    supported = sorted([t for t, c in pairs_by_task.items() if c > 0])
+    meta = {"supported_task_types": supported, "pairs_by_task": pairs_by_task, "counts_by_dir": counts_by_dir}
+    return "å›¾åƒ", f"{n} å¼ ", meta
 
 
 @app.get("/datasets")
@@ -276,6 +339,7 @@ def create_dataset(payload: DatasetCreate):
         "type": payload.type,
         "size": payload.size,
         "created_at": created,
+        "meta": {},
     }
     save_dataset(r, dataset_id, data)
     return DatasetOut(**data)
@@ -294,6 +358,8 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch):
         cur["type"] = payload.type
     if payload.size is not None:
         cur["size"] = payload.size
+    if not isinstance(cur.get("meta"), dict):
+        cur["meta"] = {}
     save_dataset(r, dataset_id, cur)
     return DatasetOut(**cur)
 
@@ -316,9 +382,10 @@ def scan_dataset(dataset_id: str):
     if not cur:
         raise HTTPException(status_code=404, detail="dataset_not_found")
     data_root = Path(__file__).resolve().parents[1] / "data"
-    t, size = _scan_dataset_on_disk(data_root, dataset_id)
+    t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
     cur["type"] = t
     cur["size"] = size
+    cur["meta"] = meta
     save_dataset(r, dataset_id, cur)
     return DatasetOut(**cur)
 
@@ -333,9 +400,10 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
         cur = {
             "dataset_id": dataset_id,
             "name": dataset_id,
-            "type": "Í¼Ïñ",
+            "type": "å›¾åƒ",
             "size": "-",
             "created_at": created,
+            "meta": {},
         }
 
     try:
@@ -349,9 +417,10 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
         shutil.rmtree(ds_dir)
     _safe_extract_zip_bytes(zip_bytes, ds_dir)
 
-    t, size = _scan_dataset_on_disk(data_root, dataset_id)
+    t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
     cur["type"] = t
     cur["size"] = size
+    cur["meta"] = meta
     save_dataset(r, dataset_id, cur)
     return DatasetOut(**cur)
 
@@ -373,6 +442,25 @@ def get_algorithms(limit: int = 500):
         "alg_lowlight_gamma": {"lowlight_gamma": 0.6},
         "alg_lowlight_clahe": {"clahe_clip_limit": 2.5},
     }
+    presets_by_id = {
+        "alg_dn_cnn": {
+            "speed": {"nlm_h": 7, "nlm_hColor": 7, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 15},
+            "quality": {"nlm_h": 12, "nlm_hColor": 12, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
+        },
+        "alg_denoise_bilateral": {
+            "speed": {"bilateral_d": 5, "bilateral_sigmaColor": 25, "bilateral_sigmaSpace": 25},
+            "quality": {"bilateral_d": 9, "bilateral_sigmaColor": 50, "bilateral_sigmaSpace": 50},
+        },
+        "alg_denoise_gaussian": {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}},
+        "alg_denoise_median": {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}},
+        "alg_dehaze_dcp": {"speed": {"dcp_patch": 7, "dcp_omega": 0.9, "dcp_t0": 0.12}, "quality": {"dcp_patch": 21, "dcp_omega": 0.97, "dcp_t0": 0.08}},
+        "alg_dehaze_clahe": {"speed": {"clahe_clip_limit": 1.5}, "quality": {"clahe_clip_limit": 3.0}},
+        "alg_dehaze_gamma": {"speed": {"gamma": 0.8}, "quality": {"gamma": 0.65}},
+        "alg_deblur_unsharp": {"speed": {"unsharp_sigma": 0.8, "unsharp_amount": 1.2}, "quality": {"unsharp_sigma": 1.2, "unsharp_amount": 2.0}},
+        "alg_deblur_laplacian": {"speed": {"laplacian_strength": 0.5}, "quality": {"laplacian_strength": 0.9}},
+        "alg_lowlight_gamma": {"speed": {"lowlight_gamma": 0.7}, "quality": {"lowlight_gamma": 0.55}},
+        "alg_lowlight_clahe": {"speed": {"clahe_clip_limit": 2.0}, "quality": {"clahe_clip_limit": 3.5}},
+    }
 
     items = list_algorithms(r, limit=limit) or []
     out = []
@@ -382,6 +470,9 @@ def get_algorithms(limit: int = 500):
             dp = x.get("default_params")
             if not isinstance(dp, dict) or not dp:
                 x = {**x, "default_params": defaults_by_id.get(alg_id, {})}
+            pp = x.get("param_presets")
+            if not isinstance(pp, dict) or not pp:
+                x = {**x, "param_presets": presets_by_id.get(alg_id, {})}
         out.append(AlgorithmOut(**x).model_dump())
     return out
 
@@ -402,6 +493,7 @@ def create_algorithm(payload: AlgorithmCreate):
         "version": payload.version,
         "created_at": created,
         "default_params": payload.default_params or {},
+        "param_presets": payload.param_presets or {},
     }
     save_algorithm(r, algorithm_id, data)
     return AlgorithmOut(**data)
@@ -424,6 +516,8 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
         cur["version"] = payload.version
     if payload.default_params is not None:
         cur["default_params"] = payload.default_params
+    if payload.param_presets is not None:
+        cur["param_presets"] = payload.param_presets
     save_algorithm(r, algorithm_id, cur)
     return AlgorithmOut(**cur)
 
@@ -511,15 +605,74 @@ def remove_preset(preset_id: str):
 @app.post("/runs", response_model=RunOut)
 def create_run(payload: RunCreate):
     r = make_redis()
+    task_type = (payload.task_type or "").strip().lower()
+    dataset_id = (payload.dataset_id or "").strip()
+    algorithm_id = (payload.algorithm_id or "").strip()
+    if task_type not in TASK_LABEL_BY_TYPE:
+        api_error(400, "bad_task_type", "ä¸æ”¯æŒçš„ä»»åŠ¡ç±»å‹", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+    if not dataset_id:
+        api_error(400, "dataset_id_required", "ç¼ºå°‘ dataset_id")
+    if not algorithm_id:
+        api_error(400, "algorithm_id_required", "ç¼ºå°‘ algorithm_id")
+
+    ds = load_dataset(r, dataset_id)
+    if not ds:
+        api_error(404, "dataset_not_found", "æ•°æ®é›†ä¸å­˜åœ¨", dataset_id=dataset_id)
+    alg = load_algorithm(r, algorithm_id)
+    if not alg:
+        api_error(404, "algorithm_not_found", "ç®—æ³•ä¸å­˜åœ¨", algorithm_id=algorithm_id)
+
+    expected_task = TASK_LABEL_BY_TYPE.get(task_type, "")
+    if expected_task and (alg.get("task") or "").strip() != expected_task:
+        api_error(
+            409,
+            "algorithm_task_mismatch",
+            "ç®—æ³•ä»»åŠ¡ä¸ä»»åŠ¡ç±»å‹ä¸åŒ¹é…",
+            task_type=task_type,
+            task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
+            expected_algorithm_task=expected_task,
+            algorithm_task=(alg.get("task") or "").strip(),
+        )
+
+    if bool(getattr(payload, "strict_validate", False)):
+        from .vision.dataset_io import count_paired_images
+
+        data_root = Path(__file__).resolve().parents[1] / "data"
+        input_dir_by_task = {
+            "dehaze": "hazy",
+            "denoise": "noisy",
+            "deblur": "blur",
+            "sr": "lr",
+            "lowlight": "dark",
+            "video_denoise": "noisy",
+            "video_sr": "lr",
+        }
+        input_dirname = input_dir_by_task.get(task_type)
+        if not input_dirname:
+            api_error(400, "bad_task_type", "ä¸æ”¯æŒçš„ä»»åŠ¡ç±»å‹", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+        pair_count = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+        if pair_count <= 0:
+            api_error(
+                409,
+                "dataset_no_pairs_for_task",
+                "å½“å‰ä»»åŠ¡æ— å¯ç”¨é…å¯¹ï¼Œè¯·æ£€æŸ¥è¾“å…¥ç›®å½•ä¸ gt/ åŒåæ–‡ä»¶å¹¶é‡æ–°æ‰«æ",
+                task_type=task_type,
+                task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
+                dataset_id=dataset_id,
+                expected_dirs=[input_dirname, "gt"],
+                pair_count=pair_count,
+            )
+
     run_id = uuid.uuid4().hex[:12]
     created = time.time()
 
     run = {
         "run_id": run_id,
-        "task_type": payload.task_type,
-        "dataset_id": payload.dataset_id,
-        "algorithm_id": payload.algorithm_id,
+        "task_type": task_type,
+        "dataset_id": dataset_id,
+        "algorithm_id": algorithm_id,
         "params": payload.params,
+        "strict_validate": bool(getattr(payload, "strict_validate", False)),
         "samples": [],
         "cancel_requested": False,
 
@@ -554,9 +707,9 @@ def export_runs(
     limit: int = Query(500, ge=1, le=5000),
 ):
     """
-    µ¼³ö runs£¨CSV / Excel£©
-    - ±¾½×¶Î£ºÖ»¶Á Redis µÄÀúÊ· runs
-    - ¹ıÂËÌõ¼ş£ºstatus/task_type/dataset_id/algorithm_id
+    å¯¼å‡º runs ä¸º CSV / Excelã€‚
+    - ä» Redis è·å– runs
+    - æ”¯æŒæŒ‰ status/task_type/dataset_id/algorithm_id è¿‡æ»¤
     """
     fmt = (format or "").lower().strip()
     if fmt not in ("csv", "xlsx"):
@@ -565,7 +718,7 @@ def export_runs(
     r = make_redis()
     runs = list_runs(r, limit=limit)
 
-    # ===== ¹ıÂË =====
+    # ===== è¿‡æ»¤ =====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -579,23 +732,36 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== ±âÆ½»¯±íÍ·£¨ÎÈ¶¨×Ö¶Î£¬Ç°¶Ë/ÂÛÎÄºÃ½âÊÍ£©=====
+    # ===== å±•å¹³éƒ¨åˆ† params/samples å­—æ®µ =====
     headers = [
         "run_id",
         "task_type",
+        "task_label",
         "dataset_id",
+        "dataset_name",
         "algorithm_id",
+        "algorithm_name",
+        "algorithm_task",
+        "batch_id",
+        "batch_name",
+        "param_scheme",
         "status",
         "created_at",
         "started_at",
         "finished_at",
         "elapsed",
+        "strict_validate",
+        "data_mode",
+        "input_dir",
+        "pair_total",
+        "pair_used",
         "PSNR",
         "SSIM",
         "NIQE",
         "error",
         "params_json",
         "samples_json",
+        "record_json",
     ]
 
     def to_row(x: dict) -> dict:
@@ -603,22 +769,40 @@ def export_runs(
         params = dict(x.get("params") or {})
         params.pop("niqe_fallback", None)
         samples = x.get("samples") or []
+        record = x.get("record") if isinstance(x.get("record"), dict) else {}
+        ds = record.get("dataset") if isinstance(record.get("dataset"), dict) else {}
+        alg = record.get("algorithm") if isinstance(record.get("algorithm"), dict) else {}
+        batch = record.get("batch") if isinstance(record.get("batch"), dict) else {}
+        task_t = x.get("task_type")
         return {
             "run_id": x.get("run_id"),
             "task_type": x.get("task_type"),
+            "task_label": TASK_LABEL_BY_TYPE.get(str(task_t or ""), ""),
             "dataset_id": x.get("dataset_id"),
+            "dataset_name": ds.get("name"),
             "algorithm_id": x.get("algorithm_id"),
+            "algorithm_name": alg.get("name"),
+            "algorithm_task": alg.get("task"),
+            "batch_id": batch.get("batch_id") or params.get("batch_id"),
+            "batch_name": batch.get("batch_name") or params.get("batch_name"),
+            "param_scheme": batch.get("param_scheme") or params.get("param_scheme"),
             "status": x.get("status"),
             "created_at": x.get("created_at"),
             "started_at": x.get("started_at"),
             "finished_at": x.get("finished_at"),
             "elapsed": x.get("elapsed"),
+            "strict_validate": x.get("strict_validate"),
+            "data_mode": record.get("data_mode"),
+            "input_dir": record.get("input_dir"),
+            "pair_total": record.get("pair_total"),
+            "pair_used": record.get("pair_used"),
             "PSNR": m.get("PSNR"),
             "SSIM": m.get("SSIM"),
             "NIQE": m.get("NIQE"),
             "error": x.get("error"),
             "params_json": json.dumps(params, ensure_ascii=False),
             "samples_json": json.dumps(samples, ensure_ascii=False),
+            "record_json": json.dumps(record, ensure_ascii=False),
         }
 
     rows = [to_row(x) for x in runs]
@@ -673,9 +857,9 @@ def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
 ):
     """
-    ÇåÀí runs ÀúÊ·¼ÇÂ¼£¨Ä¬ÈÏÇåÀíÒÑÍê³É done£©
-    - status=done£ºÖ»É¾ÒÑÍê³É
-    - status=all£ºÈ«²¿É¾³ı
+    æ¸…ç©º runsï¼ˆé»˜è®¤æ¸…ç©º doneï¼‰ã€‚
+    - status=doneï¼šåªæ¸…ç©ºå·²å®Œæˆ
+    - status=allï¼šæ¸…ç©ºå…¨éƒ¨
     """
     r = make_redis()
     keys = r.keys("run:*")
@@ -728,7 +912,7 @@ def cancel_run(run_id: str):
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "ÒÑÈ¡Ïû"
+        run["error"] = "å·²å–æ¶ˆ"
         save_run(r, run_id, run)
         return {"ok": True, "run_id": run_id, "status": "canceled"}
 

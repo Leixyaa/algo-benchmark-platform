@@ -4,35 +4,43 @@
 
     <el-card shadow="never" class="card">
       <div class="filters">
-        <el-select v-model="task" placeholder="选择任务类型" style="width: 180px">
+        <el-select v-model="task" placeholder="任务类型" style="width: 180px">
           <el-option v-for="t in taskOptions" :key="t" :label="t" :value="t" />
         </el-select>
 
-        <el-select v-model="datasetId" placeholder="选择数据集" style="width: 220px">
+        <el-select v-model="datasetId" placeholder="数据集" style="width: 220px">
           <el-option v-for="d in store.datasets" :key="d.id" :label="d.name" :value="d.id" />
         </el-select>
 
-        <el-checkbox v-model="onlyDone">只显示已完成</el-checkbox>
+        <el-checkbox v-model="onlyDone">仅显示完成</el-checkbox>
 
         <el-button type="primary" @click="reset">重置</el-button>
-        <el-button @click="clearCache">清除缓存</el-button>
+        <el-button @click="clearCache">清空缓存</el-button>
 
-        <el-button @click="presetQuality">质量优先</el-button>
-        <el-button @click="presetBalanced">平衡推荐</el-button>
-        <el-button @click="presetSpeed">速度优先</el-button>
+        <el-button @click="presetQuality">偏质量</el-button>
+        <el-button @click="presetBalanced">均衡</el-button>
+        <el-button @click="presetSpeed">偏速度</el-button>
         <el-button type="warning" :disabled="bulkRunning" @click="bulkRunBaselines">
-          {{ bulkRunning ? "批量运行中..." : "批量跑基线" }}
+          {{ bulkRunning ? "批量发起中..." : "批量运行基线" }}
         </el-button>
+        <el-checkbox v-model="bulkStrictValidate">无配对则拒绝创建（推荐）</el-checkbox>
+        <el-checkbox v-model="bulkOnlyBaselines">仅基线算法</el-checkbox>
+        <el-select v-model="bulkParamScheme" style="width: 140px" size="small">
+          <el-option label="默认参数" value="default" />
+          <el-option label="偏速度参数" value="speed" />
+          <el-option label="偏质量参数" value="quality" />
+        </el-select>
 
         <el-button @click="exportCsv">导出CSV</el-button>
         <el-button @click="exportXlsx">导出Excel</el-button>
-        <el-button type="success" @click="exportRecommendCsv">导出CSV(含综合分/原因)</el-button>
-        <el-button type="success" @click="exportRecommendXlsx">导出Excel(含综合分/原因)</el-button>
+        <el-button type="success" @click="exportRecommendCsv">导出推荐CSV（含评分/原因）</el-button>
+        <el-button type="success" @click="exportRecommendXlsx">导出推荐Excel（含评分/原因）</el-button>
+        <el-button type="success" @click="exportConclusionMd">导出结论Markdown</el-button>
 
       </div>
 
       <div class="weights">
-        <div class="weights-title">加权规则（自动归一化）</div>
+        <div class="weights-title">指标权重（越大越重要）</div>
 
         <div class="weights-grid">
           <div class="w-item">
@@ -46,18 +54,18 @@
           </div>
 
           <div class="w-item">
-            <div class="w-label">NIQE 权重（惩罚）</div>
+            <div class="w-label">NIQE 权重（越低越好）</div>
             <el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" />
           </div>
 
           <div class="w-item">
-            <div class="w-label">耗时 权重（惩罚）</div>
+            <div class="w-label">耗时 权重（越低越好）</div>
             <el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" />
           </div>
 
           <div class="w-sum">
-            当前权重和：<b>{{ weightSum.toFixed(2) }}</b>
-            <span style="color:#909399">（会自动归一化，不用你手动凑 1）</span>
+            权重合计：<b>{{ weightSum.toFixed(2) }}</b>
+            <span style="color:#909399">权重会自动归一化，不需要等于 1</span>
           </div>
         </div>
       </div>
@@ -65,16 +73,16 @@
 
     <el-card shadow="never" class="card" style="margin-top: 12px">
       <div class="recommend" v-if="recommendText">
-        <div class="recommend-title">推荐结果</div>
+        <div class="recommend-title">推荐结论</div>
         <div class="recommend-body">{{ recommendText }}</div>
       </div>
 
       <div class="chart-bar" v-if="chartItems.length">
         <div class="chart-head">
-          <div class="chart-title">对比图（Top {{ chartTopN }}）</div>
+          <div class="chart-title">柱状图 Top {{ chartTopN }}</div>
           <div class="chart-actions">
             <el-select v-model="chartMetric" style="width: 200px" size="small">
-              <el-option label="综合分" value="score" />
+              <el-option label="综合评分" value="score" />
               <el-option label="PSNR" value="psnr" />
               <el-option label="SSIM" value="ssim" />
               <el-option label="NIQE" value="niqe" />
@@ -125,9 +133,9 @@
         <el-table-column prop="niqe" label="NIQE" width="90" />
         <el-table-column prop="elapsed" label="耗时" width="90" />
 
-        <el-table-column prop="score" label="综合分" width="110" sortable />
+        <el-table-column prop="score" label="综合评分" width="110" sortable />
 
-        <el-table-column label="推荐原因" min-width="320">
+        <el-table-column label="失败/取消原因" min-width="320">
           <template #default="{ row }">
             <div style="line-height: 1.5; color: #303133">
               {{ row.reason || "-" }}
@@ -137,7 +145,7 @@
       </el-table>
 
       <div v-if="tableRows.length === 0" class="empty">
-        当前筛选条件下没有可对比的运行记录。你可以先去“新建评测”跑几次结果。
+        暂无数据。请先在「发起评测」页面运行评测，再来这里对比。
       </div>
     </el-card>
   </div>
@@ -155,8 +163,6 @@ const datasetId = ref("");
 const onlyDone = ref(true);
 const _LS_KEY = "compare_filters_v1";
 
-// 默认权重（你不用选，我给你唯一推荐配置）
-// 主打画质：PSNR + SSIM；兼顾自然度与速度：NIQE、耗时作为惩罚项
 const wPSNR = ref(3.5);
 const wSSIM = ref(3.5);
 const wNIQE = ref(2.0);
@@ -219,7 +225,6 @@ function clearCache() {
 }
 
 function presetQuality() {
-  // 画质最重要：PSNR/SSIM 更大权重；NIQE 次之；耗时最少
   wPSNR.value = 4.0;
   wSSIM.value = 4.0;
   wNIQE.value = 1.5;
@@ -227,7 +232,6 @@ function presetQuality() {
 }
 
 function presetBalanced() {
-  // 默认推荐（你现在 reset 里也是这个）
   wPSNR.value = 3.5;
   wSSIM.value = 3.5;
   wNIQE.value = 2.0;
@@ -235,7 +239,6 @@ function presetBalanced() {
 }
 
 function presetSpeed() {
-  // 速度优先：耗时惩罚更大，同时保持画质底线
   wPSNR.value = 2.5;
   wSSIM.value = 2.5;
   wNIQE.value = 1.5;
@@ -288,7 +291,7 @@ function statusText(status) {
 }
 
 function isDone(status) {
-  return status === "已完成" || status === "done";
+  return status === "done" || status === "已完成";
 }
 
 function reset() {
@@ -302,17 +305,43 @@ function reset() {
 }
 
 const bulkRunning = ref(false);
+const bulkStrictValidate = ref(true);
+const bulkOnlyBaselines = ref(true);
+const bulkParamScheme = ref("default");
 
 async function bulkRunBaselines() {
   const taskLabel = task.value || taskOptions.value?.[0] || "";
   const dsId = datasetId.value || store.datasets?.[0]?.id || "";
-  if (!taskLabel) return alert("请先选择任务类型");
-  if (!dsId) return alert("请先选择数据集");
+  if (!taskLabel) return alert("请选择任务类型");
+  if (!dsId) return alert("请选择数据集");
 
-  const algs = (store.algorithms || []).filter((a) => a?.task === taskLabel);
-  if (!algs.length) return alert("当前任务类型下没有可用算法");
+  const taskType = mapTaskLabelToType(taskLabel);
+  if (!taskType) return alert("任务类型无法映射到后端 task_type");
 
-  const ok = confirm(`将为【${taskLabel}】在数据集【${dsId}】批量创建 ${algs.length} 条评测任务。继续吗？`);
+  const baselineIdsByTaskType = {
+    denoise: ["alg_dn_cnn", "alg_denoise_bilateral", "alg_denoise_gaussian", "alg_denoise_median"],
+    dehaze: ["alg_dehaze_dcp", "alg_dehaze_clahe", "alg_dehaze_gamma"],
+    deblur: ["alg_deblur_unsharp", "alg_deblur_laplacian"],
+    sr: ["alg_sr_bicubic", "alg_sr_lanczos", "alg_sr_nearest"],
+    lowlight: ["alg_lowlight_gamma", "alg_lowlight_clahe"],
+  };
+  const baselineIdSet = new Set(baselineIdsByTaskType[taskType] || []);
+
+  let algs = (store.algorithms || []).filter((a) => a?.task === taskLabel);
+  if (bulkOnlyBaselines.value) {
+    algs = algs.filter((a) => baselineIdSet.has(a.id));
+  }
+  if (!algs.length) return alert("当前任务下无可运行算法（可能被筛选为仅基线）");
+
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const batchId = `batch_${taskType}_${dsId}_${ts}_${Math.random().toString(16).slice(2, 6)}`;
+  const batchName = `${taskLabel}-${dsId}-${bulkParamScheme.value}-${ts}`;
+
+  const ok = confirm(
+    `将为「${taskLabel}」在数据集「${dsId}」上批量创建 ${algs.length} 个评测任务。\n` +
+      `参数方案：${bulkParamScheme.value}；严格校验：${bulkStrictValidate.value ? "是" : "否"}；仅基线：${bulkOnlyBaselines.value ? "是" : "否"}\n` +
+      `批次ID：${batchId}\n继续吗？`
+  );
   if (!ok) return;
 
   task.value = taskLabel;
@@ -321,34 +350,66 @@ async function bulkRunBaselines() {
   if (bulkRunning.value) return;
   bulkRunning.value = true;
   const failed = [];
+  const skipped = [];
+  const created = [];
+
+  const existingKey = (r) => `${r?.taskType || ""}|${r?.datasetId || ""}|${r?.algorithmId || ""}`;
+  const existing = new Set((store.runs || []).map(existingKey));
 
   for (const a of algs) {
+    const key = `${taskType}|${dsId}|${a.id}`;
+    if (existing.has(key)) {
+      skipped.push(`${a?.name || a?.id}`);
+      continue;
+    }
     try {
+      const params = {};
+      const scheme = bulkParamScheme.value;
+      const algDefault =
+        a?.defaultParams && typeof a.defaultParams === "object" && !Array.isArray(a.defaultParams) ? a.defaultParams : {};
+      const algPresets =
+        a?.paramPresets && typeof a.paramPresets === "object" && !Array.isArray(a.paramPresets) ? a.paramPresets : {};
+      const picked =
+        scheme === "speed" || scheme === "quality"
+          ? (algPresets?.[scheme] && typeof algPresets[scheme] === "object" ? algPresets[scheme] : {})
+          : algDefault;
+      Object.assign(params, picked);
+      params.batch_id = batchId;
+      params.batch_name = batchName;
+      params.param_scheme = scheme;
+
       await store.createRun({
         task: taskLabel,
         datasetId: dsId,
         algorithmId: a.id,
         metrics: ["PSNR", "SSIM", "NIQE"],
+        params,
+        strictValidate: bulkStrictValidate.value,
       });
+      created.push(`${a?.name || a?.id}`);
     } catch (e) {
       failed.push(`${a?.name || a?.id}: ${e?.message || e}`);
     }
   }
 
   bulkRunning.value = false;
-  if (failed.length) return alert(`部分创建失败：\n${failed.join("\n")}`);
-  alert("批量创建完成：请稍候在列表中查看结果。");
+  const parts = [];
+  if (created.length) parts.push(`已创建 ${created.length} 个；`);
+  if (skipped.length) parts.push(`已跳过 ${skipped.length} 个（已存在）；`);
+  if (failed.length) parts.push(`失败 ${failed.length} 个；`);
+  if (failed.length) return alert(`${parts.join("")}\n\n失败详情：\n${failed.join("\n")}`);
+  alert(`${parts.join("")}\n\n批次ID：${batchId}\n建议到「运行列表」查看进度。`);
 }
 
 function mapTaskLabelToType(label) {
   const m = {
-    去噪: "denoise",
-    去模糊: "deblur",
-    去雾: "dehaze",
-    超分辨率: "sr",
-    低照度增强: "lowlight",
-    视频去噪: "video_denoise",
-    视频超分: "video_sr",
+    "去噪": "denoise",
+    "去模糊": "deblur",
+    "去雾": "dehaze",
+    "超分辨率": "sr",
+    "低照度增强": "lowlight",
+    "视频去噪": "video_denoise",
+    "视频超分": "video_sr",
   };
   return m[label] || "";
 }
@@ -385,31 +446,29 @@ function downloadBlob(blob, filename) {
 }
 
 function buildExportRows() {
-  // 用当前表格数据（已应用筛选、排序、综合分、原因）
   return (tableRows.value || []).map((r) => ({
-    创建时间: r.createdAt ?? "",
-    任务: r.task ?? "",
-    数据集: r.datasetName ?? "",
-    算法: r.algorithmName ?? "",
-    状态: statusText(r.status),
-    PSNR: r.psnr ?? "",
-    SSIM: r.ssim ?? "",
-    NIQE: r.niqe ?? "",
-    耗时: r.elapsed ?? "",
-    综合分: Number.isFinite(r.score) ? r.score : "",
-    推荐原因: r.reason ?? "",
-    RunID: r.id ?? "",
+    "创建时间": r.createdAt ?? "",
+    "任务": r.task ?? "",
+    "数据集": r.datasetName ?? "",
+    "算法": r.algorithmName ?? "",
+    "状态": statusText(r.status),
+    "PSNR": r.psnr ?? "",
+    "SSIM": r.ssim ?? "",
+    "NIQE": r.niqe ?? "",
+    "耗时": r.elapsed ?? "",
+    "综合评分": Number.isFinite(r.score) ? r.score : "",
+    "失败/取消原因": r.reason ?? "",
+    "RunID": r.id ?? "",
   }));
 }
 
 function exportRecommendCsv() {
   const rows = buildExportRows();
-  if (!rows.length) return alert("当前没有可导出的记录");
+  if (!rows.length) return alert("暂无可导出数据");
 
   const headers = Object.keys(rows[0]);
   const escape = (v) => {
     const s = String(v ?? "");
-    // 含逗号/引号/换行 -> 用双引号包裹，并转义双引号
     if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
@@ -419,7 +478,6 @@ function exportRecommendCsv() {
     ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
   ];
 
-  // Excel 友好：加 BOM
   const csvText = "\uFEFF" + lines.join("\n");
   const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
 
@@ -429,7 +487,7 @@ function exportRecommendCsv() {
 
 function exportRecommendXlsx() {
   const rows = buildExportRows();
-  if (!rows.length) return alert("当前没有可导出的记录");
+  if (!rows.length) return alert("暂无可导出数据");
 
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -444,15 +502,45 @@ function exportRecommendXlsx() {
   downloadBlob(blob, `compare_recommend_${ts}.xlsx`);
 }
 
+function exportConclusionMd() {
+  const rows = tableRows.value || [];
+  if (!rows.length) return alert("暂无可导出数据");
 
-// ---------- 评分：归一化 + 加权（可解释） ----------
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const mdLines = [];
+  mdLines.push(`# 对比结论（${ts}）`);
+  mdLines.push("");
+  mdLines.push(`- 任务类型：${task.value || "-"}`);
+  mdLines.push(`- 数据集：${datasetId.value || "-"}`);
+  mdLines.push(`- 仅显示完成：${onlyDone.value ? "是" : "否"}`);
+  mdLines.push(`- 权重：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}，耗时=${wTIME.value}`);
+  mdLines.push("");
+  if (recommendText.value) {
+    mdLines.push("## 推荐结论");
+    mdLines.push(recommendText.value);
+    mdLines.push("");
+  }
+  mdLines.push("## Top 10 算法");
+  mdLines.push("");
+  mdLines.push("| 排名 | 算法 | PSNR | SSIM | NIQE | 耗时 | 评分 | 原因 | RunID |");
+  mdLines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const r = rows[i];
+    mdLines.push(
+      `| ${i + 1} | ${r.algorithmName || "-"} | ${r.psnr ?? "-"} | ${r.ssim ?? "-"} | ${r.niqe ?? "-"} | ${r.elapsed ?? "-"} | ${Number.isFinite(r.score) ? r.score : "-"} | ${(r.reason || "-").replace(/\n/g, " ")} | ${r.id || "-"} |`
+    );
+  }
+  mdLines.push("");
+
+  const blob = new Blob([mdLines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  downloadBlob(blob, `compare_conclusion_${ts}.md`);
+}
 
 function toNumber(v) {
   const x = Number(v);
   return Number.isFinite(x) ? x : null;
 }
 
-// elapsed 形如 "1.234s" 或 "-"，转成秒
 function parseElapsedSeconds(elapsed) {
   if (elapsed == null) return null;
   if (typeof elapsed === "number") return elapsed;
@@ -471,7 +559,7 @@ function minMax(values) {
 
 function norm01(x, min, max) {
   if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null;
-  if (max === min) return 1.0; // 全一样就给满分，避免 NaN
+  if (max === min) return 1.0;
   return (x - min) / (max - min);
 }
 
@@ -485,7 +573,6 @@ const tableRows = computed(() => {
   if (datasetId.value) runs = runs.filter((r) => r.datasetId === datasetId.value);
   if (onlyDone.value) runs = runs.filter((r) => isDone(r.status));
 
-  // 先提取数值数组，做归一化区间
   const psnrs = runs.map((r) => toNumber(r.psnr)).filter((x) => x != null);
   const ssims = runs.map((r) => toNumber(r.ssim)).filter((x) => x != null);
   const niqes = runs.map((r) => toNumber(r.niqe)).filter((x) => x != null);
@@ -496,7 +583,6 @@ const tableRows = computed(() => {
   const mmNIQE = minMax(niqes);
   const mmTIME = minMax(times);
 
-  // 权重自动归一化
   const sum = weightSum.value > 0 ? weightSum.value : 1;
   const W = {
     psnr: Number(wPSNR.value) / sum,
@@ -505,7 +591,6 @@ const tableRows = computed(() => {
     time: Number(wTIME.value) / sum,
   };
 
-  // 做排名对比用（解释原因）
   function rankBy(key, betterHigh = true) {
     const arr = runs
       .map((r) => {
@@ -538,12 +623,11 @@ const tableRows = computed(() => {
     const niqe = toNumber(r.niqe);
     const tsec = parseElapsedSeconds(r.elapsed);
 
-    const nPSNR = norm01(psnr, mmPSNR.min, mmPSNR.max); // 越大越好
-    const nSSIM = norm01(ssim, mmSSIM.min, mmSSIM.max); // 越大越好
-    const nNIQE = norm01(niqe, mmNIQE.min, mmNIQE.max); // 越小越好 -> 用 (1-n)
-    const nTIME = norm01(tsec, mmTIME.min, mmTIME.max); // 越小越好 -> 用 (1-n)
+    const nPSNR = norm01(psnr, mmPSNR.min, mmPSNR.max);
+    const nSSIM = norm01(ssim, mmSSIM.min, mmSSIM.max);
+    const nNIQE = norm01(niqe, mmNIQE.min, mmNIQE.max);
+    const nTIME = norm01(tsec, mmTIME.min, mmTIME.max);
 
-    // 缺指标：不给分，排最后
     const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
 
     let score = -Infinity;
@@ -556,7 +640,6 @@ const tableRows = computed(() => {
       score = Number(s.toFixed(4));
     }
 
-    // 解释原因：挑出贡献最大/排名最好项
     let reason = "";
     if (okAll) {
       const parts = [];
@@ -566,22 +649,19 @@ const tableRows = computed(() => {
       const r3 = rankNIQE.get(r.id);
       const r4 = rankTIME.get(r.id);
 
-      // 优先讲“排名第一/前二”的指标
-      if (r1 === 1) parts.push("PSNR最高");
-      else if (r1 === 2) parts.push("PSNR第2");
-      if (r2 === 1) parts.push("SSIM最高");
-      else if (r2 === 2) parts.push("SSIM第2");
-      if (r3 === 1) parts.push("NIQE最低(更自然)");
-      else if (r3 === 2) parts.push("NIQE第2低");
-      if (r4 === 1) parts.push("耗时最短");
-      else if (r4 === 2) parts.push("耗时第2短");
+      if (r1 === 1) parts.push("PSNR 第1");
+      else if (r1 === 2) parts.push("PSNR 第2");
+      if (r2 === 1) parts.push("SSIM 第1");
+      else if (r2 === 2) parts.push("SSIM 第2");
+      if (r3 === 1) parts.push("NIQE 第1（更低更好）");
+      else if (r3 === 2) parts.push("NIQE 第2");
+      if (r4 === 1) parts.push("耗时 第1");
+      else if (r4 === 2) parts.push("耗时 第2");
 
-      // 如果没有特别突出的，就讲“均衡”
       if (parts.length === 0) {
-        parts.push("多指标表现均衡");
+        parts.push("综合表现最好");
       }
 
-      // 再补一句：按权重强调主导因素
       const main = [
         { k: "PSNR", w: W.psnr },
         { k: "SSIM", w: W.ssim },
@@ -589,7 +669,7 @@ const tableRows = computed(() => {
         { k: "耗时", w: W.time },
       ].sort((a, b) => b.w - a.w);
 
-      reason = `${parts.join("，")}；权重侧重：${main[0].k}(${(main[0].w * 100).toFixed(
+      reason = `${parts.join("，")}；主要贡献：${main[0].k}(${(main[0].w * 100).toFixed(
         0
       )}%) + ${main[1].k}(${(main[1].w * 100).toFixed(0)}%)`;
     }
@@ -613,9 +693,9 @@ const recommendText = computed(() => {
   if (!Number.isFinite(top.score)) return "";
 
   return [
-    `当前筛选条件下，推荐优先选择：${top.algorithmName}。`,
+    `推荐算法：${top.algorithmName}`,
     `原因：${top.reason}`,
-    `指标：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || "—"}。`,
+    `指标：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || "-"}`,
   ].join(" ");
 });
 
@@ -657,7 +737,7 @@ function onChartMove(e) {
     visible: true,
     x: lx,
     y: ly,
-    text: `${hit.name}：${hit.valueTxt}`,
+    text: `${hit.name}??${hit.valueTxt}`,
   };
 }
 
@@ -707,7 +787,7 @@ function downloadDataUrl(dataUrl, filename) {
 
 function exportChartPng() {
   const c = chartCanvas.value;
-  if (!c) return alert("图表尚未渲染");
+  if (!c) return alert("图表尚未就绪");
   const dataUrl = c.toDataURL("image/png");
   const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   downloadDataUrl(dataUrl, `compare_chart_${chartMetric.value}_${ts}.png`);
@@ -776,7 +856,7 @@ function drawChart() {
     ctx.fillStyle = "#9ca3af";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("暂无可绘制数据", cssW / 2, cssH / 2);
+    ctx.fillText("暂无可视化数据", cssW / 2, cssH / 2);
     return;
   }
 
@@ -844,13 +924,13 @@ function drawChart() {
   ctx.textBaseline = "top";
   ctx.font = "12px var(--el-font-family, system-ui)";
   const titleMap = {
-    score: "综合分",
+    score: "综合评分",
     psnr: "PSNR",
     ssim: "SSIM",
     niqe: "NIQE",
     time: "耗时(秒)",
   };
-  const extra = chartMetric.value === "score" ? "（0~1 归一化）" : "";
+  const extra = chartMetric.value === "score" ? "（0~1，越大越好）" : "";
   ctx.fillText(`指标：${titleMap[chartMetric.value] || chartMetric.value}${extra}`, padL, 0);
 }
 

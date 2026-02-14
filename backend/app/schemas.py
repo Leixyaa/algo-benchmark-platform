@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class RunCreate(BaseModel):
-    # 这些字段尽量贴近你前端 NewRun 的 payload
     task_type: str = Field(..., description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr")
     dataset_id: str
     algorithm_id: str
     params: Dict[str, Any] = Field(default_factory=dict)
+    strict_validate: bool = False
 
 
 class RunOut(BaseModel):
@@ -18,6 +19,8 @@ class RunOut(BaseModel):
     task_type: str
     dataset_id: str
     algorithm_id: str
+    strict_validate: bool = False
+    record: Dict[str, Any] = Field(default_factory=dict)
 
     status: str  # queued/running/done/failed
     created_at: float
@@ -50,6 +53,7 @@ class DatasetOut(BaseModel):
     type: str
     size: str
     created_at: float
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DatasetImportZip(BaseModel):
@@ -65,6 +69,7 @@ class AlgorithmCreate(BaseModel):
     impl: str = "OpenCV"
     version: str = "v1"
     default_params: Dict[str, Any] = Field(default_factory=dict)
+    param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class AlgorithmPatch(BaseModel):
@@ -73,6 +78,7 @@ class AlgorithmPatch(BaseModel):
     impl: Optional[str] = None
     version: Optional[str] = None
     default_params: Optional[Dict[str, Any]] = None
+    param_presets: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 class AlgorithmOut(BaseModel):
@@ -83,6 +89,7 @@ class AlgorithmOut(BaseModel):
     version: str
     created_at: float
     default_params: Dict[str, Any] = Field(default_factory=dict)
+    param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class PresetCreate(BaseModel):

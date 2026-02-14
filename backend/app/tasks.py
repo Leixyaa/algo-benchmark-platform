@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import random
 import time
+import os
+import socket
+import platform
 from typing import Any, Dict
 
 import numpy as np
 import hashlib
 
 from .celery_app import celery_app
-from .store import make_redis, load_run, save_run
+from .store import make_redis, load_run, save_run, load_dataset, load_algorithm
 
-# 真实算法 + 指标（阶段E）
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
@@ -39,8 +41,8 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
 
 def _make_synthetic_dehaze_pair(h: int = 360, w: int = 640) -> tuple[np.ndarray, np.ndarray]:
     """
-    生成一对（清晰GT, 有雾输入），用于没有真实数据集时也能跑出“真实指标”
-    GT: 随机自然纹理 + 渐变
+    合成一对去雾任务数据：GT 与 Hazy，用于在无数据集时演示。
+    GT: 随机纹理 + 渐变
     Hazy: I = J * t + A * (1 - t)
     """
     # base texture
@@ -76,8 +78,7 @@ def _compute_psnr_ssim(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[
 
 def _resize_to_match(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    保证两张图尺寸一致再算指标。
-    默认把 gt resize 到 pred 的尺寸（更合理：pred 是算法输出的实际尺寸）。
+    将 gt resize 到 pred 的尺寸，用于避免尺寸不一致导致指标计算失败。
     """
     if gt_bgr_u8.shape[:2] == pred_bgr_u8.shape[:2]:
         return gt_bgr_u8, pred_bgr_u8
@@ -269,6 +270,54 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
     task_type = (run.get("task_type") or "").lower()
     seed = _stable_seed(f"{run_id}|{task_type}|{run.get('dataset_id','')}|{run.get('algorithm_id','')}")
+    dataset_id = run.get("dataset_id") or ""
+    algorithm_id = run.get("algorithm_id") or ""
+    strict_validate = bool(run.get("strict_validate"))
+
+    record = run.get("record") if isinstance(run.get("record"), dict) else {}
+    p0 = run.get("params") if isinstance(run.get("params"), dict) else {}
+    if isinstance(p0, dict):
+        batch_id = p0.get("batch_id")
+        batch_name = p0.get("batch_name")
+        param_scheme = p0.get("param_scheme")
+        if batch_id or batch_name or param_scheme:
+            record["batch"] = {
+                "batch_id": batch_id,
+                "batch_name": batch_name,
+                "param_scheme": param_scheme,
+            }
+    record.update(
+        {
+            "task_type": task_type,
+            "seed": seed,
+            "strict_validate": strict_validate,
+            "worker": {
+                "host": socket.gethostname(),
+                "pid": os.getpid(),
+                "python": platform.python_version(),
+            },
+        }
+    )
+    ds = load_dataset(r, dataset_id) if dataset_id else None
+    if isinstance(ds, dict):
+        record["dataset"] = {
+            "dataset_id": dataset_id,
+            "name": ds.get("name"),
+            "type": ds.get("type"),
+            "size": ds.get("size"),
+            "meta": ds.get("meta") if isinstance(ds.get("meta"), dict) else {},
+        }
+    alg = load_algorithm(r, algorithm_id) if algorithm_id else None
+    if isinstance(alg, dict):
+        record["algorithm"] = {
+            "algorithm_id": algorithm_id,
+            "task": alg.get("task"),
+            "name": alg.get("name"),
+            "impl": alg.get("impl"),
+            "version": alg.get("version"),
+        }
+    run["record"] = record
+    save_run(r, run_id, run)
 
     try:
         def check_cancel():
@@ -281,8 +330,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             from pathlib import Path
             from .vision.dataset_io import find_paired_images
 
-            dataset_id = run.get("dataset_id") or ""
-            algorithm_id = (run.get("algorithm_id") or "").lower()
+            algorithm_id = (algorithm_id or "").lower()
             algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
             data_root = Path(__file__).resolve().parents[1] / "data"  # backend/app/.. -> backend/data
 
@@ -298,6 +346,23 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             }
             input_dirname = input_dir_by_task.get(task_type, "hazy")
             pairs = find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
+            try:
+                from .vision.dataset_io import count_paired_images
+
+                total_pairs = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+            except Exception:
+                total_pairs = None
+            record = run.get("record") if isinstance(run.get("record"), dict) else {}
+            record.update(
+                {
+                    "data_mode": "paired_images" if pairs else "synthetic_no_dataset",
+                    "input_dir": input_dirname,
+                    "pair_used": len(pairs) if pairs else 0,
+                    "pair_total": total_pairs,
+                }
+            )
+            run["record"] = record
+            save_run(r, run_id, run)
 
             def pick_impl_name() -> str:
                 if task_type == "dehaze":
@@ -407,6 +472,10 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 params["input_dir"] = input_dirname
                 run["params"] = params
                 run["samples"] = samples
+                record = run.get("record") if isinstance(run.get("record"), dict) else {}
+                record["data_mode"] = "paired_images"
+                record["pair_used"] = len(pairs)
+                run["record"] = record
                 save_run(r, run_id, run)
                 return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
 
@@ -436,6 +505,10 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             params["input_dir"] = input_dirname
             run["params"] = params
             run["samples"] = [{"name": "synthetic", "PSNR": round(float(psnr), 3), "SSIM": round(float(ssim), 4), "NIQE": round(float(niqe), 3)}]
+            record = run.get("record") if isinstance(run.get("record"), dict) else {}
+            record["data_mode"] = "synthetic_no_dataset"
+            record["pair_used"] = 0
+            run["record"] = record
             save_run(r, run_id, run)
             return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
 

@@ -1,30 +1,25 @@
 // web/src/stores/app.js
-// Pinia ??? store?????C??????????????????
-// - NewRun??POST /runs ??????? run
-// - Runs????? GET /runs/{id} ??? queued/running/done?????????
-// - Compare??????? metrics??PSNR/SSIM/NIQE??
-//
-// ?????
-// 1) ????????????????????????????????? + Celery/Redis ?????????
-// 2) ????????????? Pinia state???????????/?????????????????
+// Pinia å…¨å±€ storeï¼ˆå‰ç«¯å¯¹æ¥åç«¯ï¼‰
+// - NewRunï¼šPOST /runs åˆ›å»º run
+// - Runsï¼šè½®è¯¢ GET /runs/{id}
+// - Compareï¼šå±•ç¤ºåç«¯ metricsï¼ˆPSNR/SSIM/NIQEï¼‰
 
 import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
-import { presetsApi } from "../api/presets";
 
 const LS_KEY = "abp_state_v1";
 
-// ====================== ÈÎÎñÀàĞÍÍ³Ò»Ó³Éä£¨Î¨Ò»ÕæÏà£© ======================
+// ====================== ä»»åŠ¡ç±»å‹ç»Ÿä¸€æ˜ å°„ï¼ˆå”¯ä¸€çœŸç›¸ï¼‰ ======================
 export const TASK_LABEL_BY_TYPE = {
-  denoise: "È¥Ôë",
-  deblur: "È¥Ä£ºı",
-  dehaze: "È¥Îí",
-  sr: "³¬·Ö±æÂÊ",
-  lowlight: "µÍÕÕ¶ÈÔöÇ¿",
-  video_denoise: "ÊÓÆµÈ¥Ôë",
-  video_sr: "ÊÓÆµ³¬·Ö",
+  denoise: "å»å™ª",
+  deblur: "å»æ¨¡ç³Š",
+  dehaze: "å»é›¾",
+  sr: "è¶…åˆ†è¾¨ç‡",
+  lowlight: "ä½ç…§åº¦å¢å¼º",
+  video_denoise: "è§†é¢‘å»å™ª",
+  video_sr: "è§†é¢‘è¶…åˆ†",
 };
 
 export const TASK_TYPE_BY_LABEL = Object.fromEntries(
@@ -66,12 +61,12 @@ function repairLoadedState(state) {
         const needsFix = hasBadText(d.name) || hasBadText(d.type) || hasBadText(d.size);
         if (!needsFix) return d;
         changed = true;
-        return { ...d, name: "Demo-ÑùÀıÊı¾İ¼¯", type: "Í¼Ïñ", size: "10 ÕÅ" };
+        return { ...d, name: "Demo-æ ·ä¾‹æ•°æ®é›†", type: "å›¾åƒ", size: "10 å¼ " };
       }
 
-      const name2 = normalizeBadString(d.name, "£¨Ãû³ÆÂÒÂë£¬Çë±à¼­£©");
-      const type2 = normalizeBadString(d.type, "£¨ÀàĞÍÂÒÂë£¬Çë±à¼­£©");
-      const size2 = normalizeBadString(d.size, "£¨´óĞ¡ÂÒÂë£¬Çë±à¼­£©");
+      const name2 = normalizeBadString(d.name, "ï¼ˆåç§°ä¹±ç ï¼Œè¯·ç¼–è¾‘ï¼‰");
+      const type2 = normalizeBadString(d.type, "ï¼ˆç±»å‹ä¹±ç ï¼Œè¯·ç¼–è¾‘ï¼‰");
+      const size2 = normalizeBadString(d.size, "ï¼ˆå¤§å°ä¹±ç ï¼Œè¯·ç¼–è¾‘ï¼‰");
       if (name2 === d.name && type2 === d.type && size2 === d.size) return d;
       changed = true;
       return { ...d, name: name2, type: type2, size: size2 };
@@ -89,19 +84,19 @@ function repairLoadedState(state) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
-        return { ...a, task: "È¥Ôë", name: "DnCNN(Ê¾Àı)" };
+        return { ...a, task: "å»å™ª", name: "DnCNN(ç¤ºä¾‹)" };
       }
       if (isDcp) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
-        return { ...a, task: "È¥Îí", name: "DCP°µÍ¨µÀÏÈÑé(ÕæÊµ)" };
+        return { ...a, task: "å»é›¾", name: "DCPæš—é€šé“å…ˆéªŒ(çœŸå®)" };
       }
 
-      const task2 = normalizeBadString(a.task, "£¨ÈÎÎñÂÒÂë£¬Çë±à¼­£©");
-      const name2 = normalizeBadString(a.name, "£¨Ëã·¨ÃûÂÒÂë£¬Çë±à¼­£©");
-      const impl2 = normalizeBadString(a.impl, "£¨ÊµÏÖ·½Ê½ÂÒÂë£©");
-      const ver2 = normalizeBadString(a.version, "£¨°æ±¾ÂÒÂë£©");
+      const task2 = normalizeBadString(a.task, "ï¼ˆä»»åŠ¡ä¹±ç ï¼Œè¯·ç¼–è¾‘ï¼‰");
+      const name2 = normalizeBadString(a.name, "ï¼ˆç®—æ³•åä¹±ç ï¼Œè¯·ç¼–è¾‘ï¼‰");
+      const impl2 = normalizeBadString(a.impl, "ï¼ˆå®ç°æ–¹å¼ä¹±ç ï¼‰");
+      const ver2 = normalizeBadString(a.version, "ï¼ˆç‰ˆæœ¬ä¹±ç ï¼‰");
       if (task2 === a.task && name2 === a.name && impl2 === a.impl && ver2 === a.version) return a;
       changed = true;
       return { ...a, task: task2, name: name2, impl: impl2, version: ver2 };
@@ -152,16 +147,16 @@ function saveState(partial) {
 }
 
 
-// ====================== ×´Ì¬/Ó³Éä¹¤¾ß ======================
+// ====================== çŠ¶æ€/æ˜ å°„å·¥å…· ======================
 
 function normalizeStatusCN(status) {
   const s = String(status ?? "").toLowerCase();
-  if (["done", "completed", "success", "ÒÑÍê³É"].includes(s)) return "ÒÑÍê³É";
-  if (["running", "ÔËĞĞÖĞ"].includes(s)) return "ÔËĞĞÖĞ";
-  if (["queued", "pending", "ÅÅ¶ÓÖĞ"].includes(s)) return "ÅÅ¶ÓÖĞ";
-  if (["failed", "error", "Ê§°Ü"].includes(s)) return "Ê§°Ü";
-  if (["canceling", "cancelling", "È¡ÏûÖĞ"].includes(s)) return "È¡ÏûÖĞ";
-  if (["canceled", "cancelled", "ÒÑÈ¡Ïû"].includes(s)) return "ÒÑÈ¡Ïû";
+  if (["done", "completed", "success", "å·²å®Œæˆ"].includes(s)) return "å·²å®Œæˆ";
+  if (["running", "è¿è¡Œä¸­"].includes(s)) return "è¿è¡Œä¸­";
+  if (["queued", "pending", "æ’é˜Ÿä¸­"].includes(s)) return "æ’é˜Ÿä¸­";
+  if (["failed", "error", "å¤±è´¥"].includes(s)) return "å¤±è´¥";
+  if (["canceling", "cancelling", "å–æ¶ˆä¸­"].includes(s)) return "å–æ¶ˆä¸­";
+  if (["canceled", "cancelled", "å·²å–æ¶ˆ"].includes(s)) return "å·²å–æ¶ˆ";
   return String(status ?? "");
 }
 
@@ -196,8 +191,8 @@ function ensureBaselineAlgorithms(algs) {
 
   add({
     id: "alg_dn_cnn",
-    task: "È¥Ôë",
-    name: "FastNLMeans(»ùÏß)",
+    task: "å»å™ª",
+    name: "FastNLMeans(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -205,8 +200,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_bilateral",
-    task: "È¥Ôë",
-    name: "Bilateral(»ùÏß)",
+    task: "å»å™ª",
+    name: "Bilateral(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -214,8 +209,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_gaussian",
-    task: "È¥Ôë",
-    name: "Gaussian(»ùÏß)",
+    task: "å»å™ª",
+    name: "Gaussian(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -223,8 +218,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_median",
-    task: "È¥Ôë",
-    name: "Median(»ùÏß)",
+    task: "å»å™ª",
+    name: "Median(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -233,8 +228,8 @@ function ensureBaselineAlgorithms(algs) {
 
   add({
     id: "alg_dehaze_dcp",
-    task: "È¥Îí",
-    name: "DCP°µÍ¨µÀÏÈÑé(»ùÏß)",
+    task: "å»é›¾",
+    name: "DCPæš—é€šé“å…ˆéªŒ(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -242,8 +237,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_dehaze_clahe",
-    task: "È¥Îí",
-    name: "CLAHE(»ùÏß)",
+    task: "å»é›¾",
+    name: "CLAHE(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -251,8 +246,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_dehaze_gamma",
-    task: "È¥Îí",
-    name: "Gamma(»ùÏß)",
+    task: "å»é›¾",
+    name: "Gamma(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -261,8 +256,8 @@ function ensureBaselineAlgorithms(algs) {
 
   add({
     id: "alg_deblur_unsharp",
-    task: "È¥Ä£ºı",
-    name: "UnsharpMask(»ùÏß)",
+    task: "å»æ¨¡ç³Š",
+    name: "UnsharpMask(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -270,22 +265,22 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_deblur_laplacian",
-    task: "È¥Ä£ºı",
-    name: "LaplacianSharpen(»ùÏß)",
+    task: "å»æ¨¡ç³Š",
+    name: "LaplacianSharpen(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
     defaultParams: { laplacian_strength: 0.7 },
   });
 
-  add({ id: "alg_sr_bicubic", task: "³¬·Ö±æÂÊ", name: "Bicubic(»ùÏß)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
-  add({ id: "alg_sr_lanczos", task: "³¬·Ö±æÂÊ", name: "Lanczos(»ùÏß)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
-  add({ id: "alg_sr_nearest", task: "³¬·Ö±æÂÊ", name: "Nearest(»ùÏß)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_bicubic", task: "è¶…åˆ†è¾¨ç‡", name: "Bicubic(åŸºçº¿)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_lanczos", task: "è¶…åˆ†è¾¨ç‡", name: "Lanczos(åŸºçº¿)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_nearest", task: "è¶…åˆ†è¾¨ç‡", name: "Nearest(åŸºçº¿)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
 
   add({
     id: "alg_lowlight_gamma",
-    task: "µÍÕÕ¶ÈÔöÇ¿",
-    name: "Gamma(»ùÏß)",
+    task: "ä½ç…§åº¦å¢å¼º",
+    name: "Gamma(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -293,8 +288,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_lowlight_clahe",
-    task: "µÍÕÕ¶ÈÔöÇ¿",
-    name: "CLAHE(»ùÏß)",
+    task: "ä½ç…§åº¦å¢å¼º",
+    name: "CLAHE(åŸºçº¿)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -305,7 +300,7 @@ function ensureBaselineAlgorithms(algs) {
 }
 
 function isTerminal(statusCN) {
-  return statusCN === "ÒÑÍê³É" || statusCN === "Ê§°Ü" || statusCN === "ÒÑÈ¡Ïû";
+  return statusCN === "å·²å®Œæˆ" || statusCN === "å¤±è´¥" || statusCN === "å·²å–æ¶ˆ";
 }
 
 // runId -> timerId
@@ -317,26 +312,25 @@ export const useAppStore = defineStore("app", {
   state: () => {
     const loaded = loadState();
     return ({
-    // ??????? dataset/algorithm ???????????????????????? Demo ???????????????
+    // ä½ åé¢ä¼šæŠŠ dataset/algorithm åšæˆçœŸæ­£çš„ç®¡ç†åŠŸèƒ½ï¼›ç›®å‰ä¿ç•™ Demo æ•°æ®ä»¥ä¾¿æµç¨‹å¯è·‘ã€‚
     datasets: (loaded?.datasets?.length ? loaded.datasets : [
-      { id: "ds_demo", name: "Demo-ÑùÀıÊı¾İ¼¯", type: "Í¼Ïñ", size: "10 ÕÅ", createdAt: nowStr() },
+      { id: "ds_demo", name: "Demo-æ ·ä¾‹æ•°æ®é›†", type: "å›¾åƒ", size: "10 å¼ ", createdAt: nowStr() },
     ]),
 
     algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
 
     
 
-    // ?????????????????????????? tasks?????C ???????
+    // å…¼å®¹ä¿ç•™ï¼šæœ‰äº›é¡µé¢å¯èƒ½è¿˜åœ¨å¼•ç”¨ tasksï¼›é˜¶æ®µC å…ˆä¸åŠ¨å®ƒ
     tasks: [],
 
-    // runs ÓÉºó¶Ë Redis/Celery Çı¶¯
+    // æ ¸å¿ƒï¼šruns ç”±åç«¯ Redis/Celery é©±åŠ¨
     runs: loaded?.runs || [],
-    presets: loaded?.presets || [],
   });
   },
 
   actions: {
-    // ====================== Catalog???????/???????????? ======================
+    // ====================== Catalogï¼šæ•°æ®é›†/ç®—æ³•ï¼ˆåç«¯æŒä¹…åŒ–ï¼‰ ======================
     async fetchDatasets(limit = 200) {
       const list = await datasetsApi.listDatasets({ limit });
       const mapped = (list ?? []).map((x) => ({
@@ -367,64 +361,6 @@ export const useAppStore = defineStore("app", {
       this.algorithms = mapped.length ? ensureBaselineAlgorithms(mapped) : this.algorithms;
       saveState({ algorithms: this.algorithms });
       return this.algorithms;
-    },
-
-    async fetchPresets(limit = 200) {
-      const list = await presetsApi.listPresets({ limit });
-      const mapped = (list ?? []).map((x) => ({
-        id: x.preset_id,
-        name: x.name,
-        taskType: x.task_type,
-        task: toTaskLabel(x.task_type),
-        datasetId: x.dataset_id,
-        algorithmId: x.algorithm_id,
-        metrics: Array.isArray(x.metrics) ? x.metrics : [],
-        params: x.params && typeof x.params === "object" && !Array.isArray(x.params) ? x.params : {},
-        createdAt: formatTs(x.created_at),
-        updatedAt: formatTs(x.updated_at),
-        raw: x,
-      }));
-      this.presets = mapped;
-      saveState({ presets: this.presets });
-      return this.presets;
-    },
-
-    async createPreset(payload) {
-      const task_type = toTaskType(payload?.task);
-      const out = await presetsApi.createPreset({
-        preset_id: payload?.id,
-        name: payload?.name,
-        task_type,
-        dataset_id: payload?.datasetId,
-        algorithm_id: payload?.algorithmId,
-        metrics: payload?.metrics ?? [],
-        params: payload?.params ?? {},
-      });
-      const preset = {
-        id: out.preset_id,
-        name: out.name,
-        taskType: out.task_type,
-        task: toTaskLabel(out.task_type),
-        datasetId: out.dataset_id,
-        algorithmId: out.algorithm_id,
-        metrics: Array.isArray(out.metrics) ? out.metrics : [],
-        params: out.params && typeof out.params === "object" && !Array.isArray(out.params) ? out.params : {},
-        createdAt: formatTs(out.created_at),
-        updatedAt: formatTs(out.updated_at),
-        raw: out,
-      };
-      const idx = this.presets.findIndex((p) => p.id === preset.id);
-      if (idx === -1) this.presets.unshift(preset);
-      else this.presets[idx] = { ...this.presets[idx], ...preset };
-      saveState({ presets: this.presets });
-      return preset;
-    },
-
-    async removePreset(id) {
-      await presetsApi.deletePreset(id);
-      const idx = this.presets.findIndex((p) => p.id === id);
-      if (idx >= 0) this.presets.splice(idx, 1);
-      saveState({ presets: this.presets });
     },
 
     async createDataset(payload) {
@@ -537,17 +473,7 @@ export const useAppStore = defineStore("app", {
     },
 
     async updateAlgorithm(id, patch) {
-      const body =
-        patch && typeof patch === "object" && !Array.isArray(patch)
-          ? {
-              ...(patch.task != null ? { task: patch.task } : {}),
-              ...(patch.name != null ? { name: patch.name } : {}),
-              ...(patch.impl != null ? { impl: patch.impl } : {}),
-              ...(patch.version != null ? { version: patch.version } : {}),
-              ...(patch.defaultParams != null ? { default_params: patch.defaultParams } : {}),
-            }
-          : patch;
-      const out = await algorithmsApi.patchAlgorithm(id, body);
+      const out = await algorithmsApi.patchAlgorithm(id, patch);
       const alg = {
         id: out.algorithm_id,
         task: out.task,
@@ -574,10 +500,10 @@ export const useAppStore = defineStore("app", {
     },
 
 
-    // ====================== ???C????????????/???/????? ======================
+    // ====================== é˜¶æ®µCï¼šåç«¯å¯¹æ¥ï¼ˆåˆ›å»º/æ‹‰å–/è½®è¯¢ï¼‰ ======================
 
     /**
-     * ??????? Run??????? Redis + ??? Celery??
+     * åˆ›å»ºçœŸå® Runï¼ˆåç«¯å†™ Redis + æŠ•é€’ Celeryï¼‰
      * @param {{task:string,datasetId:string,algorithmId:string,metrics?:string[],params?:object}} payload
      * @returns {Promise<string>} runId
      */
@@ -588,42 +514,44 @@ export const useAppStore = defineStore("app", {
           ? payload.params
           : {};
       const params = { ...userParams, metrics: payload.metrics ?? [] };
+      const strict_validate = Boolean(payload?.strictValidate);
 
       const out = await runsApi.createRun({
         task_type,
         dataset_id: payload.datasetId,
         algorithm_id: payload.algorithmId,
         params,
+        strict_validate,
       });
 
       const run = this._mapRunOut(out);
       this._upsertRun(run);
 
-      // ???????????????? done/failed
+      // åˆ›å»ºåç«‹å³è½®è¯¢ç›´åˆ° done/failed
       this.startPolling(run.id);
 
       return run.id;
     },
 
     /**
-     * ??? Run ??????????????????
+     * æ‹‰å– Run åˆ—è¡¨ï¼ˆåˆ·æ–°é¡µé¢ä¸ä¸¢å¤±ï¼‰
      * @param {number} limit
      */
     async fetchRuns(limit = 200) {
       const list = await runsApi.listRuns({ limit });
       const mapped = (list ?? []).map((x) => this._mapRunOut(x));
 
-      // ???????????? Redis ??
+      // è¦†ç›–å¼åŒæ­¥ï¼šä»¥ Redis ä¸ºå‡†
       this.runs = mapped;
       saveState({ runs: this.runs });
-      // ?????????? run ????????
+      // å¯¹æœªç»“æŸçš„ run è‡ªåŠ¨è¡¥è½®è¯¢
       for (const r of this.runs) {
         if (!isTerminal(r.status)) this.startPolling(r.id);
       }
     },
 
     /**
-     * ??????? Run?????/???????
+     * æ‹‰å–å•ä¸ª Runï¼ˆè½®è¯¢/è¯¦æƒ…ç”¨ï¼‰
      * @param {string} runId
      */
     async fetchRun(runId) {
@@ -635,26 +563,26 @@ export const useAppStore = defineStore("app", {
 
     async cancelRun(runId) {
       const prev = this.runs.find((r) => r.id === runId);
-      if (prev && (prev.status === "ÒÑÍê³É" || prev.status === "Ê§°Ü" || prev.status === "ÒÑÈ¡Ïû")) return;
+      if (prev && (prev.status === "å·²å®Œæˆ" || prev.status === "å¤±è´¥" || prev.status === "å·²å–æ¶ˆ")) return;
 
-      this._upsertRun({ id: runId, status: "È¡ÏûÖĞ" });
+      this._upsertRun({ id: runId, status: "å–æ¶ˆä¸­" });
       try {
         const out = await runsApi.cancelRun(runId);
         if (out?.status) {
           const statusCN = normalizeStatusCN(out.status);
           this._upsertRun({ id: runId, status: statusCN });
-          if (statusCN === "ÒÑÈ¡Ïû") this.stopPolling(runId);
+          if (statusCN === "å·²å–æ¶ˆ") this.stopPolling(runId);
         }
       } catch (e) {
-        this._upsertRun({ id: runId, status: prev?.status ?? "ÔËĞĞÖĞ" });
+        this._upsertRun({ id: runId, status: prev?.status ?? "è¿è¡Œä¸­" });
         throw e;
       }
     },
 
     /**
-     * ???????????? 800ms??
-     * - run ??????????????/????????? stop
-     * - ????/?????????????????? stop????????????????
+     * å¯åŠ¨è½®è¯¢ï¼ˆé»˜è®¤ 800msï¼‰
+     * - run è¿›å…¥ç»ˆæ€ï¼ˆå·²å®Œæˆ/å¤±è´¥ï¼‰ä¼šè‡ªåŠ¨ stop
+     * - ç½‘ç»œ/åç«¯çŸ­æš‚é‡å¯ï¼šä¸ç«‹å³ stopï¼Œè®©ä¸‹ä¸€è½®ç»§ç»­å°è¯•
      */
     startPolling(runId, intervalMs = 800) {
       if (_pollTimers.has(runId)) return;
@@ -684,7 +612,7 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    // ====================== ?????Run ??? & upsert ======================
+    // ====================== å†…éƒ¨ï¼šRun æ˜ å°„ & upsert ======================
 
     _mapRunOut(out) {
       const statusCN = normalizeStatusCN(out?.status);
@@ -703,7 +631,7 @@ export const useAppStore = defineStore("app", {
       return {
         id: out.run_id,
 
-        // ? ??????????????????????/??????????
+        // ? åŒæ—¶ä¿ç•™è‹±æ–‡ä¸ä¸­æ–‡ï¼Œåç»­ç­›é€‰/å¯¼å‡ºä¸å†ä¹±
         taskType,
         task: toTaskLabel(taskType),
 
@@ -714,7 +642,7 @@ export const useAppStore = defineStore("app", {
         status: statusCN,
         createdAt: formatTs(out.created_at),
 
-        // ????????????????
+        // è¡¨æ ¼ç›´æ¥ç”¨ï¼šæ‰å¹³å­—æ®µ
         psnr: metrics.PSNR ?? metrics.psnr ?? null,
         ssim: metrics.SSIM ?? metrics.ssim ?? null,
         niqe: metrics.NIQE ?? metrics.niqe ?? null,
@@ -722,7 +650,7 @@ export const useAppStore = defineStore("app", {
 
         error: out?.error ?? null,
 
-        // ???????????????????/???????
+        // ä¿ç•™åŸå§‹å­—æ®µï¼ˆæœªæ¥å¯¼å‡º/è¯¦æƒ…ç”¨ï¼‰
         raw,
       };
     },
