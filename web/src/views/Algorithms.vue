@@ -1,18 +1,18 @@
 <template>
-  <div style="padding: 16px;">
-    <h2 style="margin: 0 0 8px;">算法库</h2>
-    <div style="color:#666; margin-bottom: 12px;">
+  <div class="page">
+    <h2 class="title">算法库</h2>
+    <div class="subtitle">
       管理平台内置/接入的算法条目，后续评测时从这里选择算法。
     </div>
 
-    <div style="display:flex; gap:8px; margin-bottom: 12px;">
-      <button @click="openCreate" style="padding:6px 10px;">新增算法</button>
-      <button @click="seedDemo" style="padding:6px 10px;">一键填充 Demo（占位）</button>
+    <div class="toolbar">
+      <button @click="openCreate">新增算法</button>
+      <button @click="seedDemo">一键填充 Demo（占位）</button>
     </div>
 
-    <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
+    <table class="gridTable" border="1" cellpadding="8" cellspacing="0">
       <thead>
-        <tr style="background:#f6f6f6;">
+        <tr>
           <th align="left">任务</th>
           <th align="left">算法名称</th>
           <th align="left">实现方式</th>
@@ -29,26 +29,26 @@
           <td>{{ a.version }}</td>
           <td>{{ a.createdAt }}</td>
           <td>
-            <button @click="openEdit(a)" style="padding:4px 8px; margin-right:6px;">编辑</button>
-            <button @click="remove(a.id)" style="padding:4px 8px;">删除</button>
+            <button class="miniBtn" @click="openEdit(a)">编辑</button>
+            <button class="miniBtn dangerBtn" @click="remove(a.id)">删除</button>
           </td>
         </tr>
         <tr v-if="store.algorithms.length === 0">
-          <td colspan="6" style="color:#888;">暂无算法条目</td>
+          <td colspan="6" class="emptyText">暂无算法条目</td>
         </tr>
       </tbody>
     </table>
 
     <!-- 新增算法弹窗 -->
     <div v-if="showCreate"
-      style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
-      <div style="background:#fff; padding:16px; width:460px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">新增算法</h3>
+      class="mask">
+      <div class="dialog">
+        <h3 class="dialogTitle">新增算法</h3>
 
-        <div style="display:flex; flex-direction:column; gap:10px;">
+        <div class="formCol">
           <label>
             任务类别：
-            <select v-model="form.task" style="width:100%; padding:6px;">
+            <select v-model="form.task" class="inputBox">
               <option>去噪</option>
               <option>去模糊</option>
               <option>去雾</option>
@@ -61,12 +61,12 @@
 
           <label>
             算法名称：
-            <div style="display:flex; gap:10px; align-items:center; margin:6px 0;">
-              <label style="display:flex; gap:6px; align-items:center;">
+            <div class="radioRow">
+              <label class="radioLabel">
                 <input type="radio" value="preset" v-model="form.nameMode" />
                 预设
               </label>
-              <label style="display:flex; gap:6px; align-items:center;">
+              <label class="radioLabel">
                 <input type="radio" value="custom" v-model="form.nameMode" />
                 自定义
               </label>
@@ -74,7 +74,7 @@
             <select
               v-if="form.nameMode === 'preset'"
               v-model="form.presetKey"
-              style="width:100%; padding:6px;"
+              class="inputBox"
             >
               <option value="" disabled>请选择预设算法</option>
               <option v-for="p in createPresetOptions" :key="p.key" :value="p.key">
@@ -85,13 +85,13 @@
               v-else
               v-model="form.name"
               placeholder="例如：DnCNN / DeblurGAN-v2 / RetinexNet"
-              style="width:100%; padding:6px;"
+              class="inputBox"
             />
           </label>
 
           <label>
             实现方式：
-            <select v-model="form.impl" style="width:100%; padding:6px;">
+            <select v-model="form.impl" class="inputBox">
               <option>PyTorch</option>
               <option>TensorFlow</option>
               <option>OpenCV</option>
@@ -101,8 +101,7 @@
 
           <label>
             版本：
-            <input v-model="form.version" placeholder="例如：v1 / commit id / 论文年份"
-              style="width:100%; padding:6px;" />
+            <input v-model="form.version" placeholder="例如：v1 / commit id / 论文年份" class="inputBox" />
           </label>
 
           <label>
@@ -110,30 +109,30 @@
             <textarea
               v-model="form.defaultParamsText"
               rows="6"
-              style="width:100%; padding:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;"
+              class="codeBox"
               placeholder='例如：{ "dcp_patch": 15, "dcp_omega": 0.95 }'
             />
           </label>
         </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeCreate" style="padding:6px 10px;">取消</button>
-          <button @click="submitCreate" style="padding:6px 10px;">确认新增</button>
+        <div class="dialogFooter">
+          <button @click="closeCreate">取消</button>
+          <button @click="submitCreate">确认新增</button>
         </div>
       </div>
     </div>
 
     <!-- 编辑算法弹窗 -->
     <div v-if="showEdit"
-      style="position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;">
-      <div style="background:#fff; padding:16px; width:520px; border-radius:10px;">
-        <h3 style="margin:0 0 12px;">编辑算法</h3>
+      class="mask">
+      <div class="dialog editDialog">
+        <h3 class="dialogTitle">编辑算法</h3>
 
-        <div style="display:flex; flex-direction:column; gap:10px;">
-          <div style="color:#666;">ID：{{ editForm.id }}</div>
+        <div class="formCol">
+          <div class="idText">ID：{{ editForm.id }}</div>
           <label>
             任务类别：
-            <select v-model="editForm.task" style="width:100%; padding:6px;">
+            <select v-model="editForm.task" class="inputBox">
               <option>去噪</option>
               <option>去模糊</option>
               <option>去雾</option>
@@ -146,12 +145,12 @@
 
           <label>
             算法名称：
-            <div style="display:flex; gap:10px; align-items:center; margin:6px 0;">
-              <label style="display:flex; gap:6px; align-items:center;">
+            <div class="radioRow">
+              <label class="radioLabel">
                 <input type="radio" value="preset" v-model="editForm.nameMode" />
                 预设
               </label>
-              <label style="display:flex; gap:6px; align-items:center;">
+              <label class="radioLabel">
                 <input type="radio" value="custom" v-model="editForm.nameMode" />
                 自定义
               </label>
@@ -159,7 +158,7 @@
             <select
               v-if="editForm.nameMode === 'preset'"
               v-model="editForm.presetKey"
-              style="width:100%; padding:6px;"
+              class="inputBox"
             >
               <option value="" disabled>请选择预设算法</option>
               <option v-for="p in editPresetOptions" :key="p.key" :value="p.key">
@@ -169,13 +168,13 @@
             <input
               v-else
               v-model="editForm.name"
-              style="width:100%; padding:6px;"
+              class="inputBox"
             />
           </label>
 
           <label>
             实现方式：
-            <select v-model="editForm.impl" style="width:100%; padding:6px;">
+            <select v-model="editForm.impl" class="inputBox">
               <option>PyTorch</option>
               <option>TensorFlow</option>
               <option>OpenCV</option>
@@ -185,7 +184,7 @@
 
           <label>
             版本：
-            <input v-model="editForm.version" style="width:100%; padding:6px;" />
+            <input v-model="editForm.version" class="inputBox" />
           </label>
 
           <label>
@@ -193,14 +192,14 @@
             <textarea
               v-model="editForm.defaultParamsText"
               rows="8"
-              style="width:100%; padding:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;"
+              class="codeBox"
             />
           </label>
         </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button @click="closeEdit" style="padding:6px 10px;">取消</button>
-          <button @click="submitEdit" style="padding:6px 10px;">保存</button>
+        <div class="dialogFooter">
+          <button @click="closeEdit">取消</button>
+          <button @click="submitEdit">保存</button>
         </div>
       </div>
     </div>
@@ -480,3 +479,131 @@ async function seedDemo() {
   }
 }
 </script>
+
+<style scoped>
+.page {
+  padding: 16px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1b2f62;
+}
+
+.subtitle {
+  margin-bottom: 14px;
+  color: #5f7098;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gridTable {
+  width: 100%;
+  border-collapse: collapse;
+  border-color: #d9e4ff;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.gridTable thead tr {
+  background: #f4f7ff;
+}
+
+.miniBtn {
+  margin-right: 6px;
+  padding: 4px 8px;
+}
+
+.dangerBtn {
+  color: #a53030;
+  border-color: #f3c5c5;
+  background: linear-gradient(180deg, #fff 0%, #fff2f2 100%);
+}
+
+.emptyText {
+  color: #8a96b3;
+}
+
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 18, 40, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.dialog {
+  background: #fff;
+  padding: 16px;
+  width: 460px;
+  border-radius: 14px;
+  border: 1px solid #d8e3ff;
+  box-shadow: 0 18px 32px rgba(23, 71, 180, 0.2);
+}
+
+.editDialog {
+  width: 520px;
+}
+
+.dialogTitle {
+  margin: 0 0 12px;
+  color: #1f3263;
+}
+
+.formCol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inputBox {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #c8d7fb;
+  background: #fff;
+}
+
+.codeBox {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #c8d7fb;
+  background: #f8fbff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.radioRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.radioLabel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.idText {
+  color: #5f7098;
+}
+
+.dialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+</style>

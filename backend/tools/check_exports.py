@@ -8,7 +8,7 @@ from pathlib import Path
 def _md_summary(p: Path) -> dict:
     raw = p.read_text(encoding="utf-8", errors="replace")
     lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    colon = "\uFF1A"  # '£º'
+    colon = "\uFF1A"  # '??'
     k_task = "- \u4EFB\u52A1\u7C7B\u578B" + colon
     k_ds = "- \u6570\u636E\u96C6" + colon
     k_rec = "\u63A8\u8350\u7B97\u6CD5" + colon

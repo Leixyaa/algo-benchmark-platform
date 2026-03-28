@@ -4,7 +4,6 @@ import Layout from "../views/Layout.vue";
 import Datasets from "../views/Datasets.vue";
 import Algorithms from "../views/Algorithms.vue";
 import NewRun from "../views/NewRun.vue";
-import Tasks from "../views/Tasks.vue";
 import Compare from "../views/Compare.vue";
 import Runs from "../views/Runs.vue";
 

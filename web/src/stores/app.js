@@ -579,6 +579,34 @@ export const useAppStore = defineStore("app", {
       }
     },
 
+    async fastSelect(payload = {}) {
+      const taskType =
+        String(payload.task_type || "").trim() ||
+        toTaskType(String(payload.task || "").trim());
+      if (!taskType) {
+        throw new Error("task_type_required");
+      }
+      const datasetId = String(payload.dataset_id || payload.datasetId || "").trim();
+      if (!datasetId) {
+        throw new Error("dataset_id_required");
+      }
+      const out = await runsApi.fastSelect({
+        task_type: taskType,
+        dataset_id: datasetId,
+        candidate_algorithm_ids: Array.isArray(payload.candidate_algorithm_ids)
+          ? payload.candidate_algorithm_ids
+          : (Array.isArray(payload.candidateAlgorithmIds) ? payload.candidateAlgorithmIds : []),
+        top_k: Number(payload.top_k ?? payload.topK ?? 3),
+        alpha: Number(payload.alpha ?? 0.35),
+        lambda_reg: payload.lambda_reg ?? payload.lambdaReg,
+        recency_half_life_hours: payload.recency_half_life_hours ?? payload.recencyHalfLifeHours,
+        cold_start_bonus: payload.cold_start_bonus ?? payload.coldStartBonus,
+        low_support_penalty: payload.low_support_penalty ?? payload.lowSupportPenalty,
+        min_support: payload.min_support ?? payload.minSupport,
+      });
+      return out;
+    },
+
     /**
      * 启动轮询（默认 800ms）
      * - run 进入终态（已完成/失败）会自动 stop

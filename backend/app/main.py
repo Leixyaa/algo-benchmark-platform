@@ -13,9 +13,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from openpyxl import Workbook
 
@@ -32,6 +32,9 @@ from .schemas import (
     PresetCreate,
     PresetOut,
     PresetPatch,
+    FastSelectRequest,
+    FastSelectResponse,
+    FastSelectItem,
 )
 from .store import (
     make_redis,
@@ -53,6 +56,15 @@ from .store import (
 )
 from .celery_app import celery_app
 from .tasks import execute_run, _stable_seed, _make_synthetic_pair_for_task
+from .selector import (
+    build_context_vector,
+    fast_select_algorithms,
+    fast_select_algorithms_online,
+    bootstrap_online_model_from_runs,
+    load_online_model,
+    FastSelectConfig,
+)
+from . import errors as err
 
 import cv2
 
@@ -68,6 +80,35 @@ def _sanitize_run_for_api(run: dict) -> dict:
         out["params"] = p2
     return out
 
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(_: Request, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict):
+        if "error_code" in detail and "error_message" in detail:
+            mapped = detail
+        elif "error" in detail and "message" in detail:
+            extra = {k: v for k, v in detail.items() if k not in {"error", "message"}}
+            mapped = {
+                "error_code": str(detail.get("error") or err.E_HTTP),
+                "error_message": str(detail.get("message") or ""),
+                "error_detail": extra or None,
+                "error": detail.get("error"),
+                "message": detail.get("message"),
+            }
+        else:
+            mapped = {
+                "error_code": err.E_HTTP,
+                "error_message": json.dumps(detail, ensure_ascii=False),
+                "error_detail": detail,
+                "error": err.E_HTTP,
+                "message": json.dumps(detail, ensure_ascii=False),
+            }
+    else:
+        msg = str(detail) if detail is not None else ""
+        mapped = {"error_code": err.E_HTTP, "error_message": msg, "error_detail": None, "error": err.E_HTTP, "message": msg}
+    return JSONResponse(status_code=exc.status_code, content={"detail": mapped})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -77,25 +118,24 @@ app.add_middleware(
 )
 
 TASK_LABEL_BY_TYPE = {
-    "denoise": "去噪",
-    "deblur": "去模糊",
-    "dehaze": "去雾",
-    "sr": "超分辨率",
-    "lowlight": "低照度增强",
-    "video_denoise": "视频去噪",
-    "video_sr": "视频超分",
+    "denoise": "\u53bb\u566a",
+    "deblur": "\u53bb\u6a21\u7cca",
+    "dehaze": "\u53bb\u96fe",
+    "sr": "\u8d85\u5206\u8fa8\u7387",
+    "lowlight": "\u4f4e\u7167\u5ea6\u589e\u5f3a",
+    "video_denoise": "\u89c6\u9891\u53bb\u566a",
+    "video_sr": "\u89c6\u9891\u8d85\u5206",
 }
-
-def api_error(status_code: int, error: str, message: str, **extra):
-    detail = {"error": error, "message": message}
-    if extra:
-        detail.update(extra)
-    raise HTTPException(status_code=status_code, detail=detail)
 
 
 @app.get("/health")
 def health():
     return {"ok": True, "ts": time.time()}
+
+
+@app.get("/meta/error-codes")
+def meta_error_codes():
+    return {"items": err.list_error_defs()}
 
 
 @app.get("/", include_in_schema=False)
@@ -108,9 +148,9 @@ def _ensure_catalog_defaults(r):
 
     demo_ds = {
         "dataset_id": "ds_demo",
-        "name": "Demo-样例数据集",
-        "type": "图像",
-        "size": "10 张",
+        "name": "Demo-\u6837\u4f8b\u6570\u636e\u96c6",
+        "type": "\u56fe\u50cf",
+        "size": "10 \u5f20",
         "created_at": created,
         "meta": {},
     }
@@ -132,115 +172,147 @@ def _ensure_catalog_defaults(r):
     defaults = [
         {
             "algorithm_id": "alg_dn_cnn",
-            "task": "去噪",
-            "name": "FastNLMeans(基线)",
+            "task": "\u53bb\u566a",
+            "name": "FastNLMeans(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
         },
         {
             "algorithm_id": "alg_denoise_bilateral",
-            "task": "去噪",
-            "name": "Bilateral(基线)",
+            "task": "\u53bb\u566a",
+            "name": "Bilateral(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
         },
         {
             "algorithm_id": "alg_denoise_gaussian",
-            "task": "去噪",
-            "name": "Gaussian(基线)",
+            "task": "\u53bb\u566a",
+            "name": "Gaussian(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"gaussian_sigma": 1.0},
         },
         {
             "algorithm_id": "alg_denoise_median",
-            "task": "去噪",
-            "name": "Median(基线)",
+            "task": "\u53bb\u566a",
+            "name": "Median(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"median_ksize": 3},
         },
         {
             "algorithm_id": "alg_dehaze_dcp",
-            "task": "去雾",
-            "name": "DCP暗通道先验(基线)",
+            "task": "\u53bb\u96fe",
+            "name": "DCP\u6697\u901a\u9053\u5148\u9a8c(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
         },
         {
             "algorithm_id": "alg_dehaze_clahe",
-            "task": "去雾",
-            "name": "CLAHE(基线)",
+            "task": "\u53bb\u96fe",
+            "name": "CLAHE(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"clahe_clip_limit": 2.0},
         },
         {
             "algorithm_id": "alg_dehaze_gamma",
-            "task": "去雾",
-            "name": "Gamma(基线)",
+            "task": "\u53bb\u96fe",
+            "name": "Gamma(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"gamma": 0.75},
         },
         {
             "algorithm_id": "alg_deblur_unsharp",
-            "task": "去模糊",
-            "name": "UnsharpMask(基线)",
+            "task": "\u53bb\u6a21\u7cca",
+            "name": "UnsharpMask(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
         },
         {
             "algorithm_id": "alg_deblur_laplacian",
-            "task": "去模糊",
-            "name": "LaplacianSharpen(基线)",
+            "task": "\u53bb\u6a21\u7cca",
+            "name": "LaplacianSharpen(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"laplacian_strength": 0.7},
         },
         {
             "algorithm_id": "alg_sr_bicubic",
-            "task": "超分辨率",
-            "name": "Bicubic(基线)",
+            "task": "\u8d85\u5206\u8fa8\u7387",
+            "name": "Bicubic(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_sr_lanczos",
-            "task": "超分辨率",
-            "name": "Lanczos(基线)",
+            "task": "\u8d85\u5206\u8fa8\u7387",
+            "name": "Lanczos(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_sr_nearest",
-            "task": "超分辨率",
-            "name": "Nearest(基线)",
+            "task": "\u8d85\u5206\u8fa8\u7387",
+            "name": "Nearest(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_lowlight_gamma",
-            "task": "低照度增强",
-            "name": "Gamma(基线)",
+            "task": "\u4f4e\u7167\u5ea6\u589e\u5f3a",
+            "name": "Gamma(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"lowlight_gamma": 0.6},
         },
         {
             "algorithm_id": "alg_lowlight_clahe",
-            "task": "低照度增强",
-            "name": "CLAHE(基线)",
+            "task": "\u4f4e\u7167\u5ea6\u589e\u5f3a",
+            "name": "CLAHE(\u57fa\u7ebf)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"clahe_clip_limit": 2.5},
+        },
+        {
+            "algorithm_id": "alg_video_denoise_gaussian",
+            "task": "\u89c6\u9891\u53bb\u566a",
+            "name": "Video-Gaussian(\u57fa\u7ebf)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"gaussian_sigma": 1.0},
+        },
+        {
+            "algorithm_id": "alg_video_denoise_median",
+            "task": "\u89c6\u9891\u53bb\u566a",
+            "name": "Video-Median(\u57fa\u7ebf)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {"median_ksize": 3},
+        },
+        {
+            "algorithm_id": "alg_video_sr_bicubic",
+            "task": "\u89c6\u9891\u8d85\u5206",
+            "name": "Video-Bicubic(\u57fa\u7ebf)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {},
+        },
+        {
+            "algorithm_id": "alg_video_sr_lanczos",
+            "task": "\u89c6\u9891\u8d85\u5206",
+            "name": "Video-Lanczos(\u57fa\u7ebf)",
+            "impl": "OpenCV",
+            "version": "v1",
+            "default_params": {},
         },
     ]
     for x in defaults:
@@ -273,10 +345,10 @@ def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
             if not name or name.endswith("/"):
                 continue
             if name.startswith("/") or name.startswith("../") or "/../" in name:
-                raise HTTPException(status_code=400, detail="zip_path_traversal")
+                err.api_error(400, err.E_ZIP_PATH_TRAVERSAL, "zip_path_traversal", name=name)
             out_path = (dest_dir / name).resolve()
             if dest_dir.resolve() not in out_path.parents and out_path != dest_dir.resolve():
-                raise HTTPException(status_code=400, detail="zip_path_traversal")
+                err.api_error(400, err.E_ZIP_PATH_TRAVERSAL, "zip_path_traversal", name=name)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info, "r") as src, open(out_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
@@ -286,14 +358,14 @@ def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str, d
     ds_dir = data_root / dataset_id
     gt_dir = ds_dir / "gt"
     if not gt_dir.exists():
-        return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
+        return "\u56fe\u50cf", f"0 \u5f20", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
     n = 0
     for p in gt_dir.iterdir():
         if p.is_file():
             suf = p.suffix.lower()
             if suf in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
                 n += 1
-    from .vision.dataset_io import IMG_EXTS, count_paired_images
+    from .vision.dataset_io import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos
 
     input_dir_by_task = {
         "dehaze": "hazy",
@@ -310,12 +382,17 @@ def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str, d
         if not dd.exists():
             counts_by_dir[d] = 0
             continue
-        counts_by_dir[d] = sum(1 for p in dd.rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTS)
+        counts_by_dir[d] = sum(1 for p in dd.rglob("*") if p.is_file() and p.suffix.lower() in (IMG_EXTS | VIDEO_EXTS))
 
-    pairs_by_task = {t: count_paired_images(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt") for t, dirn in input_dir_by_task.items()}
+    pairs_by_task = {}
+    for t, dirn in input_dir_by_task.items():
+        if t.startswith("video_"):
+            pairs_by_task[t] = count_paired_videos(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt")
+        else:
+            pairs_by_task[t] = count_paired_images(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt")
     supported = sorted([t for t, c in pairs_by_task.items() if c > 0])
     meta = {"supported_task_types": supported, "pairs_by_task": pairs_by_task, "counts_by_dir": counts_by_dir}
-    return "图像", f"{n} 张", meta
+    return "\u56fe\u50cf", f"{n} \u5f20", meta
 
 
 @app.get("/datasets")
@@ -331,7 +408,7 @@ def create_dataset(payload: DatasetCreate):
     _ensure_catalog_defaults(r)
     dataset_id = (payload.dataset_id or "").strip() or f"ds_{uuid.uuid4().hex[:10]}"
     if load_dataset(r, dataset_id):
-        raise HTTPException(status_code=409, detail="dataset_id_exists")
+        err.api_error(409, err.E_DATASET_ID_EXISTS, "dataset_id_exists", dataset_id=dataset_id)
     created = time.time()
     data = {
         "dataset_id": dataset_id,
@@ -351,7 +428,7 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch):
     _ensure_catalog_defaults(r)
     cur = load_dataset(r, dataset_id)
     if not cur:
-        raise HTTPException(status_code=404, detail="dataset_not_found")
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     if payload.name is not None:
         cur["name"] = payload.name.strip()
     if payload.type is not None:
@@ -369,7 +446,7 @@ def remove_dataset(dataset_id: str):
     r = make_redis()
     _ensure_catalog_defaults(r)
     if not load_dataset(r, dataset_id):
-        raise HTTPException(status_code=404, detail="dataset_not_found")
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     delete_dataset(r, dataset_id)
     return {"ok": True, "dataset_id": dataset_id}
 
@@ -380,7 +457,7 @@ def scan_dataset(dataset_id: str):
     _ensure_catalog_defaults(r)
     cur = load_dataset(r, dataset_id)
     if not cur:
-        raise HTTPException(status_code=404, detail="dataset_not_found")
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     data_root = Path(__file__).resolve().parents[1] / "data"
     t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
     cur["type"] = t
@@ -400,7 +477,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
         cur = {
             "dataset_id": dataset_id,
             "name": dataset_id,
-            "type": "图像",
+            "type": "\u56fe\u50cf",
             "size": "-",
             "created_at": created,
             "meta": {},
@@ -409,7 +486,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
     try:
         zip_bytes = base64.b64decode(payload.data_b64.encode("utf-8"), validate=True)
     except Exception:
-        raise HTTPException(status_code=400, detail="bad_base64")
+        err.api_error(400, err.E_BAD_BASE64, "bad_base64")
 
     data_root = Path(__file__).resolve().parents[1] / "data"
     ds_dir = data_root / dataset_id
@@ -441,6 +518,8 @@ def get_algorithms(limit: int = 500):
         "alg_deblur_laplacian": {"laplacian_strength": 0.7},
         "alg_lowlight_gamma": {"lowlight_gamma": 0.6},
         "alg_lowlight_clahe": {"clahe_clip_limit": 2.5},
+        "alg_video_denoise_gaussian": {"gaussian_sigma": 1.0},
+        "alg_video_denoise_median": {"median_ksize": 3},
     }
     presets_by_id = {
         "alg_dn_cnn": {
@@ -460,6 +539,8 @@ def get_algorithms(limit: int = 500):
         "alg_deblur_laplacian": {"speed": {"laplacian_strength": 0.5}, "quality": {"laplacian_strength": 0.9}},
         "alg_lowlight_gamma": {"speed": {"lowlight_gamma": 0.7}, "quality": {"lowlight_gamma": 0.55}},
         "alg_lowlight_clahe": {"speed": {"clahe_clip_limit": 2.0}, "quality": {"clahe_clip_limit": 3.5}},
+        "alg_video_denoise_gaussian": {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}},
+        "alg_video_denoise_median": {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}},
     }
 
     items = list_algorithms(r, limit=limit) or []
@@ -483,7 +564,7 @@ def create_algorithm(payload: AlgorithmCreate):
     _ensure_catalog_defaults(r)
     algorithm_id = (payload.algorithm_id or "").strip() or f"alg_{uuid.uuid4().hex[:10]}"
     if load_algorithm(r, algorithm_id):
-        raise HTTPException(status_code=409, detail="algorithm_id_exists")
+        err.api_error(409, err.E_ALGORITHM_ID_EXISTS, "algorithm_id_exists", algorithm_id=algorithm_id)
     created = time.time()
     data = {
         "algorithm_id": algorithm_id,
@@ -505,7 +586,7 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
     _ensure_catalog_defaults(r)
     cur = load_algorithm(r, algorithm_id)
     if not cur:
-        raise HTTPException(status_code=404, detail="algorithm_not_found")
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
     if payload.task is not None:
         cur["task"] = payload.task
     if payload.name is not None:
@@ -527,7 +608,7 @@ def remove_algorithm(algorithm_id: str):
     r = make_redis()
     _ensure_catalog_defaults(r)
     if not load_algorithm(r, algorithm_id):
-        raise HTTPException(status_code=404, detail="algorithm_not_found")
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
     delete_algorithm(r, algorithm_id)
     return {"ok": True, "algorithm_id": algorithm_id}
 
@@ -544,7 +625,7 @@ def get_preset(preset_id: str):
     r = make_redis()
     cur = load_preset(r, preset_id)
     if not cur:
-        raise HTTPException(status_code=404, detail="preset_not_found")
+        err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
     return PresetOut(**cur)
 
 
@@ -553,7 +634,7 @@ def create_preset(payload: PresetCreate):
     r = make_redis()
     preset_id = (payload.preset_id or "").strip() or f"pre_{uuid.uuid4().hex[:10]}"
     if load_preset(r, preset_id):
-        raise HTTPException(status_code=409, detail="preset_id_exists")
+        err.api_error(409, err.E_PRESET_ID_EXISTS, "preset_id_exists", preset_id=preset_id)
     created = time.time()
     data = {
         "preset_id": preset_id,
@@ -575,7 +656,7 @@ def patch_preset(preset_id: str, payload: PresetPatch):
     r = make_redis()
     cur = load_preset(r, preset_id)
     if not cur:
-        raise HTTPException(status_code=404, detail="preset_not_found")
+        err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
     if payload.name is not None:
         cur["name"] = payload.name.strip()
     if payload.task_type is not None:
@@ -597,9 +678,166 @@ def patch_preset(preset_id: str, payload: PresetPatch):
 def remove_preset(preset_id: str):
     r = make_redis()
     if not load_preset(r, preset_id):
-        raise HTTPException(status_code=404, detail="preset_not_found")
+        err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
     delete_preset(r, preset_id)
     return {"ok": True, "preset_id": preset_id}
+
+
+@app.post("/recommend/fast-select", response_model=FastSelectResponse)
+def recommend_fast_select(payload: FastSelectRequest):
+    r = make_redis()
+    task_type = (payload.task_type or "").strip().lower()
+    dataset_id = (payload.dataset_id or "").strip()
+    if task_type not in TASK_LABEL_BY_TYPE:
+        err.api_error(400, err.E_BAD_TASK_TYPE, "bad_task_type", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+    if not dataset_id:
+        err.api_error(400, err.E_DATASET_ID_REQUIRED, "dataset_id_required")
+
+    ds = load_dataset(r, dataset_id)
+    if not ds:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
+    pairs_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
+    pair_count = int(pairs_map.get(task_type) or 0)
+    if pair_count <= 0:
+        err.api_error(
+            409,
+            err.E_DATASET_NO_PAIR,
+            "dataset_no_pair_for_task",
+            task_type=task_type,
+            dataset_id=dataset_id,
+            pair_count=pair_count,
+        )
+
+    task_label = TASK_LABEL_BY_TYPE.get(task_type, "")
+    if payload.candidate_algorithm_ids:
+        candidate_ids = []
+        for x in payload.candidate_algorithm_ids:
+            aid = str(x or "").strip()
+            if aid:
+                candidate_ids.append(aid)
+    else:
+        all_algs = list_algorithms(r, limit=2000) or []
+        candidate_ids = [str(x.get("algorithm_id") or "") for x in all_algs if str((x.get("task") or "")).strip() == task_label]
+
+    uniq = []
+    seen = set()
+    for aid in candidate_ids:
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        uniq.append(aid)
+    candidate_ids = uniq
+    if not candidate_ids:
+        err.api_error(409, err.E_TASK_NOT_SUPPORTED, "no_candidate_algorithms", task_type=task_type, task_label=task_label)
+
+    valid_ids = []
+    for aid in candidate_ids:
+        alg = load_algorithm(r, aid)
+        if not alg:
+            err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=aid)
+        if str((alg.get("task") or "")).strip() != task_label:
+            err.api_error(
+                409,
+                err.E_ALGORITHM_TASK_MISMATCH,
+                "algorithm_task_mismatch",
+                algorithm_id=aid,
+                algorithm_task=(alg.get("task") or ""),
+                task_type=task_type,
+                task_label=task_label,
+            )
+        valid_ids.append(aid)
+
+    target_context = build_context_vector(task_type=task_type, dataset_meta=meta)
+    alpha = float(payload.alpha if payload.alpha is not None else 0.35)
+    alpha = max(0.0, min(alpha, 2.0))
+    lambda_reg = float(payload.lambda_reg if payload.lambda_reg is not None else 1.0)
+    lambda_reg = max(0.05, min(lambda_reg, 50.0))
+    recency_half_life_hours = float(payload.recency_half_life_hours if payload.recency_half_life_hours is not None else 72.0)
+    recency_half_life_hours = max(1.0, min(recency_half_life_hours, 24.0 * 60.0))
+    cold_start_bonus = float(payload.cold_start_bonus if payload.cold_start_bonus is not None else 0.08)
+    cold_start_bonus = max(0.0, min(cold_start_bonus, 0.5))
+    low_support_penalty = float(payload.low_support_penalty if payload.low_support_penalty is not None else 0.06)
+    low_support_penalty = max(0.0, min(low_support_penalty, 0.5))
+    min_support = int(payload.min_support if payload.min_support is not None else 3)
+    min_support = max(1, min(min_support, 50))
+    cfg = FastSelectConfig(
+        alpha=alpha,
+        lambda_reg=lambda_reg,
+        recency_half_life_hours=recency_half_life_hours,
+        cold_start_bonus=cold_start_bonus,
+        low_support_penalty=low_support_penalty,
+        min_support=min_support,
+    )
+    model = load_online_model(r, task_type)
+    historical_done_count = 0
+    if model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
+        arm_stats = fast_select_algorithms_online(
+            task_type=task_type,
+            candidate_algorithm_ids=valid_ids,
+            target_context=target_context,
+            model=model,
+            config=cfg,
+        )
+        arms = model.get("arms") if isinstance(model.get("arms"), dict) else {}
+        historical_done_count = int(sum(int((v or {}).get("sample_count") or 0) for v in arms.values() if isinstance(v, dict)))
+    else:
+        runs = list_runs(r, limit=5000) or []
+        arm_stats = fast_select_algorithms(
+            task_type=task_type,
+            candidate_algorithm_ids=valid_ids,
+            historical_runs=runs,
+            target_context=target_context,
+            config=cfg,
+        )
+        historical_done_count = len([x for x in runs if str(x.get("task_type") or "") == task_type and str(x.get("status") or "").lower() == "done"])
+        bootstrap_online_model_from_runs(r, task_type=task_type, historical_runs=runs, config=cfg)
+
+    top_k = int(payload.top_k if payload.top_k is not None else 3)
+    if top_k < 1:
+        top_k = 1
+    if top_k > len(arm_stats):
+        top_k = len(arm_stats)
+
+    recs = [
+        FastSelectItem(
+            algorithm_id=x.algorithm_id,
+            score=x.score,
+            expected_reward=x.expected_reward,
+            mean_reward=x.mean_reward,
+            uncertainty=x.uncertainty,
+            exploration_bonus=x.exploration_bonus,
+            cold_start_bonus=x.cold_start_bonus,
+            reliability=x.reliability,
+            sample_count=x.sample_count,
+        )
+        for x in arm_stats[:top_k]
+    ]
+
+    context = {
+        "pair_count": pair_count,
+        "supported_tasks": meta.get("supported_task_types") if isinstance(meta.get("supported_task_types"), list) else [],
+        "counts_by_dir": meta.get("counts_by_dir") if isinstance(meta.get("counts_by_dir"), dict) else {},
+        "feature_dim": int(target_context.shape[0]),
+        "candidate_count": len(valid_ids),
+        "historical_run_count": historical_done_count,
+        "alpha": alpha,
+        "lambda_reg": lambda_reg,
+        "recency_half_life_hours": recency_half_life_hours,
+        "cold_start_bonus": cold_start_bonus,
+        "low_support_penalty": low_support_penalty,
+        "min_support": min_support,
+        "online_model": bool(model),
+    }
+
+    return FastSelectResponse(
+        task_type=task_type,
+        dataset_id=dataset_id,
+        top_k=top_k,
+        reward_formula="expected + alpha*uncertainty + cold_start_bonus/sqrt(n+1) - low_support_penalty*(1-reliability)",
+        context=context,
+        recommendations=recs,
+    )
 
 
 @app.post("/runs", response_model=RunOut)
@@ -609,25 +847,25 @@ def create_run(payload: RunCreate):
     dataset_id = (payload.dataset_id or "").strip()
     algorithm_id = (payload.algorithm_id or "").strip()
     if task_type not in TASK_LABEL_BY_TYPE:
-        api_error(400, "bad_task_type", "不支持的任务类型", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+        err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
     if not dataset_id:
-        api_error(400, "dataset_id_required", "缺少 dataset_id")
+        err.api_error(400, err.E_DATASET_ID_REQUIRED, "\u7f3a\u5c11 dataset_id")
     if not algorithm_id:
-        api_error(400, "algorithm_id_required", "缺少 algorithm_id")
+        err.api_error(400, err.E_ALGORITHM_ID_REQUIRED, "\u7f3a\u5c11 algorithm_id")
 
     ds = load_dataset(r, dataset_id)
     if not ds:
-        api_error(404, "dataset_not_found", "数据集不存在", dataset_id=dataset_id)
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "\u6570\u636e\u96c6\u4e0d\u5b58\u5728", dataset_id=dataset_id)
     alg = load_algorithm(r, algorithm_id)
     if not alg:
-        api_error(404, "algorithm_not_found", "算法不存在", algorithm_id=algorithm_id)
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "\u7b97\u6cd5\u4e0d\u5b58\u5728", algorithm_id=algorithm_id)
 
     expected_task = TASK_LABEL_BY_TYPE.get(task_type, "")
     if expected_task and (alg.get("task") or "").strip() != expected_task:
-        api_error(
+        err.api_error(
             409,
-            "algorithm_task_mismatch",
-            "算法任务与任务类型不匹配",
+            err.E_ALGORITHM_TASK_MISMATCH,
+            "\u7b97\u6cd5\u4efb\u52a1\u4e0e\u4efb\u52a1\u7c7b\u578b\u4e0d\u5339\u914d",
             task_type=task_type,
             task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
             expected_algorithm_task=expected_task,
@@ -635,7 +873,7 @@ def create_run(payload: RunCreate):
         )
 
     if bool(getattr(payload, "strict_validate", False)):
-        from .vision.dataset_io import count_paired_images
+        from .vision.dataset_io import count_paired_images, count_paired_videos
 
         data_root = Path(__file__).resolve().parents[1] / "data"
         input_dir_by_task = {
@@ -649,13 +887,16 @@ def create_run(payload: RunCreate):
         }
         input_dirname = input_dir_by_task.get(task_type)
         if not input_dirname:
-            api_error(400, "bad_task_type", "不支持的任务类型", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
-        pair_count = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+            err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+        if task_type.startswith("video_"):
+            pair_count = count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+        else:
+            pair_count = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
         if pair_count <= 0:
-            api_error(
+            err.api_error(
                 409,
-                "dataset_no_pairs_for_task",
-                "当前任务无可用配对，请检查输入目录与 gt/ 同名文件并重新扫描",
+                err.E_DATASET_NO_PAIR,
+                "\u5f53\u524d\u4efb\u52a1\u65e0\u53ef\u7528\u914d\u5bf9\uff0c\u8bf7\u68c0\u67e5\u8f93\u5165\u76ee\u5f55\u4e0e gt/ \u540c\u540d\u6587\u4ef6\u5e76\u91cd\u65b0\u626b\u63cf",
                 task_type=task_type,
                 task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
                 dataset_id=dataset_id,
@@ -683,6 +924,8 @@ def create_run(payload: RunCreate):
         "elapsed": None,
         "metrics": {},
         "error": None,
+        "error_code": None,
+        "error_detail": None,
     }
     save_run(r, run_id, run)
 
@@ -692,10 +935,29 @@ def create_run(payload: RunCreate):
 
 
 @app.get("/runs")
-def get_runs(limit: int = 200):
+def get_runs(
+    limit: int = 200,
+    status: str | None = Query(None, description="queued|running|canceling|canceled|done|failed"),
+    task_type: str | None = Query(None, description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr"),
+    dataset_id: str | None = Query(None),
+    algorithm_id: str | None = Query(None),
+):
     r = make_redis()
     runs = list_runs(r, limit=limit)
-    return [_sanitize_run_for_api(x) for x in (runs or [])]
+
+    def ok(x: dict) -> bool:
+        if status and x.get("status") != status:
+            return False
+        if task_type and x.get("task_type") != task_type:
+            return False
+        if dataset_id and x.get("dataset_id") != dataset_id:
+            return False
+        if algorithm_id and x.get("algorithm_id") != algorithm_id:
+            return False
+        return True
+
+    runs = [x for x in (runs or []) if ok(x)]
+    return [_sanitize_run_for_api(x) for x in runs]
 
 @app.get("/runs/export")
 def export_runs(
@@ -707,18 +969,16 @@ def export_runs(
     limit: int = Query(500, ge=1, le=5000),
 ):
     """
-    导出 runs 为 CSV / Excel。
-    - 从 Redis 获取 runs
-    - 支持按 status/task_type/dataset_id/algorithm_id 过滤
+    Export runs as CSV/XLSX.
     """
     fmt = (format or "").lower().strip()
     if fmt not in ("csv", "xlsx"):
-        raise HTTPException(status_code=400, detail="format_must_be_csv_or_xlsx")
+        err.api_error(400, err.E_EXPORT_FORMAT, "format_must_be_csv_or_xlsx", format=fmt)
 
     r = make_redis()
     runs = list_runs(r, limit=limit)
 
-    # ===== 过滤 =====
+    # ===== ???? =====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -732,7 +992,7 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== 展平部分 params/samples 字段 =====
+    # ===== ?????? params/samples ??? =====
     headers = [
         "run_id",
         "task_type",
@@ -755,10 +1015,22 @@ def export_runs(
         "input_dir",
         "pair_total",
         "pair_used",
+        "read_ok",
+        "read_fail",
+        "algo_elapsed_mean",
+        "algo_elapsed_sum",
+        "metric_elapsed_mean",
+        "metric_elapsed_sum",
+        "metric_psnr_ssim_elapsed_mean",
+        "metric_psnr_ssim_elapsed_sum",
+        "metric_niqe_elapsed_mean",
+        "metric_niqe_elapsed_sum",
         "PSNR",
         "SSIM",
         "NIQE",
+        "error_code",
         "error",
+        "error_detail_json",
         "params_json",
         "samples_json",
         "record_json",
@@ -796,10 +1068,22 @@ def export_runs(
             "input_dir": record.get("input_dir"),
             "pair_total": record.get("pair_total"),
             "pair_used": record.get("pair_used"),
+            "read_ok": params.get("read_ok"),
+            "read_fail": params.get("read_fail"),
+            "algo_elapsed_mean": params.get("algo_elapsed_mean"),
+            "algo_elapsed_sum": params.get("algo_elapsed_sum"),
+            "metric_elapsed_mean": params.get("metric_elapsed_mean"),
+            "metric_elapsed_sum": params.get("metric_elapsed_sum"),
+            "metric_psnr_ssim_elapsed_mean": params.get("metric_psnr_ssim_elapsed_mean"),
+            "metric_psnr_ssim_elapsed_sum": params.get("metric_psnr_ssim_elapsed_sum"),
+            "metric_niqe_elapsed_mean": params.get("metric_niqe_elapsed_mean"),
+            "metric_niqe_elapsed_sum": params.get("metric_niqe_elapsed_sum"),
             "PSNR": m.get("PSNR"),
             "SSIM": m.get("SSIM"),
             "NIQE": m.get("NIQE"),
+            "error_code": x.get("error_code"),
             "error": x.get("error"),
+            "error_detail_json": json.dumps(x.get("error_detail"), ensure_ascii=False),
             "params_json": json.dumps(params, ensure_ascii=False),
             "samples_json": json.dumps(samples, ensure_ascii=False),
             "record_json": json.dumps(record, ensure_ascii=False),
@@ -857,9 +1141,7 @@ def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
 ):
     """
-    清空 runs（默认清空 done）。
-    - status=done：只清空已完成
-    - status=all：清空全部
+    Clear runs by status (default: done).
     """
     r = make_redis()
     keys = r.keys("run:*")
@@ -890,7 +1172,7 @@ def get_run(run_id: str):
     r = make_redis()
     run = load_run(r, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="run_not_found")
+        err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
     return _sanitize_run_for_api(run)
 
 
@@ -899,12 +1181,14 @@ def cancel_run(run_id: str):
     r = make_redis()
     run = load_run(r, run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="run_not_found")
+        err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
 
     status = (run.get("status") or "").lower()
     if status in {"done", "failed", "canceled"}:
         return {"ok": True, "run_id": run_id, "status": status}
 
+    cancel_key = f"run_cancel:{run_id}"
+    r.set(cancel_key, "1", ex=24 * 3600)
     run["cancel_requested"] = True
     if status == "queued":
         celery_app.control.revoke(run_id)
@@ -912,7 +1196,9 @@ def cancel_run(run_id: str):
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "已取消"
+        run["error"] = "\u5df2\u53d6\u6d88"
+        run["error_code"] = "E_CANCELED"
+        run["error_detail"] = {"run_id": run_id, "phase": "queued"}
         save_run(r, run_id, run)
         return {"ok": True, "run_id": run_id, "status": "canceled"}
 
@@ -942,7 +1228,7 @@ def dev_generate_dataset(
         tasks = ["dehaze", "denoise", "deblur", "sr", "lowlight"]
     else:
         if task_type_norm not in input_dir_by_task:
-            raise HTTPException(status_code=400, detail="task_type_not_supported")
+            err.api_error(400, err.E_TASK_NOT_SUPPORTED, "task_type_not_supported", task_type=task_type_norm)
         tasks = [task_type_norm]
 
     created: dict[str, int] = {}
@@ -971,4 +1257,3 @@ def dev_generate_dataset(
         "count": count,
         "created": created,
     }
-

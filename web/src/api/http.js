@@ -1,10 +1,10 @@
 // web/src/api/http.js
-// ???? HTTP ?????JSON ????/??????????
+// 通用 HTTP 请求封装：自动拼 query，JSON 请求与错误透传
 
 const API_BASE = "http://127.0.0.1:8000";
 
 /**
- * @param {string} path ???? "/runs"
+ * @param {string} path 例如 "/runs"
  * @param {{method?: string, query?: Record<string, any>, body?: any}} opts
  */
 export async function request(path, { method = "GET", query, body } = {}) {

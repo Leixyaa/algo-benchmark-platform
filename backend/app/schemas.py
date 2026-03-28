@@ -32,12 +32,13 @@ class RunOut(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
     samples: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[str] = None
-
+    error_code: Optional[str] = None
+    error_detail: Optional[Dict[str, Any]] = None
 
 class DatasetCreate(BaseModel):
     dataset_id: Optional[str] = None
     name: str
-    type: str = "图像"
+    type: str = "???"
     size: str = "-"
 
 
@@ -121,3 +122,37 @@ class PresetOut(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
     created_at: float
     updated_at: float
+
+
+class FastSelectRequest(BaseModel):
+    task_type: str = Field(..., description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr")
+    dataset_id: str
+    candidate_algorithm_ids: List[str] = Field(default_factory=list)
+    top_k: int = 3
+    alpha: float = 0.35
+    lambda_reg: float = 1.0
+    recency_half_life_hours: float = 72.0
+    cold_start_bonus: float = 0.08
+    low_support_penalty: float = 0.06
+    min_support: int = 3
+
+
+class FastSelectItem(BaseModel):
+    algorithm_id: str
+    score: float
+    expected_reward: float = 0.0
+    mean_reward: float
+    uncertainty: float
+    exploration_bonus: float = 0.0
+    cold_start_bonus: float = 0.0
+    reliability: float = 0.0
+    sample_count: int
+
+
+class FastSelectResponse(BaseModel):
+    task_type: str
+    dataset_id: str
+    top_k: int
+    reward_formula: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    recommendations: List[FastSelectItem] = Field(default_factory=list)

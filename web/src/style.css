@@ -1,84 +1,154 @@
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
-    "Source Han Sans SC", Avenir, Helvetica, Arial, sans-serif;
-  --el-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
-    "Source Han Sans SC", Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --el-font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --el-color-primary: #2f6bff;
+  --el-color-success: #20b17a;
+  --el-color-warning: #f59e0b;
+  --el-color-danger: #ef4444;
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 8px;
+  --el-bg-color-page: #f3f7ff;
+  --el-fill-color-blank: #ffffff;
+  --el-text-color-primary: #1f2937;
+  --el-text-color-regular: #4b5563;
+  --el-border-color: #dbe4f7;
+}
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+* {
+  box-sizing: border-box;
+}
 
-  font-synthesis: none;
+html,
+body,
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  min-width: 1200px;
+  color: #1f2937;
+  background:
+    radial-gradient(1200px 520px at -10% -20%, rgba(47, 107, 255, 0.18), transparent 70%),
+    radial-gradient(1000px 460px at 120% -10%, rgba(43, 197, 255, 0.16), transparent 72%),
+    linear-gradient(180deg, #f7f9ff 0%, #eef4ff 45%, #f4f8ff 100%);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+  color: inherit;
+  text-decoration: none;
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+button:not(.el-button) {
+  border: 1px solid #c9d8ff;
+  border-radius: 9px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #20408d;
+  background: linear-gradient(180deg, #ffffff 0%, #ecf3ff 100%);
+  box-shadow: 0 2px 6px rgba(47, 107, 255, 0.1);
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  transition: all 0.2s ease;
 }
 
-.card {
-  padding: 2em;
+button:not(.el-button):hover {
+  border-color: #9bb6ff;
+  color: #1e40af;
+  box-shadow: 0 6px 14px rgba(47, 107, 255, 0.16);
+  transform: translateY(-1px);
 }
 
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+button:not(.el-button):active {
+  transform: translateY(0);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+button:not(.el-button):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.el-button {
+  font-weight: 600;
+}
+
+.el-button.el-button--default {
+  color: #1f3e79;
+  border-color: #bcd0fb;
+  background: #ffffff;
+}
+
+.el-button.el-button--primary {
+  color: #ffffff;
+  border-color: #2f6bff;
+  background: linear-gradient(180deg, #4f86ff 0%, #2f6bff 100%);
+}
+
+.el-button.el-button--success {
+  color: #ffffff;
+  border-color: #18a66f;
+  background: linear-gradient(180deg, #33bf8b 0%, #18a66f 100%);
+}
+
+.el-button.el-button--warning {
+  color: #ffffff;
+  border-color: #e49407;
+  background: linear-gradient(180deg, #ffb020 0%, #e49407 100%);
+}
+
+.el-button.el-button--danger {
+  color: #ffffff;
+  border-color: #e14040;
+  background: linear-gradient(180deg, #f26666 0%, #e14040 100%);
+}
+
+.el-button.is-disabled,
+.el-button.is-disabled:hover {
+  color: #8b9bb9;
+  border-color: #d4def2;
+  background: #edf2ff;
+  opacity: 1;
+}
+
+.el-tag {
+  font-weight: 600;
+}
+
+.el-tag.el-tag--success {
+  color: #13784c;
+  border-color: #b8e8cb;
+  background: #e8f8ef;
+}
+
+.el-tag.el-tag--warning {
+  color: #8a5600;
+  border-color: #ffd48a;
+  background: #fff2d9;
+}
+
+.el-tag.el-tag--danger {
+  color: #a32c2c;
+  border-color: #f4b3b3;
+  background: #ffe8e8;
+}
+
+.el-tag.el-tag--info {
+  color: #355588;
+  border-color: #c9daff;
+  background: #edf3ff;
+}
+
+.el-card {
+  border: 1px solid #dce6ff;
+  box-shadow: 0 10px 24px rgba(21, 64, 167, 0.07);
+}
+
+.el-table {
+  --el-table-header-bg-color: #f5f8ff;
 }

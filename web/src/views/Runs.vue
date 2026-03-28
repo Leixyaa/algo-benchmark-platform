@@ -5,23 +5,23 @@
         <div class="header">
           <div class="headerLeft">
             <div class="titleRow">
-              <h2 class="title">任务中心</h2>
+              <h2 class="title">运行中心</h2>
               <el-tag size="small" type="info">{{ filteredRows.length }} 条</el-tag>
             </div>
-            <div class="subtitle">展示评测任务的状态、参数与结果概览。状态由后端 Celery/Redis 驱动，会自动刷新。</div>
+            <div class="subtitle">支持查看 Run 状态、导出结果与失败排查</div>
           </div>
           <div class="headerRight">
-            <el-button type="primary" @click="goNewRun">发起评测</el-button>
+            <el-button type="primary" @click="goNewRun">新建 Run</el-button>
           </div>
         </div>
       </template>
 
       <div class="toolbar">
         <div class="filters">
-          <el-select v-model="statusFilter" clearable size="small" placeholder="状态" style="width: 130px">
+          <el-select v-model="statusFilter" clearable size="small" placeholder="按状态筛选" style="width: 130px">
             <el-option v-for="x in statusOptions" :key="x.value" :label="x.label" :value="x.value" />
           </el-select>
-          <el-select v-model="taskFilter" clearable size="small" placeholder="任务类型" style="width: 140px">
+          <el-select v-model="taskFilter" clearable size="small" placeholder="按任务筛选" style="width: 140px">
             <el-option v-for="x in taskOptions" :key="x.value" :label="x.label" :value="x.value" />
           </el-select>
           <el-input
@@ -36,24 +36,24 @@
         <div class="actions">
           <el-button-group>
             <el-button size="small" @click="refresh">刷新</el-button>
-            <el-button size="small" @click="mockOne">示例</el-button>
+            <el-button size="small" @click="mockOne">创建示例</el-button>
           </el-button-group>
           <el-button-group>
-            <el-button size="small" @click="exportDoneCsv">导出CSV</el-button>
-            <el-button size="small" @click="exportDoneXlsx">导出Excel</el-button>
+            <el-button size="small" @click="exportDoneCsv">导出已完成CSV</el-button>
+            <el-button size="small" @click="exportDoneXlsx">导出已完成Excel</el-button>
           </el-button-group>
           <el-button size="small" type="danger" @click="clearDone">清理已完成</el-button>
         </div>
       </div>
 
       <el-table :data="filteredRows" size="small" stripe border style="width: 100%" row-key="id">
-        <el-table-column prop="name" label="任务名" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
         <el-table-column label="Run ID" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="task" label="任务类型" width="110" show-overflow-tooltip />
+        <el-table-column prop="task" label="任务" width="110" show-overflow-tooltip />
         <el-table-column prop="dataset" label="数据集" min-width="160" show-overflow-tooltip />
         <el-table-column prop="algorithm" label="算法" min-width="160" show-overflow-tooltip />
 
@@ -85,16 +85,16 @@
 
         <template #empty>
           <div class="empty">
-            <div class="emptyTitle">暂无任务</div>
-            <div class="emptySub">点击右上角“发起评测”创建第一条任务。</div>
+            <div class="emptyTitle">暂无运行记录</div>
+            <div class="emptySub">请新建 Run 或调整筛选条件</div>
           </div>
         </template>
       </el-table>
 
-      <el-dialog v-model="detailVisible" title="任务详情" width="760px">
+      <el-dialog v-model="detailVisible" title="运行详情" width="760px">
         <div v-if="detail" class="detail">
           <el-descriptions size="small" :column="2" border>
-            <el-descriptions-item label="任务名">{{ detail.name }}</el-descriptions-item>
+            <el-descriptions-item label="名称">{{ detail.name }}</el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-tag :type="statusTagType(detail.status)">
                 {{ statusText(detail.status) }}
@@ -114,25 +114,28 @@
               <pre class="code codeDark">{{ formatJson(detail.raw?.params ?? {}) }}</pre>
             </div>
             <div class="detailBlock">
-              <div class="blockTitle">结果指标</div>
+              <div class="blockTitle">指标与性能</div>
               <el-descriptions size="small" :column="1" border>
                 <el-descriptions-item label="PSNR">{{ detail.psnr ?? "-" }}</el-descriptions-item>
                 <el-descriptions-item label="SSIM">{{ detail.ssim ?? "-" }}</el-descriptions-item>
                 <el-descriptions-item label="NIQE">{{ detail.niqe ?? "-" }}</el-descriptions-item>
                 <el-descriptions-item label="耗时">{{ detail.elapsed ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="样本数">{{ detail.raw?.params?.data_used ?? "-" }}</el-descriptions-item>
+                <el-descriptions-item label="算法均耗时(s)">{{ formatNum(detail.raw?.params?.algo_elapsed_mean) }}</el-descriptions-item>
+                <el-descriptions-item label="指标均耗时(s)">{{ formatNum(detail.raw?.params?.metric_elapsed_mean) }}</el-descriptions-item>
                 <el-descriptions-item label="综合分">{{ detail.score ?? "-" }}</el-descriptions-item>
               </el-descriptions>
             </div>
           </div>
 
           <div v-if="detail.reason" class="reason">
-            <div class="blockTitle">推荐原因</div>
+            <div class="blockTitle">推荐理由</div>
             <div class="reasonText">{{ detail.reason }}</div>
           </div>
 
-          <div v-if="detail.raw?.error" class="errorBlock">
-            <div class="blockTitle">失败/取消原因</div>
-            <pre class="code codeError">{{ detail.raw?.error }}</pre>
+          <div v-if="detail.raw?.error || detail.raw?.error_code" class="errorBlock">
+            <div class="blockTitle">错误码/错误详情</div>
+            <pre class="code codeError">{{ formatRunError(detail.raw) }}</pre>
           </div>
         </div>
 
@@ -152,7 +155,6 @@ import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 const router = useRouter();
 const store = useAppStore();
 
-// ========= 隐藏（本地持久化，不动后端）=========
 const HIDDEN_KEY = "hiddenRunIds_v1";
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
 
@@ -160,11 +162,10 @@ function persistHidden() {
   localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value)));
 }
 
-// ========= 下载（不弹窗，不会被拦截）=========
 function downloadFile(url, filename) {
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename; // 某些浏览器会忽略，但不影响下载
+  a.download = filename;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
@@ -182,7 +183,7 @@ function exportDoneXlsx() {
 }
 
 async function clearDone() {
-  if (!confirm("确定清理所有“已完成”的历史任务吗？（会删除后端Redis记录，无法恢复）")) return;
+  if (!confirm("确认清理 Redis 中所有已完成 Run 吗？")) return;
 
   try {
     const res = await fetch("http://127.0.0.1:8000/runs/clear?status=done", {
@@ -191,15 +192,14 @@ async function clearDone() {
     const data = await res.json();
     if (!res.ok) throw new Error(JSON.stringify(data));
 
-    alert(`已清理：${data.deleted} 条已完成任务`);
-    await refresh(); // 重新拉取列表
+    alert(`已清理 ${data.deleted} 条已完成 Run`);
+    await refresh();
   } catch (e) {
     alert(`清理失败：${e?.message || e}`);
   }
 }
 
 
-// ========= 表格数据 =========
 const rows = computed(() => {
   const dsMap = new Map((store.datasets ?? []).map((d) => [d.id, d.name]));
   const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
@@ -209,12 +209,11 @@ const rows = computed(() => {
     .map((r) => {
       const base = {
         ...r,
-        name: r.name || `${r.task || "评测"} Run`,
+        name: r.name || `${r.task || "任务"} Run`,
         dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
         algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
       };
 
-      // 只对已完成且指标齐全的 run 算综合分
       const ctx = buildScoringContext(store.runs ?? []);
       const s = scoreOne(base, ctx);
       return {
@@ -229,9 +228,9 @@ const taskFilter = ref("");
 const keyword = ref("");
 
 const statusOptions = [
-  { value: "已完成", label: "已完成" },
-  { value: "运行中", label: "运行中" },
   { value: "排队中", label: "排队中" },
+  { value: "运行中", label: "运行中" },
+  { value: "已完成", label: "已完成" },
   { value: "失败", label: "失败" },
   { value: "取消中", label: "取消中" },
   { value: "已取消", label: "已取消" },
@@ -264,8 +263,25 @@ function formatJson(v) {
   }
 }
 
+function formatNum(v) {
+  if (v == null || v === "") return "-";
+  const x = Number(v);
+  if (!Number.isFinite(x)) return String(v);
+  return x.toFixed(4);
+}
+
+function formatRunError(raw) {
+  if (!raw || typeof raw !== "object") return "-";
+  const code = raw.error_code || raw.errorCode || "";
+  const msg = raw.error || "";
+  const detail = raw.error_detail || raw.errorDetail || null;
+  const head = code ? `${code}${msg ? `: ${msg}` : ""}` : msg || "-";
+  if (!detail) return head;
+  return `${head}\n${formatJson(detail)}`;
+}
+
 function statusText(status) {
-  if (status === "done" || status === "已完成") return "已完成";
+  if (status === "done" || status === "completed" || status === "已完成") return "已完成";
   if (status === "running" || status === "运行中") return "运行中";
   if (status === "failed" || status === "失败") return "失败";
   if (status === "queued" || status === "排队中") return "排队中";
@@ -275,20 +291,21 @@ function statusText(status) {
 }
 
 function statusTagType(status) {
-  if (status === "done" || status === "已完成") return "success";
+  if (status === "done" || status === "completed" || status === "已完成") return "success";
   if (status === "running" || status === "运行中") return "warning";
   if (status === "failed" || status === "失败") return "danger";
   if (status === "canceling" || status === "取消中") return "warning";
   if (status === "canceled" || status === "已取消") return "info";
+  if (status === "queued" || status === "排队中") return "info";
   return "info";
 }
 
 function canCancel(row) {
-  return row?.status === "排队中" || row?.status === "运行中" || row?.status === "取消中";
+  return row?.status === "排队中" || row?.status === "运行中" || row?.status === "取消中" || row?.status === "queued" || row?.status === "running" || row?.status === "canceling";
 }
 
 async function cancel(runId) {
-  if (!confirm("确定取消该任务吗？")) return;
+  if (!confirm("确认取消该 Run 吗？")) return;
   try {
     await store.cancelRun(runId);
     await refresh();
@@ -298,9 +315,6 @@ async function cancel(runId) {
 }
 
 
-// ====== 快速选型：给单条 run 计算综合分 + 推荐原因（与 Compare 同逻辑）======
-
-// elapsed "1.23s" -> seconds
 function parseElapsedSeconds(elapsed) {
   if (elapsed == null) return null;
   if (typeof elapsed === "number") return elapsed;
@@ -338,7 +352,6 @@ function buildScoringContext(allRuns) {
   const mmNIQE = minMax(niqes);
   const mmTIME = minMax(times);
 
-  // Runs 详情这里用固定默认权重（你在 Compare 里可调；详情里只展示“平台默认推荐逻辑”）
   const W = { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 };
 
   return { mmPSNR, mmSSIM, mmNIQE, mmTIME, W };
@@ -356,7 +369,7 @@ function scoreOne(run, ctx) {
   const nTIME = norm01(tsec, ctx.mmTIME.min, ctx.mmTIME.max);
 
   const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
-  if (!okAll) return { score: null, reason: "指标不完整，无法计算综合分" };
+  if (!okAll) return { score: null, reason: "指标不完整，暂不评分" };
 
   const score =
     ctx.W.psnr * nPSNR +
@@ -364,17 +377,16 @@ function scoreOne(run, ctx) {
     ctx.W.niqe * (1 - nNIQE) +
     ctx.W.time * (1 - nTIME);
 
-  // 简短解释：点出主导项
   const parts = [];
-  if (nPSNR >= 0.8) parts.push("PSNR较高");
-  if (nSSIM >= 0.8) parts.push("SSIM较高");
-  if (nNIQE <= 0.2) parts.push("NIQE较低(更自然)");
-  if (nTIME <= 0.2) parts.push("耗时较短");
-  if (parts.length === 0) parts.push("多指标较均衡");
+  if (nPSNR >= 0.8) parts.push("PSNR表现突出");
+  if (nSSIM >= 0.8) parts.push("SSIM表现突出");
+  if (nNIQE <= 0.2) parts.push("NIQE表现优秀（越低越好）");
+  if (nTIME <= 0.2) parts.push("耗时表现优秀");
+  if (parts.length === 0) parts.push("综合表现均衡");
 
   return {
     score: Number(score.toFixed(4)),
-    reason: `${parts.join("，")}；默认权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%`,
+    reason: `${parts.join("，")}；评分权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%`,
   };
 }
 // ===========================================================================//
@@ -389,7 +401,7 @@ async function refresh() {
 }
 
 function remove(id) {
-  if (!confirm("确定隐藏该任务吗？（仅本机本浏览器生效，后端不会删除）")) return;
+  if (!confirm("确认在本地列表隐藏该 Run 吗？")) return;
   hiddenIds.value.add(id);
   persistHidden();
 }
@@ -397,7 +409,7 @@ function remove(id) {
 async function mockOne() {
   const ds = (store.datasets ?? [])[0];
   const algo = (store.algorithms ?? [])[0];
-  if (!ds || !algo) return alert("缺少 Demo 数据集或算法，无法创建示例任务");
+  if (!ds || !algo) return alert("请先准备至少一个数据集和算法，再创建示例 Run");
 
   try {
     await store.createRun({
@@ -407,7 +419,7 @@ async function mockOne() {
       metrics: ["PSNR", "SSIM", "NIQE"],
     });
   } catch (e) {
-    alert(`创建失败：${e?.message || e}`);
+    alert(`创建示例失败：${e?.message || e}`);
   }
 }
 
@@ -419,7 +431,6 @@ const detailVisible = ref(false);
 const detail = ref(null);
 
 function openDetail(row) {
-  // 用当前列表（已过滤隐藏）作为评分范围；这样解释是“在当前可见 runs 中的相对表现”
   const ctx = buildScoringContext(filteredRows.value);
   const s = scoreOne(row, ctx);
 
@@ -439,7 +450,9 @@ function openDetail(row) {
 }
 
 .card {
-  border-radius: 12px;
+  border-radius: 14px;
+  border: 1px solid #d8e3ff;
+  box-shadow: 0 14px 28px rgba(26, 78, 190, 0.1);
 }
 
 .header {
@@ -457,14 +470,16 @@ function openDetail(row) {
 
 .title {
   margin: 0;
-  font-size: 18px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1b2f62;
   line-height: 1.2;
 }
 
 .subtitle {
   margin-top: 6px;
-  color: #6b7280;
-  font-size: 13px;
+  color: #4f628f;
+  font-size: 14px;
 }
 
 .toolbar {
@@ -499,6 +514,7 @@ function openDetail(row) {
 
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: #23386a;
 }
 
 .empty {
@@ -508,13 +524,13 @@ function openDetail(row) {
 
 .emptyTitle {
   font-size: 14px;
-  color: #374151;
+  color: #2a3f71;
 }
 
 .emptySub {
   margin-top: 6px;
   font-size: 12px;
-  color: #6b7280;
+  color: #5f7098;
 }
 
 .detail {
@@ -536,8 +552,9 @@ function openDetail(row) {
 }
 
 .blockTitle {
-  color: #6b7280;
+  color: #3d5588;
   font-size: 13px;
+  font-weight: 600;
 }
 
 .code {
@@ -563,12 +580,22 @@ function openDetail(row) {
 
 .reasonText {
   padding: 10px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #d3e1ff;
   border-radius: 10px;
-  background: #fafafa;
-  color: #374151;
+  background: #f7faff;
+  color: #2b3f6f;
   font-size: 13px;
   line-height: 1.5;
+}
+
+:deep(.el-table) {
+  --el-table-text-color: #243965;
+  --el-table-header-text-color: #23478f;
+}
+
+:deep(.el-input__wrapper),
+:deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px #c9d8ff inset;
 }
 
 @media (max-width: 980px) {
