@@ -27,12 +27,9 @@ body,
 
 body {
   margin: 0;
-  min-width: 1200px;
+  min-width: 0;
   color: #1f2937;
-  background:
-    radial-gradient(1200px 520px at -10% -20%, rgba(47, 107, 255, 0.18), transparent 70%),
-    radial-gradient(1000px 460px at 120% -10%, rgba(43, 197, 255, 0.16), transparent 72%),
-    linear-gradient(180deg, #f7f9ff 0%, #eef4ff 45%, #f4f8ff 100%);
+  background: var(--el-bg-color-page);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -50,21 +47,18 @@ button:not(.el-button) {
   font-size: 13px;
   font-weight: 600;
   color: #20408d;
-  background: linear-gradient(180deg, #ffffff 0%, #ecf3ff 100%);
-  box-shadow: 0 2px 6px rgba(47, 107, 255, 0.1);
+  background: #ffffff;
+  box-shadow: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
 
 button:not(.el-button):hover {
   border-color: #9bb6ff;
   color: #1e40af;
-  box-shadow: 0 6px 14px rgba(47, 107, 255, 0.16);
-  transform: translateY(-1px);
 }
 
 button:not(.el-button):active {
-  transform: translateY(0);
 }
 
 button:not(.el-button):disabled {
@@ -76,6 +70,29 @@ button:not(.el-button):disabled {
 
 .el-button {
   font-weight: 600;
+  border-radius: 10px;
+}
+
+.el-button:not(.el-button--small):not(.el-button--large):not(.is-circle) {
+  min-height: 38px;
+  padding: 0 16px;
+}
+
+.action-bar .el-button:not(.el-button--small):not(.is-circle),
+.toolbar .el-button:not(.el-button--small):not(.is-circle),
+.filter-bar .el-button:not(.el-button--small):not(.is-circle),
+.selector-row .el-button:not(.el-button--small):not(.is-circle) {
+  min-height: 40px;
+  padding: 0 18px;
+}
+
+.action-bar .el-input__wrapper,
+.action-bar .el-select__wrapper,
+.filter-bar .el-input__wrapper,
+.filter-bar .el-select__wrapper,
+.selector-row .el-input__wrapper,
+.selector-row .el-select__wrapper {
+  min-height: 40px;
 }
 
 .el-button.el-button--default {
@@ -87,25 +104,25 @@ button:not(.el-button):disabled {
 .el-button.el-button--primary {
   color: #ffffff;
   border-color: #2f6bff;
-  background: linear-gradient(180deg, #4f86ff 0%, #2f6bff 100%);
+  background: #2f6bff;
 }
 
 .el-button.el-button--success {
   color: #ffffff;
   border-color: #18a66f;
-  background: linear-gradient(180deg, #33bf8b 0%, #18a66f 100%);
+  background: #18a66f;
 }
 
 .el-button.el-button--warning {
   color: #ffffff;
   border-color: #e49407;
-  background: linear-gradient(180deg, #ffb020 0%, #e49407 100%);
+  background: #e49407;
 }
 
 .el-button.el-button--danger {
   color: #ffffff;
   border-color: #e14040;
-  background: linear-gradient(180deg, #f26666 0%, #e14040 100%);
+  background: #e14040;
 }
 
 .el-button.is-disabled,
@@ -146,7 +163,7 @@ button:not(.el-button):disabled {
 
 .el-card {
   border: 1px solid #dce6ff;
-  box-shadow: 0 10px 24px rgba(21, 64, 167, 0.07);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
 .el-table {

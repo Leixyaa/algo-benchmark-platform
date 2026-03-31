@@ -6,6 +6,7 @@ import uuid
 import io
 import csv
 import json
+import re
 import base64
 import zipfile
 import shutil
@@ -13,9 +14,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.security import OAuth2PasswordBearer
+from datetime import datetime, timedelta
 
 from openpyxl import Workbook
 
@@ -35,6 +38,9 @@ from .schemas import (
     FastSelectRequest,
     FastSelectResponse,
     FastSelectItem,
+    UserCreate,
+    UserOut,
+    Token,
 )
 from .store import (
     make_redis,
@@ -53,9 +59,19 @@ from .store import (
     load_preset,
     delete_preset,
     list_presets,
+    save_user,
+    load_user,
+)
+from .auth import (
+    get_current_user,
+    get_current_user_optional,
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from .celery_app import celery_app
-from .tasks import execute_run, _stable_seed, _make_synthetic_pair_for_task
+from .tasks import execute_run
 from .selector import (
     build_context_vector,
     fast_select_algorithms,
@@ -70,6 +86,49 @@ import cv2
 
 
 app = FastAPI(title="Algo Eval Platform API", version="0.1.0")
+
+# --- 用户系统 (User System) ---
+
+@app.post("/register", response_model=UserOut)
+def register(payload: UserCreate):
+    r = make_redis()
+    username = payload.username.strip()
+    if not username:
+        err.api_error(400, err.E_HTTP, "username_required")
+    if load_user(r, username):
+        err.api_error(409, err.E_HTTP, "user_already_exists")
+    
+    user_data = {
+        "username": username,
+        "hashed_password": get_password_hash(payload.password),
+        "created_at": time.time(),
+    }
+    save_user(r, username, user_data)
+    return UserOut(**user_data)
+
+
+@app.post("/token", response_model=Token)
+@app.post("/login", response_model=Token)
+def login(payload: UserCreate):
+    r = make_redis()
+    user = load_user(r, payload.username)
+    if not user or not verify_password(payload.password, user["hashed_password"]):
+        err.api_error(401, err.E_HTTP, "invalid_credentials")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user["username"]
+    }
+
+
+@app.get("/me", response_model=UserOut)
+def get_me(current_user: dict = Depends(get_current_user)):
+    return UserOut(**current_user)
 
 def _sanitize_run_for_api(run: dict) -> dict:
     out = dict(run)
@@ -111,8 +170,8 @@ async def _http_exception_handler(_: Request, exc: HTTPException):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],  # 开发环境下允许所有源
+    allow_credentials=False, # 设为 False 以支持 "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -126,6 +185,43 @@ TASK_LABEL_BY_TYPE = {
     "video_denoise": "\u89c6\u9891\u53bb\u566a",
     "video_sr": "\u89c6\u9891\u8d85\u5206",
 }
+
+BUILTIN_ALGORITHM_IDS = {
+    "alg_dn_cnn",
+    "alg_denoise_bilateral",
+    "alg_denoise_gaussian",
+    "alg_denoise_median",
+    "alg_dehaze_dcp",
+    "alg_dehaze_clahe",
+    "alg_dehaze_gamma",
+    "alg_deblur_unsharp",
+    "alg_deblur_laplacian",
+    "alg_sr_bicubic",
+    "alg_sr_lanczos",
+    "alg_sr_nearest",
+    "alg_lowlight_gamma",
+    "alg_lowlight_clahe",
+    "alg_video_denoise_gaussian",
+    "alg_video_denoise_median",
+    "alg_video_sr_bicubic",
+    "alg_video_sr_lanczos",
+}
+
+
+def _normalize_algorithm_name(name: str) -> str:
+    return re.sub(r"\s+", " ", str(name or "").strip()).lower()
+
+
+def _ensure_unique_algorithm_name(r, name: str, exclude_id: str | None = None) -> None:
+    wanted = _normalize_algorithm_name(name)
+    if not wanted:
+        return
+    for x in list_algorithms(r, limit=5000):
+        aid = str(x.get("algorithm_id") or "")
+        if exclude_id and aid == exclude_id:
+            continue
+        if _normalize_algorithm_name(x.get("name") or "") == wanted:
+            err.api_error(409, err.E_ALGORITHM_ID_EXISTS, "algorithm_name_exists", algorithm_name=name, algorithm_id=aid)
 
 
 @app.get("/health")
@@ -143,21 +239,76 @@ def root():
     return RedirectResponse(url="/docs")
 
 
-def _ensure_catalog_defaults(r):
-    created = time.time()
+_CATALOG_INITIALIZED = False
+_PINNED_OWNER_USERNAME = "1959920806"
 
+
+def _pin_dataset_and_algorithm_owners(r) -> None:
+    dataset_keys = r.keys("dataset:*")
+    for k in dataset_keys:
+        if ":version:" in k or ":fs_hash:" in k or ":scan:" in k:
+            continue
+        s = r.get(k)
+        if not s:
+            continue
+        try:
+            data = json.loads(s)
+        except Exception:
+            continue
+        if not isinstance(data, dict) or "dataset_id" not in data:
+            continue
+        if str(data.get("owner_id") or "") == _PINNED_OWNER_USERNAME:
+            continue
+        data["owner_id"] = _PINNED_OWNER_USERNAME
+        save_dataset(r, str(data.get("dataset_id") or ""), data)
+
+    algorithm_keys = r.keys("algorithm:*")
+    for k in algorithm_keys:
+        s = r.get(k)
+        if not s:
+            continue
+        try:
+            data = json.loads(s)
+        except Exception:
+            continue
+        if not isinstance(data, dict) or "algorithm_id" not in data:
+            continue
+        alg_id = str(data.get("algorithm_id") or "")
+        target_owner = "system" if alg_id in BUILTIN_ALGORITHM_IDS else _PINNED_OWNER_USERNAME
+        if str(data.get("owner_id") or "") == target_owner:
+            continue
+        data["owner_id"] = target_owner
+        save_algorithm(r, alg_id, data)
+
+def _ensure_catalog_defaults(r):
+    """
+    确保 Redis 中包含默认的数据集和算法。
+    使用全局变量缓存初始化状态，避免每个 API 请求都执行复杂的初始化逻辑。
+    """
+    global _CATALOG_INITIALIZED
+    if _CATALOG_INITIALIZED:
+        _pin_dataset_and_algorithm_owners(r)
+        return
+    
+    # 执行初始化逻辑
+    created = time.time()
+    
+    # 1. 默认数据集
+    demo_ds_id = "ds_demo"
     demo_ds = {
-        "dataset_id": "ds_demo",
-        "name": "Demo-\u6837\u4f8b\u6570\u636e\u96c6",
-        "type": "\u56fe\u50cf",
-        "size": "10 \u5f20",
+        "dataset_id": demo_ds_id,
+        "name": "Demo-样例数据集",
+        "type": "图像",
+        "size": "10 张",
+        "owner_id": _PINNED_OWNER_USERNAME,
         "created_at": created,
         "meta": {},
     }
-    cur_ds = load_dataset(r, "ds_demo")
+    cur_ds = load_dataset(r, demo_ds_id)
     if not cur_ds:
-        save_dataset(r, "ds_demo", demo_ds)
+        save_dataset(r, demo_ds_id, demo_ds)
     else:
+        # 修复乱码或缺失字段
         need_patch = False
         for k in ("name", "type", "size"):
             v = str(cur_ds.get(k) or "")
@@ -167,149 +318,151 @@ def _ensure_catalog_defaults(r):
         if need_patch:
             if not isinstance(cur_ds.get("meta"), dict):
                 cur_ds["meta"] = {}
-            save_dataset(r, "ds_demo", cur_ds)
+            cur_ds["owner_id"] = _PINNED_OWNER_USERNAME
+            save_dataset(r, demo_ds_id, cur_ds)
 
+    # 2. 默认算法
     defaults = [
         {
             "algorithm_id": "alg_dn_cnn",
-            "task": "\u53bb\u566a",
-            "name": "FastNLMeans(\u57fa\u7ebf)",
+            "task": "去噪",
+            "name": "FastNLMeans(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
         },
         {
             "algorithm_id": "alg_denoise_bilateral",
-            "task": "\u53bb\u566a",
-            "name": "Bilateral(\u57fa\u7ebf)",
+            "task": "去噪",
+            "name": "Bilateral(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
         },
         {
             "algorithm_id": "alg_denoise_gaussian",
-            "task": "\u53bb\u566a",
-            "name": "Gaussian(\u57fa\u7ebf)",
+            "task": "去噪",
+            "name": "Gaussian(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"gaussian_sigma": 1.0},
         },
         {
             "algorithm_id": "alg_denoise_median",
-            "task": "\u53bb\u566a",
-            "name": "Median(\u57fa\u7ebf)",
+            "task": "去噪",
+            "name": "Median(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"median_ksize": 3},
         },
         {
             "algorithm_id": "alg_dehaze_dcp",
-            "task": "\u53bb\u96fe",
-            "name": "DCP\u6697\u901a\u9053\u5148\u9a8c(\u57fa\u7ebf)",
+            "task": "去雾",
+            "name": "DCP暗通道先验(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
         },
         {
             "algorithm_id": "alg_dehaze_clahe",
-            "task": "\u53bb\u96fe",
-            "name": "CLAHE(\u57fa\u7ebf)",
+            "task": "去雾",
+            "name": "CLAHE(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"clahe_clip_limit": 2.0},
         },
         {
             "algorithm_id": "alg_dehaze_gamma",
-            "task": "\u53bb\u96fe",
-            "name": "Gamma(\u57fa\u7ebf)",
+            "task": "去雾",
+            "name": "Gamma(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"gamma": 0.75},
         },
         {
             "algorithm_id": "alg_deblur_unsharp",
-            "task": "\u53bb\u6a21\u7cca",
-            "name": "UnsharpMask(\u57fa\u7ebf)",
+            "task": "去模糊",
+            "name": "UnsharpMask(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
         },
         {
             "algorithm_id": "alg_deblur_laplacian",
-            "task": "\u53bb\u6a21\u7cca",
-            "name": "LaplacianSharpen(\u57fa\u7ebf)",
+            "task": "去模糊",
+            "name": "LaplacianSharpen(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"laplacian_strength": 0.7},
         },
         {
             "algorithm_id": "alg_sr_bicubic",
-            "task": "\u8d85\u5206\u8fa8\u7387",
-            "name": "Bicubic(\u57fa\u7ebf)",
+            "task": "超分辨率",
+            "name": "Bicubic(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_sr_lanczos",
-            "task": "\u8d85\u5206\u8fa8\u7387",
-            "name": "Lanczos(\u57fa\u7ebf)",
+            "task": "超分辨率",
+            "name": "Lanczos(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_sr_nearest",
-            "task": "\u8d85\u5206\u8fa8\u7387",
-            "name": "Nearest(\u57fa\u7ebf)",
+            "task": "超分辨率",
+            "name": "Nearest(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_lowlight_gamma",
-            "task": "\u4f4e\u7167\u5ea6\u589e\u5f3a",
-            "name": "Gamma(\u57fa\u7ebf)",
+            "task": "低照度增强",
+            "name": "Gamma(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"lowlight_gamma": 0.6},
         },
         {
             "algorithm_id": "alg_lowlight_clahe",
-            "task": "\u4f4e\u7167\u5ea6\u589e\u5f3a",
-            "name": "CLAHE(\u57fa\u7ebf)",
+            "task": "低照度增强",
+            "name": "CLAHE(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"clahe_clip_limit": 2.5},
         },
         {
             "algorithm_id": "alg_video_denoise_gaussian",
-            "task": "\u89c6\u9891\u53bb\u566a",
-            "name": "Video-Gaussian(\u57fa\u7ebf)",
+            "task": "视频去噪",
+            "name": "Video-Gaussian(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"gaussian_sigma": 1.0},
         },
         {
             "algorithm_id": "alg_video_denoise_median",
-            "task": "\u89c6\u9891\u53bb\u566a",
-            "name": "Video-Median(\u57fa\u7ebf)",
+            "task": "视频去噪",
+            "name": "Video-Median(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {"median_ksize": 3},
         },
         {
             "algorithm_id": "alg_video_sr_bicubic",
-            "task": "\u89c6\u9891\u8d85\u5206",
-            "name": "Video-Bicubic(\u57fa\u7ebf)",
+            "task": "视频超分",
+            "name": "Video-Bicubic(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
         },
         {
             "algorithm_id": "alg_video_sr_lanczos",
-            "task": "\u89c6\u9891\u8d85\u5206",
-            "name": "Video-Lanczos(\u57fa\u7ebf)",
+            "task": "视频超分",
+            "name": "Video-Lanczos(基线)",
             "impl": "OpenCV",
             "version": "v1",
             "default_params": {},
@@ -320,21 +473,31 @@ def _ensure_catalog_defaults(r):
         if not cur:
             x2 = dict(x)
             x2["created_at"] = created
+            x2["owner_id"] = "system"
             save_algorithm(r, x2["algorithm_id"], x2)
             continue
+        # 增量修复逻辑
         need_patch = False
         for k in ("task", "name", "impl", "version"):
-            v = str(cur.get(k) or "")
-            if not v or "?" in v or "\ufffd" in v:
+            if cur.get(k) != x[k]:
                 cur[k] = x[k]
                 need_patch = True
-        if not isinstance(cur.get("default_params"), dict) and isinstance(x.get("default_params"), dict):
-            cur["default_params"] = x["default_params"]
+        if cur.get("default_params") != x.get("default_params"):
+            cur["default_params"] = dict(x.get("default_params") or {})
+            need_patch = True
+        if not isinstance(cur.get("param_presets"), dict):
+            cur["param_presets"] = {}
+            need_patch = True
+        if str(cur.get("owner_id") or "") != "system":
+            cur["owner_id"] = "system"
             need_patch = True
         if need_patch:
             if not isinstance(cur.get("created_at"), (int, float)):
                 cur["created_at"] = created
             save_algorithm(r, x["algorithm_id"], cur)
+
+    _pin_dataset_and_algorithm_owners(r)
+    _CATALOG_INITIALIZED = True
 
 
 def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
@@ -354,17 +517,68 @@ def _safe_extract_zip_bytes(zip_bytes: bytes, dest_dir: Path) -> None:
                 shutil.copyfileobj(src, dst)
 
 
+def _merge_tree(src_root: Path, dst_root: Path, overwrite: bool) -> None:
+    for p in src_root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(src_root)
+        out = dst_root / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.exists() and not overwrite:
+            continue
+        if out.exists() and overwrite:
+            out.unlink()
+        shutil.move(str(p), str(out))
+
+
+def _normalize_dataset_import_layout(ds_dir: Path, overwrite: bool) -> None:
+    if (ds_dir / "gt").exists():
+        return
+    marker_dirs = ("gt", "hazy", "noisy", "blur", "lr", "dark")
+    candidates = []
+    for p in ds_dir.rglob("*"):
+        if not p.is_dir():
+            continue
+        if p.name == "__MACOSX":
+            continue
+        if any((p / d).exists() for d in marker_dirs):
+            depth = len(p.relative_to(ds_dir).parts)
+            candidates.append((depth, p))
+    if not candidates:
+        return
+    candidates.sort(key=lambda x: x[0])
+    root = candidates[0][1]
+    if root == ds_dir:
+        return
+    _merge_tree(root, ds_dir, overwrite=overwrite)
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def _validate_text_encoding(v: str, field: str) -> str:
+    s = (v or "").strip()
+    if not s:
+        return s
+    if "\ufffd" in s or re.search(r"[?？]{3,}", s):
+        err.api_error(
+            400,
+            err.E_TEXT_ENCODING_INVALID,
+            "text_encoding_invalid",
+            field=field,
+            hint="请使用 UTF-8 提交文本",
+            value_preview=s[:32],
+        )
+    return s
+
+
+def _get_dataset_cache_key(dataset_id: str) -> str:
+    return f"dataset:scan:{dataset_id}"
+
+
 def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str, dict]:
     ds_dir = data_root / dataset_id
     gt_dir = ds_dir / "gt"
     if not gt_dir.exists():
         return "\u56fe\u50cf", f"0 \u5f20", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
-    n = 0
-    for p in gt_dir.iterdir():
-        if p.is_file():
-            suf = p.suffix.lower()
-            if suf in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}:
-                n += 1
     from .vision.dataset_io import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos
 
     input_dir_by_task = {
@@ -377,44 +591,130 @@ def _scan_dataset_on_disk(data_root: Path, dataset_id: str) -> tuple[str, str, d
         "video_sr": "lr",
     }
     counts_by_dir = {}
+    gt_img_count = 0
+    gt_video_count = 0
+
     for d in {"gt", *input_dir_by_task.values()}:
         dd = ds_dir / d
-        if not dd.exists():
-            counts_by_dir[d] = 0
-            continue
-        counts_by_dir[d] = sum(1 for p in dd.rglob("*") if p.is_file() and p.suffix.lower() in (IMG_EXTS | VIDEO_EXTS))
-
-    pairs_by_task = {}
-    for t, dirn in input_dir_by_task.items():
-        if t.startswith("video_"):
-            pairs_by_task[t] = count_paired_videos(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt")
-        else:
-            pairs_by_task[t] = count_paired_images(data_root, dataset_id, input_dirname=dirn, gt_dirname="gt")
+        total = 0
+        if dd.exists():
+            for p in dd.rglob("*"):
+                if not p.is_file():
+                    continue
+                suf = p.suffix.lower()
+                if suf in IMG_EXTS:
+                    total += 1
+                    if d == "gt":
+                        gt_img_count += 1
+                elif suf in VIDEO_EXTS:
+                    total += 1
+                    if d == "gt":
+                        gt_video_count += 1
+        counts_by_dir[d] = total
+    pairs_by_task = {
+        "dehaze": count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt"),
+        "denoise": count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="noisy", gt_dirname="gt"),
+        "deblur": count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="blur", gt_dirname="gt"),
+        "sr": count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="lr", gt_dirname="gt"),
+        "lowlight": count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="dark", gt_dirname="gt"),
+        "video_denoise": count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname="noisy", gt_dirname="gt"),
+        "video_sr": count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname="lr", gt_dirname="gt"),
+    }
     supported = sorted([t for t, c in pairs_by_task.items() if c > 0])
-    meta = {"supported_task_types": supported, "pairs_by_task": pairs_by_task, "counts_by_dir": counts_by_dir}
-    return "\u56fe\u50cf", f"{n} \u5f20", meta
+    image_pair_total = sum(v for k, v in pairs_by_task.items() if not k.startswith("video_"))
+    video_pair_total = sum(v for k, v in pairs_by_task.items() if k.startswith("video_"))
+    if video_pair_total > 0 and image_pair_total > 0:
+        dtype = "\u56fe\u50cf/\u89c6\u9891"
+    elif video_pair_total > 0 or gt_video_count > 0:
+        dtype = "\u89c6\u9891"
+    else:
+        dtype = "\u56fe\u50cf"
+    if dtype == "\u89c6\u9891":
+        size = f"{max(video_pair_total, gt_video_count)} \u6bb5"
+    elif dtype == "\u56fe\u50cf/\u89c6\u9891":
+        size = f"{gt_img_count} \u5f20 + {gt_video_count} \u6bb5"
+    else:
+        size = f"{max(image_pair_total, gt_img_count)} \u5f20"
+    meta = {
+        "supported_task_types": supported,
+        "pairs_by_task": pairs_by_task,
+        "counts_by_dir": counts_by_dir,
+        "image_pair_total": image_pair_total,
+        "video_pair_total": video_pair_total,
+        "gt_image_count": gt_img_count,
+        "gt_video_count": gt_video_count,
+    }
+    return dtype, size, meta
+
+
+def _size_by_declared_type(declared_type: str, inferred_type: str, inferred_size: str, meta: dict) -> str:
+    m = dict(meta or {})
+    image_pair_total = int(m.get("image_pair_total") or 0)
+    video_pair_total = int(m.get("video_pair_total") or 0)
+    gt_image_count = int(m.get("gt_image_count") or 0)
+    gt_video_count = int(m.get("gt_video_count") or 0)
+    t = str(declared_type or "").strip()
+    if t == "\u89c6\u9891":
+        return f"{max(video_pair_total, gt_video_count)} \u6bb5"
+    if t == "\u56fe\u50cf":
+        return f"{max(image_pair_total, gt_image_count)} \u5f20"
+    if t == "\u56fe\u50cf/\u89c6\u9891":
+        return f"{gt_image_count} \u5f20 + {gt_video_count} \u6bb5"
+    if inferred_type == "\u89c6\u9891":
+        return f"{max(video_pair_total, gt_video_count)} \u6bb5"
+    if inferred_type == "\u56fe\u50cf/\u89c6\u9891":
+        return f"{gt_image_count} \u5f20 + {gt_video_count} \u6bb5"
+    return inferred_size
+
+
+def _username_of(current_user: Optional[dict]) -> str:
+    if not isinstance(current_user, dict):
+        return ""
+    return str(current_user.get("username") or "").strip()
+
+
+def _assert_resource_access(resource: dict, current_user: Optional[dict], *, allow_system: bool = True) -> None:
+    owner_id = str((resource or {}).get("owner_id") or "system").strip() or "system"
+    username = _username_of(current_user)
+    if owner_id == "system":
+        if allow_system:
+            return
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    if not username:
+        err.api_error(401, err.E_HTTP, "authentication_required")
+    if owner_id != username:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+
+
+def _assert_pinned_user(current_user: dict) -> None:
+    if _username_of(current_user) != _PINNED_OWNER_USERNAME:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
 
 
 @app.get("/datasets")
-def get_datasets(limit: int = 200):
+def get_datasets(limit: int = 200, current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    return list_datasets(r, limit=limit)
+    owner_id = current_user["username"] if current_user else None
+    return list_datasets(r, limit=limit, owner_id=owner_id)
 
 
 @app.post("/datasets", response_model=DatasetOut)
-def create_dataset(payload: DatasetCreate):
+def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
     dataset_id = (payload.dataset_id or "").strip() or f"ds_{uuid.uuid4().hex[:10]}"
     if load_dataset(r, dataset_id):
         err.api_error(409, err.E_DATASET_ID_EXISTS, "dataset_id_exists", dataset_id=dataset_id)
     created = time.time()
+    owner_id = _PINNED_OWNER_USERNAME
     data = {
         "dataset_id": dataset_id,
-        "name": payload.name.strip(),
-        "type": payload.type,
-        "size": payload.size,
+        "name": _validate_text_encoding(payload.name, "dataset.name"),
+        "type": _validate_text_encoding(payload.type, "dataset.type"),
+        "size": _validate_text_encoding(payload.size, "dataset.size"),
+        "owner_id": owner_id,
         "created_at": created,
         "meta": {},
     }
@@ -423,18 +723,22 @@ def create_dataset(payload: DatasetCreate):
 
 
 @app.patch("/datasets/{dataset_id}", response_model=DatasetOut)
-def patch_dataset(dataset_id: str, payload: DatasetPatch):
+def patch_dataset(dataset_id: str, payload: DatasetPatch, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
     cur = load_dataset(r, dataset_id)
     if not cur:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     if payload.name is not None:
-        cur["name"] = payload.name.strip()
+        cur["name"] = _validate_text_encoding(payload.name, "dataset.name")
     if payload.type is not None:
-        cur["type"] = payload.type
+        cur["type"] = _validate_text_encoding(payload.type, "dataset.type")
     if payload.size is not None:
-        cur["size"] = payload.size
+        cur["size"] = _validate_text_encoding(payload.size, "dataset.size")
     if not isinstance(cur.get("meta"), dict):
         cur["meta"] = {}
     save_dataset(r, dataset_id, cur)
@@ -442,35 +746,146 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch):
 
 
 @app.delete("/datasets/{dataset_id}")
-def remove_dataset(dataset_id: str):
+def remove_dataset(dataset_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    if not load_dataset(r, dataset_id):
+    _assert_pinned_user(current_user)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     delete_dataset(r, dataset_id)
     return {"ok": True, "dataset_id": dataset_id}
 
 
+def _get_dataset_version_key(dataset_id: str) -> str:
+    return f"dataset:version:{dataset_id}"
+
+
+def _increment_dataset_version(r, dataset_id: str) -> int:
+    version_key = _get_dataset_version_key(dataset_id)
+    version = r.incr(version_key)
+    return version
+
+
+def _get_dataset_fs_hash(dataset_id: str) -> str:
+    """计算数据集文件系统的哈希值，用于检测文件变化"""
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    ds_dir = data_root / dataset_id
+    
+    import hashlib
+    import os
+    
+    hasher = hashlib.md5()
+    
+    if ds_dir.exists():
+        # 遍历目录，计算文件路径和修改时间的哈希值
+        for root, dirs, files in os.walk(ds_dir):
+            for file in sorted(files):
+                file_path = os.path.join(root, file)
+                try:
+                    # 获取文件修改时间
+                    mtime = os.path.getmtime(file_path)
+                    # 更新哈希值
+                    hasher.update(f"{file_path}:{mtime}".encode('utf-8'))
+                except:
+                    pass
+    
+    return hasher.hexdigest()
+
+
+def _get_dataset_fs_hash_key(dataset_id: str) -> str:
+    return f"dataset:fs_hash:{dataset_id}"
+
+
 @app.post("/datasets/{dataset_id}/scan", response_model=DatasetOut)
-def scan_dataset(dataset_id: str):
+def scan_dataset(
+    dataset_id: str,
+    force_refresh: bool = Query(False, description="是否强制刷新缓存"),
+    current_user: dict = Depends(get_current_user),
+):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
     cur = load_dataset(r, dataset_id)
     if not cur:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
-    data_root = Path(__file__).resolve().parents[1] / "data"
-    t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
-    cur["type"] = t
-    cur["size"] = size
+    _assert_resource_access(cur, current_user, allow_system=True)
+    
+    # 获取数据集版本
+    version_key = _get_dataset_version_key(dataset_id)
+    current_version = r.get(version_key) or "0"
+    
+    # 检查文件系统变化
+    fs_hash_key = _get_dataset_fs_hash_key(dataset_id)
+    current_fs_hash = _get_dataset_fs_hash(dataset_id)
+    cached_fs_hash = r.get(fs_hash_key)
+    
+    # 如果文件系统发生变化，增加版本号
+    if cached_fs_hash != current_fs_hash:
+        current_version = str(_increment_dataset_version(r, dataset_id))
+        r.set(fs_hash_key, current_fs_hash)
+    
+    # 检查缓存
+    cache_key = _get_dataset_cache_key(dataset_id)
+    cached_data = r.get(cache_key)
+    use_cache = not force_refresh
+    
+    if use_cache and cached_data:
+        try:
+            import json
+            cached = json.loads(cached_data)
+            # 检查缓存中的版本是否与当前版本一致
+            if cached.get("version") == current_version:
+                t = cached.get("type")
+                size = cached.get("size")
+                meta = cached.get("meta", {})
+            else:
+                # 版本不一致，缓存失效
+                use_cache = False
+        except Exception:
+            use_cache = False
+    else:
+        use_cache = False
+    
+    # 如果没有缓存或缓存无效，执行扫描
+    if not use_cache:
+        data_root = Path(__file__).resolve().parents[1] / "data"
+        # 确保数据目录存在
+        data_root.mkdir(parents=True, exist_ok=True)
+        t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
+        
+        # 缓存结果，包含版本信息
+        import json
+        cache_data = {
+            "version": current_version,
+            "type": t,
+            "size": size,
+            "meta": meta
+        }
+        # 缓存永不过期，只有在数据集变化时才会失效
+        r.set(cache_key, json.dumps(cache_data))
+    
+    meta = dict(meta or {})
+    meta["inferred_type"] = t
+    current_type = str(cur.get("type") or "").strip()
+    if not current_type:
+        cur["type"] = t
+        current_type = str(cur.get("type") or "").strip()
+    meta["type_mismatch"] = bool(current_type and current_type != t)
+    cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
     save_dataset(r, dataset_id, cur)
     return DatasetOut(**cur)
 
 
 @app.post("/datasets/{dataset_id}/import_zip", response_model=DatasetOut)
-def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
+def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
     cur = load_dataset(r, dataset_id)
     if not cur:
         created = time.time()
@@ -479,9 +894,11 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
             "name": dataset_id,
             "type": "\u56fe\u50cf",
             "size": "-",
+            "owner_id": _PINNED_OWNER_USERNAME,
             "created_at": created,
             "meta": {},
         }
+    _assert_resource_access(cur, current_user, allow_system=True)
 
     try:
         zip_bytes = base64.b64decode(payload.data_b64.encode("utf-8"), validate=True)
@@ -489,23 +906,101 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip):
         err.api_error(400, err.E_BAD_BASE64, "bad_base64")
 
     data_root = Path(__file__).resolve().parents[1] / "data"
+    # 确保数据目录存在
+    data_root.mkdir(parents=True, exist_ok=True)
     ds_dir = data_root / dataset_id
     if payload.overwrite and ds_dir.exists():
         shutil.rmtree(ds_dir)
     _safe_extract_zip_bytes(zip_bytes, ds_dir)
+    _normalize_dataset_import_layout(ds_dir, overwrite=bool(payload.overwrite))
 
     t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
-    cur["type"] = t
-    cur["size"] = size
+    meta = dict(meta or {})
+    meta["inferred_type"] = t
+    current_type = str(cur.get("type") or "").strip()
+    if not current_type:
+        cur["type"] = t
+        current_type = str(cur.get("type") or "").strip()
+    meta["type_mismatch"] = bool(current_type and current_type != t)
+    cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
     save_dataset(r, dataset_id, cur)
+    
+    # 增加数据集版本号，使缓存失效
+    _increment_dataset_version(r, dataset_id)
+    
+    # 清除缓存，确保下次扫描获取最新数据
+    cache_key = _get_dataset_cache_key(dataset_id)
+    r.delete(cache_key)
+    
     return DatasetOut(**cur)
 
 
-@app.get("/algorithms")
-def get_algorithms(limit: int = 500):
+@app.post("/datasets/{dataset_id}/import_zip_file", response_model=DatasetOut)
+def import_dataset_zip_file(
+    dataset_id: str,
+    overwrite: bool = Query(False),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        created = time.time()
+        cur = {
+            "dataset_id": dataset_id,
+            "name": dataset_id,
+            "type": "图像",
+            "size": "-",
+            "owner_id": _PINNED_OWNER_USERNAME,
+            "created_at": created,
+            "meta": {},
+        }
+    _assert_resource_access(cur, current_user, allow_system=True)
+    try:
+        zip_bytes = file.file.read()
+    except Exception:
+        err.api_error(400, err.E_BAD_BASE64, "bad_zip_file")
+
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    # 确保数据目录存在
+    data_root.mkdir(parents=True, exist_ok=True)
+    ds_dir = data_root / dataset_id
+    if overwrite and ds_dir.exists():
+        shutil.rmtree(ds_dir)
+    _safe_extract_zip_bytes(zip_bytes, ds_dir)
+    _normalize_dataset_import_layout(ds_dir, overwrite=overwrite)
+
+    t, size, meta = _scan_dataset_on_disk(data_root, dataset_id)
+    meta = dict(meta or {})
+    meta["inferred_type"] = t
+    current_type = str(cur.get("type") or "").strip()
+    if not current_type:
+        cur["type"] = t
+        current_type = str(cur.get("type") or "").strip()
+    meta["type_mismatch"] = bool(current_type and current_type != t)
+    cur["size"] = _size_by_declared_type(current_type, t, size, meta)
+    cur["meta"] = meta
+    save_dataset(r, dataset_id, cur)
+    
+    # 增加数据集版本号，使缓存失效
+    _increment_dataset_version(r, dataset_id)
+    
+    # 清除缓存，确保下次扫描获取最新数据
+    cache_key = _get_dataset_cache_key(dataset_id)
+    r.delete(cache_key)
+    
+    return DatasetOut(**cur)
+
+
+
+@app.get("/algorithms")
+def get_algorithms(limit: int = 500, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    owner_id = current_user["username"] if current_user else None
     defaults_by_id = {
         "alg_dn_cnn": {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
         "alg_denoise_bilateral": {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
@@ -543,7 +1038,7 @@ def get_algorithms(limit: int = 500):
         "alg_video_denoise_median": {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}},
     }
 
-    items = list_algorithms(r, limit=limit) or []
+    items = list_algorithms(r, limit=limit, owner_id=owner_id) or []
     out = []
     for x in items:
         alg_id = x.get("algorithm_id")
@@ -559,19 +1054,23 @@ def get_algorithms(limit: int = 500):
 
 
 @app.post("/algorithms", response_model=AlgorithmOut)
-def create_algorithm(payload: AlgorithmCreate):
+def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
     algorithm_id = (payload.algorithm_id or "").strip() or f"alg_{uuid.uuid4().hex[:10]}"
     if load_algorithm(r, algorithm_id):
         err.api_error(409, err.E_ALGORITHM_ID_EXISTS, "algorithm_id_exists", algorithm_id=algorithm_id)
+    _ensure_unique_algorithm_name(r, payload.name)
     created = time.time()
+    owner_id = _PINNED_OWNER_USERNAME
     data = {
         "algorithm_id": algorithm_id,
         "task": payload.task,
-        "name": payload.name.strip(),
-        "impl": payload.impl,
-        "version": payload.version,
+        "name": _validate_text_encoding(payload.name, "algorithm.name"),
+        "impl": _validate_text_encoding(payload.impl, "algorithm.impl"),
+        "version": _validate_text_encoding(payload.version, "algorithm.version"),
+        "owner_id": owner_id,
         "created_at": created,
         "default_params": payload.default_params or {},
         "param_presets": payload.param_presets or {},
@@ -581,20 +1080,27 @@ def create_algorithm(payload: AlgorithmCreate):
 
 
 @app.patch("/algorithms/{algorithm_id}", response_model=AlgorithmOut)
-def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
+def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
+    if algorithm_id in BUILTIN_ALGORITHM_IDS:
+        err.api_error(400, err.E_HTTP, "builtin_algorithm_readonly", algorithm_id=algorithm_id)
     cur = load_algorithm(r, algorithm_id)
     if not cur:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     if payload.task is not None:
         cur["task"] = payload.task
     if payload.name is not None:
-        cur["name"] = payload.name.strip()
+        _ensure_unique_algorithm_name(r, payload.name, exclude_id=algorithm_id)
+        cur["name"] = _validate_text_encoding(payload.name, "algorithm.name")
     if payload.impl is not None:
-        cur["impl"] = payload.impl
+        cur["impl"] = _validate_text_encoding(payload.impl, "algorithm.impl")
     if payload.version is not None:
-        cur["version"] = payload.version
+        cur["version"] = _validate_text_encoding(payload.version, "algorithm.version")
     if payload.default_params is not None:
         cur["default_params"] = payload.default_params
     if payload.param_presets is not None:
@@ -604,46 +1110,76 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch):
 
 
 @app.delete("/algorithms/{algorithm_id}")
-def remove_algorithm(algorithm_id: str):
+def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    if not load_algorithm(r, algorithm_id):
+    _assert_pinned_user(current_user)
+    if algorithm_id in BUILTIN_ALGORITHM_IDS:
+        err.api_error(400, err.E_HTTP, "builtin_algorithm_readonly", algorithm_id=algorithm_id)
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     delete_algorithm(r, algorithm_id)
     return {"ok": True, "algorithm_id": algorithm_id}
 
 
-@app.get("/presets")
-def get_presets(limit: int = 200):
+@app.post("/algorithms/reset_user")
+def reset_user_algorithms(current_user: dict = Depends(get_current_user)):
     r = make_redis()
-    items = list_presets(r, limit=limit) or []
+    _ensure_catalog_defaults(r)
+    _assert_pinned_user(current_user)
+    username = _PINNED_OWNER_USERNAME
+    removed = 0
+    for x in list_algorithms(r, limit=5000, owner_id=username):
+        aid = str(x.get("algorithm_id") or "")
+        if not aid or aid in BUILTIN_ALGORITHM_IDS:
+            continue
+        if str(x.get("owner_id") or "") != username:
+            continue
+        delete_algorithm(r, aid)
+        removed += 1
+    _ensure_catalog_defaults(r)
+    return {"ok": True, "removed": removed}
+
+
+@app.get("/presets")
+def get_presets(limit: int = 200, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    r = make_redis()
+    owner_id = current_user["username"] if current_user else None
+    items = list_presets(r, limit=limit, owner_id=owner_id) or []
     return [PresetOut(**x).model_dump() for x in items]
 
 
 @app.get("/presets/{preset_id}", response_model=PresetOut)
-def get_preset(preset_id: str):
+def get_preset(preset_id: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     cur = load_preset(r, preset_id)
     if not cur:
         err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
+    _assert_resource_access(cur, current_user, allow_system=True)
     return PresetOut(**cur)
 
 
 @app.post("/presets", response_model=PresetOut)
-def create_preset(payload: PresetCreate):
+def create_preset(payload: PresetCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     preset_id = (payload.preset_id or "").strip() or f"pre_{uuid.uuid4().hex[:10]}"
     if load_preset(r, preset_id):
         err.api_error(409, err.E_PRESET_ID_EXISTS, "preset_id_exists", preset_id=preset_id)
     created = time.time()
+    owner_id = current_user["username"]
     data = {
         "preset_id": preset_id,
-        "name": payload.name.strip(),
+        "name": _validate_text_encoding(payload.name, "preset.name"),
         "task_type": payload.task_type,
         "dataset_id": payload.dataset_id,
         "algorithm_id": payload.algorithm_id,
         "metrics": payload.metrics or [],
         "params": payload.params or {},
+        "owner_id": owner_id,
         "created_at": created,
         "updated_at": created,
     }
@@ -652,13 +1188,16 @@ def create_preset(payload: PresetCreate):
 
 
 @app.patch("/presets/{preset_id}", response_model=PresetOut)
-def patch_preset(preset_id: str, payload: PresetPatch):
+def patch_preset(preset_id: str, payload: PresetPatch, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     cur = load_preset(r, preset_id)
     if not cur:
         err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     if payload.name is not None:
-        cur["name"] = payload.name.strip()
+        cur["name"] = _validate_text_encoding(payload.name, "preset.name")
     if payload.task_type is not None:
         cur["task_type"] = payload.task_type
     if payload.dataset_id is not None:
@@ -675,17 +1214,22 @@ def patch_preset(preset_id: str, payload: PresetPatch):
 
 
 @app.delete("/presets/{preset_id}")
-def remove_preset(preset_id: str):
+def remove_preset(preset_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
-    if not load_preset(r, preset_id):
+    cur = load_preset(r, preset_id)
+    if not cur:
         err.api_error(404, err.E_PRESET_NOT_FOUND, "preset_not_found", preset_id=preset_id)
+    
+    _assert_resource_access(cur, current_user, allow_system=False)
+        
     delete_preset(r, preset_id)
     return {"ok": True, "preset_id": preset_id}
 
 
 @app.post("/recommend/fast-select", response_model=FastSelectResponse)
-def recommend_fast_select(payload: FastSelectRequest):
+def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
+    username = _username_of(current_user)
     task_type = (payload.task_type or "").strip().lower()
     dataset_id = (payload.dataset_id or "").strip()
     if task_type not in TASK_LABEL_BY_TYPE:
@@ -696,6 +1240,7 @@ def recommend_fast_select(payload: FastSelectRequest):
     ds = load_dataset(r, dataset_id)
     if not ds:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    _assert_resource_access(ds, current_user, allow_system=True)
     meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
     pairs_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
     pair_count = int(pairs_map.get(task_type) or 0)
@@ -717,7 +1262,7 @@ def recommend_fast_select(payload: FastSelectRequest):
             if aid:
                 candidate_ids.append(aid)
     else:
-        all_algs = list_algorithms(r, limit=2000) or []
+        all_algs = list_algorithms(r, limit=2000, owner_id=(username or None)) or []
         candidate_ids = [str(x.get("algorithm_id") or "") for x in all_algs if str((x.get("task") or "")).strip() == task_label]
 
     uniq = []
@@ -736,6 +1281,7 @@ def recommend_fast_select(payload: FastSelectRequest):
         alg = load_algorithm(r, aid)
         if not alg:
             err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=aid)
+        _assert_resource_access(alg, current_user, allow_system=True)
         if str((alg.get("task") or "")).strip() != task_label:
             err.api_error(
                 409,
@@ -782,7 +1328,7 @@ def recommend_fast_select(payload: FastSelectRequest):
         arms = model.get("arms") if isinstance(model.get("arms"), dict) else {}
         historical_done_count = int(sum(int((v or {}).get("sample_count") or 0) for v in arms.values() if isinstance(v, dict)))
     else:
-        runs = list_runs(r, limit=5000) or []
+        runs = list_runs(r, limit=5000, owner_id=(username or None)) or []
         arm_stats = fast_select_algorithms(
             task_type=task_type,
             candidate_algorithm_ids=valid_ids,
@@ -841,11 +1387,12 @@ def recommend_fast_select(payload: FastSelectRequest):
 
 
 @app.post("/runs", response_model=RunOut)
-def create_run(payload: RunCreate):
+def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     task_type = (payload.task_type or "").strip().lower()
     dataset_id = (payload.dataset_id or "").strip()
     algorithm_id = (payload.algorithm_id or "").strip()
+    owner_id = current_user["username"]
     if task_type not in TASK_LABEL_BY_TYPE:
         err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
     if not dataset_id:
@@ -856,9 +1403,11 @@ def create_run(payload: RunCreate):
     ds = load_dataset(r, dataset_id)
     if not ds:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "\u6570\u636e\u96c6\u4e0d\u5b58\u5728", dataset_id=dataset_id)
+    _assert_resource_access(ds, current_user, allow_system=True)
     alg = load_algorithm(r, algorithm_id)
     if not alg:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "\u7b97\u6cd5\u4e0d\u5b58\u5728", algorithm_id=algorithm_id)
+    _assert_resource_access(alg, current_user, allow_system=True)
 
     expected_task = TASK_LABEL_BY_TYPE.get(task_type, "")
     if expected_task and (alg.get("task") or "").strip() != expected_task:
@@ -872,37 +1421,38 @@ def create_run(payload: RunCreate):
             algorithm_task=(alg.get("task") or "").strip(),
         )
 
-    if bool(getattr(payload, "strict_validate", False)):
-        from .vision.dataset_io import count_paired_images, count_paired_videos
+    from .vision.dataset_io import count_paired_images, count_paired_videos
 
-        data_root = Path(__file__).resolve().parents[1] / "data"
-        input_dir_by_task = {
-            "dehaze": "hazy",
-            "denoise": "noisy",
-            "deblur": "blur",
-            "sr": "lr",
-            "lowlight": "dark",
-            "video_denoise": "noisy",
-            "video_sr": "lr",
-        }
-        input_dirname = input_dir_by_task.get(task_type)
-        if not input_dirname:
-            err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
-        if task_type.startswith("video_"):
-            pair_count = count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
-        else:
-            pair_count = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
-        if pair_count <= 0:
-            err.api_error(
-                409,
-                err.E_DATASET_NO_PAIR,
-                "\u5f53\u524d\u4efb\u52a1\u65e0\u53ef\u7528\u914d\u5bf9\uff0c\u8bf7\u68c0\u67e5\u8f93\u5165\u76ee\u5f55\u4e0e gt/ \u540c\u540d\u6587\u4ef6\u5e76\u91cd\u65b0\u626b\u63cf",
-                task_type=task_type,
-                task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
-                dataset_id=dataset_id,
-                expected_dirs=[input_dirname, "gt"],
-                pair_count=pair_count,
-            )
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    # 确保数据目录存在
+    data_root.mkdir(parents=True, exist_ok=True)
+    input_dir_by_task = {
+        "dehaze": "hazy",
+        "denoise": "noisy",
+        "deblur": "blur",
+        "sr": "lr",
+        "lowlight": "dark",
+        "video_denoise": "noisy",
+        "video_sr": "lr",
+    }
+    input_dirname = input_dir_by_task.get(task_type)
+    if not input_dirname:
+        err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+    if task_type.startswith("video_"):
+        pair_count = count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+    else:
+        pair_count = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+    if pair_count <= 0:
+        err.api_error(
+            409,
+            err.E_DATASET_NO_PAIR,
+            "\u5f53\u524d\u4efb\u52a1\u65e0\u53ef\u7528\u914d\u5bf9\uff0c\u8bf7\u68c0\u67e5\u8f93\u5165\u76ee\u5f55\u4e0e gt/ \u540c\u540d\u6587\u4ef6\u5e76\u91cd\u65b0\u626b\u63cf",
+            task_type=task_type,
+            task_label=TASK_LABEL_BY_TYPE.get(task_type, ""),
+            dataset_id=dataset_id,
+            expected_dirs=[input_dirname, "gt"],
+            pair_count=pair_count,
+        )
 
     run_id = uuid.uuid4().hex[:12]
     created = time.time()
@@ -912,6 +1462,7 @@ def create_run(payload: RunCreate):
         "task_type": task_type,
         "dataset_id": dataset_id,
         "algorithm_id": algorithm_id,
+        "owner_id": owner_id,
         "params": payload.params,
         "strict_validate": bool(getattr(payload, "strict_validate", False)),
         "samples": [],
@@ -941,9 +1492,11 @@ def get_runs(
     task_type: str | None = Query(None, description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr"),
     dataset_id: str | None = Query(None),
     algorithm_id: str | None = Query(None),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     r = make_redis()
-    runs = list_runs(r, limit=limit)
+    owner_id = _username_of(current_user) or None
+    runs = list_runs(r, limit=limit, owner_id=owner_id)
 
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
@@ -967,6 +1520,7 @@ def export_runs(
     dataset_id: str | None = Query(None),
     algorithm_id: str | None = Query(None),
     limit: int = Query(500, ge=1, le=5000),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """
     Export runs as CSV/XLSX.
@@ -976,7 +1530,8 @@ def export_runs(
         err.api_error(400, err.E_EXPORT_FORMAT, "format_must_be_csv_or_xlsx", format=fmt)
 
     r = make_redis()
-    runs = list_runs(r, limit=limit)
+    owner_id = _username_of(current_user) or None
+    runs = list_runs(r, limit=limit, owner_id=owner_id)
 
     # ===== ???? =====
     def ok(x: dict) -> bool:
@@ -1139,12 +1694,14 @@ def export_runs(
 @app.post("/runs/clear")
 def clear_runs(
     status: str | None = Query("done", description="done|queued|running|failed|all"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Clear runs by status (default: done).
     """
     r = make_redis()
     keys = r.keys("run:*")
+    username = current_user["username"]
 
     deleted = 0
     for k in keys:
@@ -1154,6 +1711,8 @@ def clear_runs(
         try:
             data = json.loads(s)
         except Exception:
+            continue
+        if str(data.get("owner_id") or "") != username:
             continue
 
         if status and status != "all":
@@ -1168,20 +1727,22 @@ def clear_runs(
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: str):
+def get_run(run_id: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     run = load_run(r, run_id)
     if not run:
         err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
+    _assert_resource_access(run, current_user, allow_system=True)
     return _sanitize_run_for_api(run)
 
 
 @app.post("/runs/{run_id}/cancel")
-def cancel_run(run_id: str):
+def cancel_run(run_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     run = load_run(r, run_id)
     if not run:
         err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
+    _assert_resource_access(run, current_user, allow_system=False)
 
     status = (run.get("status") or "").lower()
     if status in {"done", "failed", "canceled"}:
@@ -1207,53 +1768,3 @@ def cancel_run(run_id: str):
     celery_app.control.revoke(run_id, terminate=False)
     return {"ok": True, "run_id": run_id, "status": "canceling"}
 
-
-@app.post("/dev/datasets/{dataset_id}/generate")
-def dev_generate_dataset(
-    dataset_id: str,
-    task_type: str = Query("all", description="all|denoise|deblur|dehaze|sr|lowlight"),
-    count: int = Query(5, ge=1, le=50),
-):
-    data_root = Path(__file__).resolve().parents[1] / "data"
-    input_dir_by_task = {
-        "dehaze": "hazy",
-        "denoise": "noisy",
-        "deblur": "blur",
-        "sr": "lr",
-        "lowlight": "dark",
-    }
-
-    task_type_norm = (task_type or "").strip().lower()
-    if task_type_norm == "all":
-        tasks = ["dehaze", "denoise", "deblur", "sr", "lowlight"]
-    else:
-        if task_type_norm not in input_dir_by_task:
-            err.api_error(400, err.E_TASK_NOT_SUPPORTED, "task_type_not_supported", task_type=task_type_norm)
-        tasks = [task_type_norm]
-
-    created: dict[str, int] = {}
-    ds_dir = data_root / dataset_id
-    gt_dir = ds_dir / "gt"
-    gt_dir.mkdir(parents=True, exist_ok=True)
-
-    for t in tasks:
-        inp_dir = ds_dir / input_dir_by_task[t]
-        inp_dir.mkdir(parents=True, exist_ok=True)
-        n_ok = 0
-        for i in range(count):
-            seed = _stable_seed(f"{dataset_id}|{t}|{i}")
-            gt_u8, inp_u8 = _make_synthetic_pair_for_task(task_type=t, seed=seed)
-            name = f"{i:03d}.png"
-            ok1 = bool(cv2.imwrite(str(gt_dir / name), gt_u8))
-            ok2 = bool(cv2.imwrite(str(inp_dir / name), inp_u8))
-            if ok1 and ok2:
-                n_ok += 1
-        created[t] = n_ok
-
-    return {
-        "ok": True,
-        "dataset_id": dataset_id,
-        "task_type": task_type_norm,
-        "count": count,
-        "created": created,
-    }

@@ -7,6 +7,7 @@ dist/
 # ===== Python / Backend =====
 backend/.venv/
 backend/data/
+/data/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -31,5 +32,5 @@ logs/
 celerybeat-schedule
 
 # ===== Local Datasets / Exports (Generated) =====
-?????/
-docs/???????/
+数据集/
+docs/导出文件/

@@ -1,198 +1,225 @@
 <template>
   <div class="page">
-    <h2 class="title">综合对比与推荐</h2>
-    <div class="subtitle">面向图像与视频复原任务的指标对比、快速选型与结论导出</div>
-
-    <el-card shadow="never" class="card">
-      <div class="filters">
-        <el-select v-model="task" placeholder="选择任务类型" style="width: 180px">
-          <el-option v-for="t in taskOptions" :key="t" :label="t" :value="t" />
-        </el-select>
-
-        <el-select v-model="datasetId" placeholder="选择数据集" style="width: 220px">
-          <el-option v-for="d in store.datasets" :key="d.id" :label="d.name" :value="d.id" />
-        </el-select>
-
-        <el-checkbox v-model="onlyDone">仅显示已完成</el-checkbox>
-
-        <el-button type="primary" @click="reset">重置筛选</el-button>
-        <el-button @click="clearCache">清除缓存</el-button>
-
-        <el-button @click="presetQuality">质量优先</el-button>
-        <el-button @click="presetBalanced">均衡模式</el-button>
-        <el-button @click="presetSpeed">速度优先</el-button>
-        <el-button type="warning" :disabled="bulkRunning" @click="bulkRunBaselines">
-          {{ bulkRunning ? "批量创建中..." : "批量创建基线Run" }}
-        </el-button>
-        <el-checkbox v-model="bulkStrictValidate">严格校验配对</el-checkbox>
-        <el-checkbox v-model="bulkOnlyBaselines">仅使用基线算法</el-checkbox>
-        <el-select v-model="bulkParamScheme" style="width: 140px" size="small">
-          <el-option label="默认参数" value="default" />
-          <el-option label="速度参数" value="speed" />
-          <el-option label="质量参数" value="quality" />
-        </el-select>
-
-        <el-button @click="exportCsv">导出原始CSV</el-button>
-        <el-button @click="exportXlsx">导出原始Excel</el-button>
-        <el-button type="success" @click="exportRecommendCsv">导出推荐CSV（含评分/理由）</el-button>
-        <el-button type="success" @click="exportRecommendXlsx">导出推荐Excel（含评分/理由）</el-button>
-        <el-button type="success" @click="exportConclusionMd">导出结论Markdown</el-button>
-
+    <div class="header-section">
+      <div class="header-left">
+        <h2 class="page-title">综合对比与智能推荐</h2>
+        <p class="page-subtitle">多维度量化指标分析，基于 LinUCB 算法的快速选型与自动化评测报告</p>
       </div>
+      <div class="header-right">
+        <el-button-group>
+          <el-button icon="Refresh" @click="store.fetchRuns()">同步数据</el-button>
+          <el-button type="danger" plain icon="Delete" @click="clearCache">重置配置</el-button>
+        </el-button-group>
+      </div>
+    </div>
 
-      <div class="fast-select">
-        <div class="fast-select-head">
-          <div class="fast-select-title">核心算法快速选型（LinUCB）</div>
-          <div class="fast-select-actions">
-            <el-input-number v-model="fastTopK" :min="1" :max="10" :step="1" size="small" />
-            <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.05" size="small" />
-            <el-button type="primary" :loading="fastLoading" @click="runFastSelect">
-              {{ fastLoading ? "快速选型中..." : "快速选型 Top-K" }}
-            </el-button>
-            <el-button
-              type="warning"
-              :disabled="!fastRecommendations.length || fastCreateRunning"
-              :loading="fastCreateRunning"
+    <!-- Filter & Config Area -->
+    <div class="config-grid">
+      <!-- Filters -->
+      <el-card shadow="never" class="config-card">
+        <template #header><div class="card-header-small"><el-icon><Filter /></el-icon> 结果筛选</div></template>
+        <div class="filter-form">
+          <div class="filter-row">
+            <el-select v-model="task" placeholder="任务类型" class="flex-1">
+              <el-option v-for="t in taskOptions" :key="t" :label="t" :value="t" />
+            </el-select>
+            <el-select v-model="datasetId" placeholder="评测数据集" class="flex-1">
+              <el-option v-for="d in store.datasets" :key="d.id" :label="d.name" :value="d.id" />
+            </el-select>
+          </div>
+          <div class="filter-row-secondary">
+            <el-checkbox v-model="onlyDone">仅显示已完成</el-checkbox>
+            <el-button link type="primary" @click="reset">重置所有条件</el-button>
+          </div>
+        </div>
+      </el-card>
+
+      <!-- Weights -->
+      <el-card shadow="never" class="config-card">
+        <template #header>
+          <div class="card-header-small">
+            <el-icon><Compass /></el-icon> 评分权重
+            <div class="preset-links">
+              <el-link type="primary" :underline="false" @click="presetQuality">质量</el-link>
+              <el-divider direction="vertical" />
+              <el-link type="primary" :underline="false" @click="presetBalanced">均衡</el-link>
+              <el-divider direction="vertical" />
+              <el-link type="primary" :underline="false" @click="presetSpeed">速度</el-link>
+            </div>
+          </div>
+        </template>
+        <div class="weight-inputs">
+          <div class="weight-item">
+            <span class="w-label">PSNR</span>
+            <el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
+          </div>
+          <div class="weight-item">
+            <span class="w-label">SSIM</span>
+            <el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
+          </div>
+          <div class="weight-item">
+            <span class="w-label">NIQE</span>
+            <el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
+          </div>
+          <div class="weight-item">
+            <span class="w-label">TIME</span>
+            <el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
+          </div>
+        </div>
+        <div class="weight-footer">
+          <span class="w-sum">权重总和: <strong>{{ weightSum.toFixed(2) }}</strong></span>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- Smart Selection & Bulk Actions -->
+    <el-card shadow="never" class="tool-card">
+      <div class="tool-tabs">
+        <div class="tool-section">
+          <div class="tool-title"><el-icon><Cpu /></el-icon> 智能选型 (LinUCB)</div>
+          <div class="tool-actions">
+            <span class="tool-label">Top-K</span>
+            <el-input-number v-model="fastTopK" :min="1" :max="10" size="small" />
+            <span class="tool-label">探索系数</span>
+            <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.1" size="small" />
+            <el-button type="primary" icon="MagicStick" :loading="fastLoading" @click="runFastSelect">分析推荐</el-button>
+            <el-button 
+              type="warning" 
+              plain 
+              icon="VideoPlay" 
+              :disabled="!fastRecommendations.length" 
               @click="createRunsByFastSelect"
             >
-              {{ fastCreateRunning ? "创建中..." : "按推荐一键创建Run" }}
+              一键创建任务
             </el-button>
           </div>
         </div>
-
-        <div class="fast-select-meta" v-if="fastContext">
-          候选算法 {{ fastContext.candidate_count ?? "-" }} 个，历史样本 {{ fastContext.historical_run_count ?? "-" }}，
-          数据配对 {{ fastContext.pair_count ?? "-" }}，alpha={{ fastContext.alpha ?? "-" }}
+        <el-divider direction="vertical" />
+        <div class="tool-section">
+          <div class="tool-title"><el-icon><List /></el-icon> 批量基线</div>
+          <div class="tool-actions">
+            <el-select v-model="bulkParamScheme" size="small" style="width: 100px">
+              <el-option label="默认" value="default" />
+              <el-option label="速度" value="speed" />
+              <el-option label="质量" value="quality" />
+            </el-select>
+            <el-button type="warning" icon="Files" :disabled="bulkRunning" @click="bulkRunBaselines">批量运行</el-button>
+          </div>
         </div>
-
-        <el-table
-          v-if="fastRecommendations.length"
-          :data="fastRecommendations"
-          stripe
-          size="small"
-          style="width: 100%; margin-top: 8px"
-        >
-          <el-table-column label="排名" width="70">
-            <template #default="{ $index }">{{ $index + 1 }}</template>
-          </el-table-column>
-          <el-table-column prop="algorithm_name" label="算法" min-width="170" />
-          <el-table-column prop="score" label="UCB分数" width="110" />
-          <el-table-column prop="mean_reward" label="历史均值" width="110" />
-          <el-table-column prop="uncertainty" label="不确定性" width="110" />
-          <el-table-column prop="sample_count" label="样本数" width="90" />
-        </el-table>
       </div>
 
-      <div class="weights">
-        <div class="weights-title">评分权重设置</div>
-
-        <div class="weights-grid">
-          <div class="w-item">
-            <div class="w-label">PSNR 权重</div>
-            <el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" />
-          </div>
-
-          <div class="w-item">
-            <div class="w-label">SSIM 权重</div>
-            <el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" />
-          </div>
-
-          <div class="w-item">
-            <div class="w-label">NIQE 权重</div>
-            <el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" />
-          </div>
-
-          <div class="w-item">
-            <div class="w-label">耗时权重</div>
-            <el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" />
-          </div>
-
-          <div class="w-sum">
-            权重总和：<b>{{ weightSum.toFixed(2) }}</b>
-            <span style="color:#909399">建议接近 1</span>
-          </div>
+      <!-- Fast Select Result Table -->
+      <div v-if="fastRecommendations.length" class="fast-res-container">
+        <el-table :data="fastRecommendations" size="small" class="mini-table">
+          <el-table-column label="推荐排名" width="80" align="center">
+            <template #default="{ $index }">
+              <span class="rank-badge" :class="'rank-' + ($index + 1)">{{ $index + 1 }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="algorithm_name" label="推荐算法" />
+          <el-table-column prop="score" label="UCB得分" width="100" />
+          <el-table-column prop="mean_reward" label="历史均值" width="100" />
+          <el-table-column prop="sample_count" label="样本数" width="80" />
+        </el-table>
+        <div class="fast-meta" v-if="fastContext">
+          基于 {{ fastContext.historical_run_count }} 组历史数据分析，当前 alpha={{ fastContext.alpha }}
         </div>
       </div>
     </el-card>
 
-    <el-card shadow="never" class="card" style="margin-top: 12px">
-      <div class="recommend" v-if="recommendText">
-        <div class="recommend-title">推荐结论</div>
-        <div class="recommend-body">{{ recommendText }}</div>
-      </div>
-
-      <div class="chart-bar" v-if="chartItems.length">
-        <div class="chart-head">
-          <div class="chart-title">指标排行 Top {{ chartTopN }}</div>
-          <div class="chart-actions">
-            <el-select v-model="chartMetric" style="width: 200px" size="small">
-              <el-option label="综合评分" value="score" />
-              <el-option label="PSNR" value="psnr" />
-              <el-option label="SSIM" value="ssim" />
-              <el-option label="NIQE" value="niqe" />
-              <el-option label="耗时(秒)" value="time" />
-            </el-select>
-            <el-select v-model="chartTopN" style="width: 140px" size="small">
-              <el-option :label="'Top 5'" :value="5" />
-              <el-option :label="'Top 10'" :value="10" />
-              <el-option :label="'Top 15'" :value="15" />
-            </el-select>
-            <el-button size="small" @click="exportChartPng">导出图表PNG</el-button>
+    <!-- Main Results Section -->
+    <div class="results-layout">
+      <!-- Recommendation & Export -->
+      <div class="recommendation-panel" v-if="recommendText">
+        <div class="recommend-card">
+          <div class="recommend-badge">最优推荐</div>
+          <div class="recommend-content">
+            <h3 class="rec-algo">{{ tableRows[0]?.algorithmName }}</h3>
+            <p class="rec-reason">{{ tableRows[0]?.reason }}</p>
+            <div class="rec-metrics">
+              <div class="rec-m-item">PSNR <span>{{ tableRows[0]?.psnr }}</span></div>
+              <div class="rec-m-item">SSIM <span>{{ tableRows[0]?.ssim }}</span></div>
+              <div class="rec-m-item">NIQE <span>{{ tableRows[0]?.niqe }}</span></div>
+              <div class="rec-m-item score">综合评分 <span>{{ tableRows[0]?.score }}</span></div>
+            </div>
+          </div>
+          <div class="export-actions">
+            <el-dropdown split-button type="success" @click="exportConclusionMd">
+              导出结论报告
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="exportRecommendXlsx">导出推荐 Excel</el-dropdown-item>
+                  <el-dropdown-item @click="exportRecommendCsv">导出推荐 CSV</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
+      </div>
 
-        <div class="chart-wrap">
-          <canvas
-            ref="chartCanvas"
-            class="chart-canvas"
-            @mousemove="onChartMove"
-            @mouseleave="onChartLeave"
-          ></canvas>
-          <div
-            v-if="chartTip.visible"
-            class="chart-tooltip"
-            :style="{ left: chartTip.x + 'px', top: chartTip.y + 'px' }"
-          >
+      <!-- Chart Visualization -->
+      <el-card shadow="never" class="chart-card-wrapper" v-if="chartItems.length">
+        <template #header>
+          <div class="chart-header">
+            <div class="chart-title-box">
+              <el-icon><Histogram /></el-icon>
+              <span>指标排行榜 (Top {{ chartTopN }})</span>
+            </div>
+            <div class="chart-controls">
+              <el-radio-group v-model="chartMetric" size="small" class="metric-radio">
+                <el-radio-button label="score">评分</el-radio-button>
+                <el-radio-button label="psnr">PSNR</el-radio-button>
+                <el-radio-button label="ssim">SSIM</el-radio-button>
+                <el-radio-button label="niqe">NIQE</el-radio-button>
+                <el-radio-button label="time">耗时</el-radio-button>
+              </el-radio-group>
+              <el-button size="small" icon="Camera" @click="exportChartPng">导出图表</el-button>
+            </div>
+          </div>
+        </template>
+        <div class="chart-container">
+          <canvas ref="chartCanvas" class="main-canvas" @mousemove="onChartMove" @mouseleave="onChartLeave"></canvas>
+          <div v-if="chartTip.visible" class="canvas-tooltip" :style="{ left: chartTip.x + 'px', top: chartTip.y + 'px' }">
             {{ chartTip.text }}
           </div>
         </div>
-      </div>
+      </el-card>
 
-      <el-table :data="tableRows" stripe style="width: 100%; margin-top: 10px">
-        <el-table-column prop="createdAt" label="创建时间" width="170" />
-        <el-table-column prop="task" label="任务" width="110" />
-        <el-table-column prop="datasetName" label="数据集" min-width="170" />
-        <el-table-column prop="algorithmName" label="算法" min-width="170" />
-
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" disable-transitions>
-              {{ statusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="psnr" label="PSNR" width="90" />
-        <el-table-column prop="ssim" label="SSIM" width="90" />
-        <el-table-column prop="niqe" label="NIQE" width="90" />
-        <el-table-column prop="elapsed" label="耗时" width="90" />
-
-        <el-table-column prop="score" label="综合分" width="110" sortable />
-
-        <el-table-column label="推荐理由/备注" min-width="320">
-          <template #default="{ row }">
-            <div style="line-height: 1.5; color: #303133">
-              {{ row.reason || "-" }}
+      <!-- Data Table -->
+      <el-card shadow="never" class="table-card-wrapper">
+        <template #header>
+          <div class="table-header">
+            <span class="table-title">对比明细清单</span>
+            <div class="table-actions">
+              <el-button size="small" icon="Download" @click="exportXlsx">原始数据 Excel</el-button>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div v-if="tableRows.length === 0" class="empty">
-        暂无符合条件的运行结果
-      </div>
-    </el-card>
+          </div>
+        </template>
+        <el-table :data="tableRows" stripe class="compare-table" height="500">
+          <el-table-column prop="algorithmName" label="算法名称" min-width="150" fixed="left" />
+          <el-table-column prop="score" label="综合分" width="100" sortable align="center">
+            <template #default="{ row }">
+              <span class="table-score">{{ row.score > -Infinity ? row.score : '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="psnr" label="PSNR" width="90" align="center" />
+          <el-table-column prop="ssim" label="SSIM" width="90" align="center" />
+          <el-table-column prop="niqe" label="NIQE" width="90" align="center" />
+          <el-table-column prop="elapsed" label="耗时" width="90" align="center" />
+          <el-table-column label="推荐分析" min-width="250">
+            <template #default="{ row }">
+              <span class="table-reason">{{ row.reason || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="运行时间" width="160" />
+        </el-table>
+        <div v-if="tableRows.length === 0" class="empty-state">
+          <el-empty description="暂无符合条件的对比结果" />
+        </div>
+      </el-card>
+    </div>
   </div>
+
 </template>
 
 <script setup>
@@ -1114,84 +1141,340 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page { padding: 12px; }
-.title { margin: 0 0 6px 0; font-size: 22px; font-weight: 700; color: #1b2f62; }
-.subtitle { margin-bottom: 12px; color: #4f628f; font-size: 14px; }
-.card {
-  border-radius: 14px;
-  border: 1px solid #d8e3ff;
-  box-shadow: 0 14px 28px rgba(26, 78, 190, 0.1);
-}
-.filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.chart-bar { margin-top: 10px; padding-top: 10px; border-top: 1px solid #dbe6ff; }
-.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.chart-title { font-weight: 700; color: #294179; }
-.chart-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.chart-wrap { margin-top: 10px; width: 100%; position: relative; }
-.chart-canvas { width: 100%; height: 310px; border-radius: 10px; border: 1px solid #d8e3ff; background: #fff; }
-.chart-tooltip {
-  position: absolute;
-  transform: translate(-8px, -8px);
-  max-width: 420px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: rgba(17, 24, 39, 0.92);
-  color: #ffffff;
-  font-size: 12px;
-  line-height: 1.3;
-  pointer-events: none;
-  white-space: nowrap;
+.page {
+  padding: 24px;
+  background-color: #f5f7fb;
+  min-height: 100%;
 }
 
-.weights { margin-top: 12px; padding-top: 10px; border-top: 1px solid #dbe6ff; }
-.fast-select {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid #dbe6ff;
+/* Header */
+.header-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
 }
-.fast-select-head {
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a2f62;
+}
+
+.page-subtitle {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+/* Config Grid */
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.config-card {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.card-header-small {
   display: flex;
   align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 12px;
+}
+
+.flex-1 { flex: 1; }
+
+.filter-row-secondary {
+  display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+
+.preset-links {
+  margin-left: auto;
+  font-weight: normal;
+}
+
+.weight-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.weight-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.w-label { font-size: 12px; color: #64748b; font-weight: 600; }
+
+.weight-footer {
+  margin-top: 12px;
+  text-align: right;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* Tool Card */
+.tool-card {
+  margin-bottom: 20px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.tool-tabs {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.tool-section {
+  flex: 1;
+}
+
+.tool-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-actions {
+  display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.fast-select-title { font-weight: 700; color: #264181; }
-.fast-select-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.fast-select-meta { margin-top: 8px; color: #36527f; font-size: 13px; }
-.weights-title { font-weight: 700; margin-bottom: 8px; color: #264181; }
-.weights-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 10px 16px;
-  align-items: end;
-}
-.w-item { display: flex; gap: 10px; align-items: center; }
-.w-label { width: 140px; color: #334c7a; font-weight: 600; }
-.w-sum { grid-column: 1 / -1; color: #2e4775; }
 
-.recommend {
-  padding: 10px 12px;
-  border: 1px dashed #c7d9ff;
+.tool-label { font-size: 12px; color: #94a3b8; }
+
+.fast-res-container {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.mini-table {
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+}
+
+.rank-badge {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.rank-1 { background: #fef3c7; color: #92400e; }
+.rank-2 { background: #e2e8f0; color: #475569; }
+
+.fast-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+/* Results Layout */
+.results-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.recommendation-panel {
+  width: 100%;
+}
+
+.recommend-card {
+  background: #ffffff;
   border-radius: 10px;
-  background: #f7fbff;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+  color: #1f2937;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-.recommend-title { font-weight: 700; margin-bottom: 6px; color: #21407c; }
-.recommend-body { line-height: 1.6; color: #263a67; }
-.empty { margin-top: 12px; color: #5f7098; }
 
-:deep(.el-table) {
-  --el-table-text-color: #243965;
-  --el-table-header-text-color: #23478f;
+.recommend-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: #2f6bff;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-bottom-right-radius: 12px;
+  text-transform: uppercase;
+}
+
+.rec-algo {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.rec-reason {
+  margin: 8px 0 16px;
+  font-size: 14px;
+  color: #64748b;
+  max-width: 600px;
+}
+
+.rec-metrics {
+  display: flex;
+  gap: 20px;
+}
+
+.rec-m-item {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.rec-m-item span {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin-top: 4px;
+}
+
+.rec-m-item.score span {
+  color: #2f6bff;
+}
+
+/* Chart */
+.chart-card-wrapper {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chart-title-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.chart-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.chart-container {
+  position: relative;
+  width: 100%;
+  padding: 10px 0;
+}
+
+.main-canvas {
+  width: 100%;
+  height: 320px;
+  cursor: crosshair;
+}
+
+.canvas-tooltip {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.9);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+/* Table */
+.table-card-wrapper {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.table-title { font-weight: 700; color: #1e293b; }
+
+.table-score {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.table-reason {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.empty-state {
+  padding: 40px 0;
+}
+
+:deep(.el-card__header) {
+  padding: 12px 20px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
-  box-shadow: 0 0 0 1px #c9d8ff inset;
+  border-radius: 8px;
 }
 
-:deep(.el-checkbox__label) {
-  color: #2d4574;
+@media (max-width: 1024px) {
+  .config-grid { grid-template-columns: 1fr; }
+  .recommend-card { flex-direction: column; align-items: flex-start; gap: 20px; }
+  .export-actions { width: 100%; }
 }
 </style>

@@ -8,8 +8,8 @@
 
 ### 1.1 后端（Backend）
 - 目录：`backend/`
-- 技术栈：Python 3.x、FastAPI、Celery、Redis
-- 算法/指标：OpenCV、scikit-image、NumPy、SciPy
+- 技术栈：Python 3.x、FastAPI、Celery、Redis、OpenPyXL
+- 算法/指标：OpenCV、scikit-image、NumPy、SciPy、scikit-video
 - 关键文件：
   - `backend/app/main.py`：API 主入口
   - `backend/app/celery_app.py` / `backend/app/tasks.py`：异步任务执行
@@ -34,8 +34,15 @@
 - 关键文档：
   - `系统架构_流程_ER_实现说明.md`
   - `答辩交付_演示脚本_验收清单_论文章节映射.md`
+  - `导师演示_全流程操作手册.md`
   - `核心算法_快速选型模块说明.md`
   - `核心算法_快速选型_实验小节（可直接入论文）.md`
+  - `系统总测试表_验收版.md`
+  - `论文库盘点_已在库与待补充.md`
+  - `BULK_COMPARE_GUIDE.md`
+  - `ERROR_CODES.md`
+  - `EXPERIMENT_RECORD_FIELDS.md`
+  - `PROCESS_LOG.md`
 
 ## 3. 毕设目标与验收口径
 - 目标：完成图像/视频增强复原评测平台，支持快速选型与可追溯导出。
@@ -55,11 +62,13 @@
   - 重试与失败路径治理
   - run.record 上下文留痕
 - 推荐能力：
-  - Compare 权重推荐
-  - 核心算法 `POST /recommend/fast-select`（LinUCB）已接入主流程
+  - Compare 权重排序推荐与 XLSX/Markdown 报告导出
+  - 核心算法 `POST /recommend/fast-select`（LinUCB）已接入主流程，支持一键创建 Run
+  - `Algorithms.vue` 支持新手可视化/专业 JSON 双模式，集成一键应用预设参数
  - 工程治理：
   - `.gitattributes` 默认文本行尾统一为 LF（脚本文件除外）
   - `scripts/manual_up.ps1` + `scripts/start_docker_redis.ps1` 支持一键拉起 Docker/Redis 与 Backend/Worker/Web
+  - 新增 `docs/项目资料/` 目录沉淀接口与项目落地资料
 
 ## 4.1 开发启动（Dev Bootstrap）
 - Windows 推荐命令：
@@ -88,8 +97,15 @@
 | 2026-03-24 | 前端乱码批量修复 | 完成 views 与 api 相关乱码占位替换并复扫归零，前端构建验证通过 | 完成 |
 | 2026-03-24 | 编码防漂移加固 | 前端相关文件重写为 UTF-8+LF，并新增 VSCode 工作区编码固定配置 | 完成 |
 | 2026-03-27 | 一键启动脚本重建 | 新增 `scripts/start_docker_redis.ps1` 与 `scripts/manual_up.ps1/.cmd`，实现 Docker+Redis+Backend/Worker/Web 一键拉起 | 完成 |
+| 2026-03-28 | 后端文本编码防呆 | 修复数据集默认类型乱码为“图像”，并在数据集/算法/预设创建更新接口加入疑似乱码文本拦截（UTF-8 提示） | 完成 |
+| 2026-03-29 | 导师演示手册完善 | 新增 `docs/graduation/导师演示_全流程操作手册.md`，补齐从环境启动、主流程演示到异常兜底与收口交付的逐步操作文档 | 完成 |
+| 2026-03-29 | 项目资料目录新增 | 新增 `docs/项目资料/README.md` 与 `API接口逐项说明_按docs顺序.md`，沉淀接口用途与资料索引 | 完成 |
+| 2026-03-29 | 算法参数交互友好化 | `Algorithms.vue` 新增“新手可视化/专业JSON”双模式参数编辑，并提供推荐默认、稳妥模式、增强模式一键应用 | 完成 |
+| 2026-03-29 | 参数中文解释增强 | `Algorithms.vue` 新增参数中文名与用途说明面板，支持可视化逐项说明与 JSON 键自动解释，降低非算法用户使用门槛 | 完成 |
+| 2026-03-30 | 验收文档编制 | 完成 `系统总测试表_验收版.md`，覆盖 F-01~F-25 功能、R-01~R-05 真实性与 E-01~E-05 异常测试 | 完成 |
+| 2026-03-31 | 论文库同步与索引更新 | 完成 `论文库盘点_已在库与待补充.md` 梳理，明确 LinUCB 核心算法理论支撑文献补齐路径 | 完成 |
 
 ## 6. 当前待办（Todo）
-- [ ] 完成最终答辩演示彩排与故障预案回归
+- [ ] 完成最终答辩演示彩排与故障预案回归（按 `系统总测试表_验收版.md` 执行）
 - [ ] 完成论文正文第 1~6 章填充与图表定稿
-- [ ] 完成核心算法最终实验复跑并更新正式结论
+- [ ] 完成核心算法最终实验复跑并更新正式结论（结合 `论文库盘点` 补齐文献支撑）

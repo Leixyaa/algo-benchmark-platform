@@ -8,8 +8,20 @@ import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
+import { presetsApi } from "../api/presets";
+import http from "../api/http";
 
 const LS_KEY = "abp_state_v1";
+const LEGACY_LS_KEY = LS_KEY;
+const GUEST_SCOPE = "__guest__";
+
+function _scopeName(username) {
+  return String(username || "").trim() || GUEST_SCOPE;
+}
+
+function _scopedKey(username) {
+  return `${LS_KEY}:${_scopeName(username)}`;
+}
 
 // ====================== 任务类型统一映射（唯一真相） ======================
 export const TASK_LABEL_BY_TYPE = {
@@ -121,14 +133,18 @@ function repairLoadedState(state) {
   return { state: next, changed };
 }
 
-function loadState() {
+function loadState(username) {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const key = _scopedKey(username ?? localStorage.getItem("username"));
+    let raw = localStorage.getItem(key);
+    if (!raw && _scopeName(username ?? localStorage.getItem("username")) === GUEST_SCOPE) {
+      raw = localStorage.getItem(LEGACY_LS_KEY);
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const repaired = repairLoadedState(parsed);
     if (repaired.changed) {
-      localStorage.setItem(LS_KEY, JSON.stringify({ ...repaired.state, _savedAt: Date.now() }));
+      localStorage.setItem(key, JSON.stringify({ ...repaired.state, _savedAt: Date.now() }));
     }
     return repaired.state;
   } catch {
@@ -136,11 +152,12 @@ function loadState() {
   }
 }
 
-function saveState(partial) {
+function saveState(partial, username) {
   try {
-    const prev = loadState() || {};
+    const key = _scopedKey(username ?? localStorage.getItem("username"));
+    const prev = loadState(username) || {};
     const next = { ...prev, ...partial, _savedAt: Date.now() };
-    localStorage.setItem(LS_KEY, JSON.stringify(next));
+    localStorage.setItem(key, JSON.stringify(next));
   } catch {
     // ignore
   }
@@ -179,6 +196,7 @@ function nowStr() {
 
 function ensureBaselineAlgorithms(algs) {
   const list = Array.isArray(algs) ? algs.slice() : [];
+  return list;
   const byId = new Set(list.map((a) => a?.id).filter(Boolean));
   const add = (x) => {
     if (!x?.id) return;
@@ -295,6 +313,42 @@ function ensureBaselineAlgorithms(algs) {
     createdAt,
     defaultParams: { clahe_clip_limit: 2.5 },
   });
+  add({
+    id: "alg_video_denoise_gaussian",
+    task: "视频去噪",
+    name: "VideoGaussian(基线)",
+    impl: "OpenCV",
+    version: "v1",
+    createdAt,
+    defaultParams: { gaussian_sigma: 1.0 },
+  });
+  add({
+    id: "alg_video_denoise_median",
+    task: "视频去噪",
+    name: "VideoMedian(基线)",
+    impl: "OpenCV",
+    version: "v1",
+    createdAt,
+    defaultParams: { median_ksize: 3 },
+  });
+  add({
+    id: "alg_video_sr_bicubic",
+    task: "视频超分",
+    name: "VideoBicubic(基线)",
+    impl: "OpenCV",
+    version: "v1",
+    createdAt,
+    defaultParams: {},
+  });
+  add({
+    id: "alg_video_sr_lanczos",
+    task: "视频超分",
+    name: "VideoLanczos(基线)",
+    impl: "OpenCV",
+    version: "v1",
+    createdAt,
+    defaultParams: {},
+  });
 
   return list;
 }
@@ -310,26 +364,66 @@ const _pollTimers = new Map();
 
 export const useAppStore = defineStore("app", {
   state: () => {
-    const loaded = loadState();
-    return ({
-    // 你后面会把 dataset/algorithm 做成真正的管理功能；目前保留 Demo 数据以便流程可跑。
-    datasets: (loaded?.datasets?.length ? loaded.datasets : [
-      { id: "ds_demo", name: "Demo-样例数据集", type: "图像", size: "10 张", createdAt: nowStr() },
-    ]),
-
-    algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
-
-    
-
-    // 兼容保留：有些页面可能还在引用 tasks；阶段C 先不动它
-    tasks: [],
-
-    // 核心：runs 由后端 Redis/Celery 驱动
-    runs: loaded?.runs || [],
-  });
+    const loaded = loadState(localStorage.getItem("username"));
+    return {
+      // 用户状态
+      user: {
+        username: localStorage.getItem("username") || "",
+        token: localStorage.getItem("token") || "",
+        isLoggedIn: !!localStorage.getItem("token"),
+      },
+      // 数据资产
+      datasets: (loaded?.datasets?.length ? loaded.datasets : []),
+      algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
+      presets: loaded?.presets || [],
+      runs: loaded?.runs || [],
+      // 全局控制
+      loading: false,
+    };
   },
 
   actions: {
+    // --- 用户 Actions ---
+    async login(username, password) {
+      try {
+        const res = await http.post("/login", { username, password });
+        this.user.username = res.username;
+        this.user.token = res.access_token;
+        this.user.isLoggedIn = true;
+        localStorage.setItem("token", res.access_token);
+        localStorage.setItem("username", res.username);
+        const loaded = loadState(res.username) || {};
+        this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
+        this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.presets = loaded?.presets || [];
+        this.runs = loaded?.runs || [];
+        return true;
+      } catch (e) {
+        throw e;
+      }
+    },
+    async register(username, password) {
+      try {
+        await http.post("/register", { username, password });
+        return true;
+      } catch (e) {
+        throw e;
+      }
+    },
+    logout() {
+      this.stopPollingAll();
+      this.user.username = "";
+      this.user.token = "";
+      this.user.isLoggedIn = false;
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      const loaded = loadState(GUEST_SCOPE) || {};
+      this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
+      this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+      this.presets = loaded?.presets || [];
+      this.runs = loaded?.runs || [];
+    },
+
     // ====================== Catalog：数据集/算法（后端持久化） ======================
     async fetchDatasets(limit = 200) {
       const list = await datasetsApi.listDatasets({ limit });
@@ -341,7 +435,7 @@ export const useAppStore = defineStore("app", {
         createdAt: formatTs(x.created_at),
         raw: x,
       }));
-      this.datasets = mapped.length ? mapped : this.datasets;
+      this.datasets = mapped;
       saveState({ datasets: this.datasets });
       return this.datasets;
     },
@@ -356,11 +450,31 @@ export const useAppStore = defineStore("app", {
         version: x.version,
         createdAt: formatTs(x.created_at),
         defaultParams: x.default_params ?? {},
+        paramPresets: x.param_presets ?? {},
         raw: x,
       }));
-      this.algorithms = mapped.length ? ensureBaselineAlgorithms(mapped) : this.algorithms;
+      this.algorithms = ensureBaselineAlgorithms(mapped);
       saveState({ algorithms: this.algorithms });
       return this.algorithms;
+    },
+
+    async fetchPresets(limit = 200) {
+      const list = await presetsApi.listPresets({ limit });
+      const mapped = (list ?? []).map((x) => ({
+        id: x.preset_id,
+        name: x.name,
+        taskType: x.task_type,
+        datasetId: x.dataset_id,
+        algorithmId: x.algorithm_id,
+        metrics: Array.isArray(x.metrics) ? x.metrics : [],
+        params: x.params ?? {},
+        createdAt: formatTs(x.created_at),
+        updatedAt: formatTs(x.updated_at),
+        raw: x,
+      }));
+      this.presets = mapped;
+      saveState({ presets: this.presets });
+      return this.presets;
     },
 
     async createDataset(payload) {
@@ -462,6 +576,7 @@ export const useAppStore = defineStore("app", {
         version: out.version,
         createdAt: formatTs(out.created_at),
         defaultParams: out.default_params ?? {},
+        paramPresets: out.param_presets ?? {},
         raw: out,
       };
       const idx = this.algorithms.findIndex((a) => a.id === alg.id);
@@ -472,8 +587,51 @@ export const useAppStore = defineStore("app", {
       return alg;
     },
 
+    async createPreset(payload) {
+      const out = await presetsApi.createPreset({
+        preset_id: payload?.id,
+        name: payload?.name,
+        task_type: payload?.taskType || toTaskType(payload?.task),
+        dataset_id: payload?.datasetId,
+        algorithm_id: payload?.algorithmId,
+        metrics: Array.isArray(payload?.metrics) ? payload.metrics : [],
+        params: payload?.params ?? {},
+      });
+      const p = {
+        id: out.preset_id,
+        name: out.name,
+        taskType: out.task_type,
+        datasetId: out.dataset_id,
+        algorithmId: out.algorithm_id,
+        metrics: Array.isArray(out.metrics) ? out.metrics : [],
+        params: out.params ?? {},
+        createdAt: formatTs(out.created_at),
+        updatedAt: formatTs(out.updated_at),
+        raw: out,
+      };
+      const idx = this.presets.findIndex((x) => x.id === p.id);
+      if (idx === -1) this.presets.unshift(p);
+      else this.presets[idx] = { ...this.presets[idx], ...p };
+      saveState({ presets: this.presets });
+      return p;
+    },
+
+    async removePreset(id) {
+      await presetsApi.deletePreset(id);
+      const idx = this.presets.findIndex((x) => x.id === id);
+      if (idx >= 0) this.presets.splice(idx, 1);
+      saveState({ presets: this.presets });
+    },
+
     async updateAlgorithm(id, patch) {
-      const out = await algorithmsApi.patchAlgorithm(id, patch);
+      const out = await algorithmsApi.patchAlgorithm(id, {
+        task: patch?.task,
+        name: patch?.name,
+        impl: patch?.impl,
+        version: patch?.version,
+        default_params: patch?.defaultParams,
+        param_presets: patch?.paramPresets,
+      });
       const alg = {
         id: out.algorithm_id,
         task: out.task,
@@ -482,6 +640,7 @@ export const useAppStore = defineStore("app", {
         version: out.version,
         createdAt: formatTs(out.created_at),
         defaultParams: out.default_params ?? {},
+        paramPresets: out.param_presets ?? {},
         raw: out,
       };
       const idx = this.algorithms.findIndex((a) => a.id === id);
@@ -497,6 +656,13 @@ export const useAppStore = defineStore("app", {
       if (idx >= 0) this.algorithms.splice(idx, 1);
       this.algorithms = ensureBaselineAlgorithms(this.algorithms);
       saveState({ algorithms: this.algorithms });
+    },
+
+    async resetUserAlgorithms() {
+      await algorithmsApi.resetUserAlgorithms();
+      await this.fetchAlgorithms();
+      saveState({ algorithms: this.algorithms });
+      return this.algorithms;
     },
 
 

@@ -13,5 +13,7 @@ export const algorithmsApi = {
   async deleteAlgorithm(algorithmId) {
     return request(`/algorithms/${algorithmId}`, { method: "DELETE" });
   },
+  async resetUserAlgorithms() {
+    return request("/algorithms/reset_user", { method: "POST" });
+  },
 };
-

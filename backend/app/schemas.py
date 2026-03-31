@@ -19,6 +19,7 @@ class RunOut(BaseModel):
     task_type: str
     dataset_id: str
     algorithm_id: str
+    owner_id: Optional[str] = "system"
     strict_validate: bool = False
     record: Dict[str, Any] = Field(default_factory=dict)
 
@@ -38,7 +39,7 @@ class RunOut(BaseModel):
 class DatasetCreate(BaseModel):
     dataset_id: Optional[str] = None
     name: str
-    type: str = "???"
+    type: str = "图像"
     size: str = "-"
 
 
@@ -53,6 +54,7 @@ class DatasetOut(BaseModel):
     name: str
     type: str
     size: str
+    owner_id: Optional[str] = "system"
     created_at: float
     meta: Dict[str, Any] = Field(default_factory=dict)
 
@@ -88,6 +90,7 @@ class AlgorithmOut(BaseModel):
     name: str
     impl: str
     version: str
+    owner_id: Optional[str] = "system"
     created_at: float
     default_params: Dict[str, Any] = Field(default_factory=dict)
     param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -118,6 +121,7 @@ class PresetOut(BaseModel):
     task_type: str
     dataset_id: str
     algorithm_id: str
+    owner_id: Optional[str] = "system"
     metrics: List[str] = Field(default_factory=list)
     params: Dict[str, Any] = Field(default_factory=dict)
     created_at: float
@@ -156,3 +160,19 @@ class FastSelectResponse(BaseModel):
     reward_formula: str
     context: Dict[str, Any] = Field(default_factory=dict)
     recommendations: List[FastSelectItem] = Field(default_factory=list)
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    username: str
+    created_at: float
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    username: str

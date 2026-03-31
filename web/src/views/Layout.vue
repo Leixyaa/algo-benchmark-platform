@@ -20,9 +20,27 @@
 
     <el-container class="mainWrap">
       <el-header class="topbar">
-        <div>
+        <div class="headerLeft">
           <div class="topTitle">{{ title }}</div>
           <div class="topSub">图像与视频增强 · 评测 · 对比 · 导出</div>
+        </div>
+        
+        <div class="headerRight">
+          <el-dropdown v-if="store.user.isLoggedIn">
+            <span class="user-info">
+              <el-avatar :size="32" icon="UserFilled" />
+              <span class="username">{{ store.user.username }}</span>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="handleLogout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <div v-else class="guest-actions">
+            <el-button type="primary" size="small" @click="$router.push('/login')">登录</el-button>
+            <el-button size="small" plain @click="$router.push('/register')">注册</el-button>
+          </div>
         </div>
       </el-header>
 
@@ -36,11 +54,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "../stores/app";
+import { ElMessage } from "element-plus";
 
 const route = useRoute();
+const router = useRouter();
 const store = useAppStore();
 
 const active = computed(() => route.path);
@@ -54,6 +74,17 @@ const title = computed(() => {
     "/compare": "结果对比",
   };
   return map[route.path] ?? "算法评测平台";
+});
+
+async function handleLogout() {
+  store.logout();
+  ElMessage.success("已退出登录");
+  router.push("/login");
+}
+
+// 监听登录状态变化，重新拉取数据
+watch(() => store.user.isLoggedIn, async () => {
+  await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
 });
 
 onMounted(async () => {
@@ -73,8 +104,8 @@ onMounted(async () => {
 
 .sidebar {
   border-right: 1px solid #dbe6ff;
-  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
-  box-shadow: 2px 0 16px rgba(33, 89, 201, 0.08);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .brand {
@@ -91,8 +122,8 @@ onMounted(async () => {
   display: grid;
   place-items: center;
   color: #ffffff;
-  background: linear-gradient(135deg, #2f6bff 0%, #28c4ff 100%);
-  box-shadow: 0 8px 16px rgba(47, 107, 255, 0.3);
+  background: #2f6bff;
+  box-shadow: none;
 }
 
 .brandTitle {
@@ -119,7 +150,7 @@ onMounted(async () => {
 :deep(.el-menu-item.is-active) {
   color: #2153d3;
   font-weight: 700;
-  background: linear-gradient(90deg, rgba(47, 107, 255, 0.14) 0%, rgba(43, 197, 255, 0.08) 100%);
+  background: rgba(47, 107, 255, 0.1);
 }
 
 .mainWrap {
@@ -130,9 +161,36 @@ onMounted(async () => {
   height: 72px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
   border-bottom: 1px solid #dce7ff;
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(8px);
+  background: #ffffff;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.user-info:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.username {
+  font-size: 14px;
+  color: #1d3263;
+  font-weight: 500;
 }
 
 .topTitle {
@@ -148,16 +206,16 @@ onMounted(async () => {
 }
 
 .main {
-  padding: 16px;
+  padding: 0;
 }
 
 .contentCard {
-  height: calc(100vh - 108px);
+  height: calc(100vh - 72px);
   overflow: auto;
-  border-radius: 14px;
-  padding: 16px;
-  border: 1px solid #dbe6ff;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 16px 30px rgba(33, 89, 201, 0.08);
+  border-radius: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 </style>

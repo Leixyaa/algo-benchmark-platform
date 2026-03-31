@@ -6,8 +6,12 @@ import Algorithms from "../views/Algorithms.vue";
 import NewRun from "../views/NewRun.vue";
 import Compare from "../views/Compare.vue";
 import Runs from "../views/Runs.vue";
+import Login from "../views/Login.vue";
+import Register from "../views/Register.vue";
 
 const routes = [
+  { path: "/login", component: Login },
+  { path: "/register", component: Register },
   {
     path: "/",
     component: Layout,
@@ -16,7 +20,6 @@ const routes = [
       { path: "datasets", component: Datasets },
       { path: "algorithms", component: Algorithms },
       { path: "new-run", component: NewRun },
-      { path: "tasks", component: Runs },
       { path: "compare", component: Compare },
       { path: "/runs", name: "Runs", component: Runs },
     ],

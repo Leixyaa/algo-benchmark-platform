@@ -1,7 +1,7 @@
 // web/src/api/http.js
 // 通用 HTTP 请求封装：自动拼 query，JSON 请求与错误透传
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 /**
  * @param {string} path 例如 "/runs"
@@ -16,15 +16,29 @@ export async function request(path, { method = "GET", query, body } = {}) {
     }
   }
 
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  const token = localStorage.getItem("token");
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(url.toString(), {
     method,
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      const hadToken = !!localStorage.getItem("token");
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      if (hadToken && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
     let data = null;
     let detail = "";
     try {
@@ -52,3 +66,11 @@ export async function request(path, { method = "GET", query, body } = {}) {
   if (!text) return null;
   return JSON.parse(text);
 }
+
+// 导出便捷方法
+export default {
+  get: (path, query) => request(path, { method: "GET", query }),
+  post: (path, body) => request(path, { method: "POST", body }),
+  patch: (path, body) => request(path, { method: "PATCH", body }),
+  delete: (path) => request(path, { method: "DELETE" }),
+};

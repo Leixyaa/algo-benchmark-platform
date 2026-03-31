@@ -277,7 +277,7 @@ def _compute_run_for_task_from_pairs(
         if strict_validate:
             raise RunFailed(
                 err.E_READ_IMAGE_FAIL,
-                "??????????????????",
+                "数据集样本读取失败，无法计算有效指标",
                 {"pair_used": len(pairs), "read_ok": read_ok, "read_fail": read_fail},
             )
         remain = min_demo_seconds - (time.time() - demo_start)
@@ -381,7 +381,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
-        run["error"] = "?????"
+        run["error"] = "任务已取消"
         run["error_code"] = err.E_CANCELED
         run["error_detail"] = None
         _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
@@ -698,7 +698,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             if strict_validate:
                 raise RunFailed(
                     err.E_DATASET_NO_PAIR,
-                    "???????????????????????????? gt/ ???????????????",
+                    "数据集当前任务无可用配对，请检查 gt 与输入目录是否同名对应",
                     {"task_type": task_type, "dataset_id": dataset_id, "expected_input_dir": input_dirname},
                 )
 
@@ -794,7 +794,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["status"] = "canceled"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or finished), 3)
-        run["error"] = "?????"
+        run["error"] = "任务已取消"
         run["error_code"] = err.E_CANCELED
         run["error_detail"] = None
         _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
