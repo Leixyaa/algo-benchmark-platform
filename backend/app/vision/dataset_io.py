@@ -37,7 +37,20 @@ def _pair_token(name: str) -> str:
     stem = Path(name).stem.strip().lower()
     if not stem:
         return ""
-    # 保留字母数字字符，同时允许一些常见的分隔符
+    # 保留字母数字字符，移除常见的后缀和前缀
+    # 移除常见的GT后缀
+    stem = re.sub(r"_gt$", "", stem)
+    stem = re.sub(r"_groundtruth$", "", stem)
+    stem = re.sub(r"_reference$", "", stem)
+    # 移除常见的输入前缀
+    stem = re.sub(r"^input_", "", stem)
+    stem = re.sub(r"^src_", "", stem)
+    # 提取核心数字部分（处理类似1966_0.9_0.08这样的格式）
+    # 尝试匹配连续的数字
+    number_match = re.search(r'\d+', stem)
+    if number_match:
+        return number_match.group(0)
+    # 如果没有数字，移除所有非字母数字字符
     return re.sub(r"[^a-z0-9]+", "", stem)
 
 
@@ -70,6 +83,11 @@ def _fuzzy_match_score(a: str, b: str) -> int:
     # 计算匹配得分：(LCS长度) / max(A长度, B长度) * 10000
     # 这样如果一个是另一个的子序列，得分就是其在较长者中的占比
     score = (lcs_len * 10000) // max(m, n)
+    
+    # 对于较短的字符串，降低匹配阈值
+    if max(m, n) < 5 and lcs_len >= 2:
+        score = max(score, 3000)
+        
     return score
 
 
@@ -98,10 +116,9 @@ def _best_fuzzy_match(input_name: str, gt_candidates: set[str]) -> str | None:
             if score > best_score:
                 best_score = score
                 best_name = g
-    
-    # 设定最低匹配阈值。3000 表示大约 30% 的相似度，这在文件名匹配中通常是安全的
-    # 尤其能处理 1.png 与 1_gt.png 的情况（1/3 = 33%）
-    if best_score < 3000:
+                
+    # 降低匹配阈值，提高匹配成功率
+    if best_score < 2000:
         return None
         
     return best_name
@@ -109,20 +126,41 @@ def _best_fuzzy_match(input_name: str, gt_candidates: set[str]) -> str | None:
 
 def find_paired_images(
     data_root: Path,
+    owner_id: str,
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
     limit: int = 5,
 ) -> List[PairedImage]:
     """
-    ?? backend/data/<dataset_id>/<input_dirname> ?? <gt_dirname> ?????????????
-    - ????? limit ??
-    - ?????????? []
+    在 `backend/data/<owner_id>/<dataset_id>/<input_dirname>` 与 GT 目录间查找可用配对。
+    - 最多返回 `limit` 对样本。
+    - 目录不存在或无法配对时返回空列表。
     """
-    ds_dir = data_root / dataset_id
+    # 尝试使用用户独有的目录结构
+    user_dir = data_root / owner_id
+    ds_dir = user_dir / dataset_id
+    
+    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    if not ds_dir.exists():
+        ds_dir = data_root / dataset_id
+    
     input_dir = ds_dir / input_dirname
     gt_dir = ds_dir / gt_dirname
-    if not input_dir.exists() or not gt_dir.exists():
+    
+    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
+    if not gt_dir.exists():
+        possible_gt_dirs = ["groundtruth", "reference", "target"]
+        for dir_name in possible_gt_dirs:
+            alt_gt_dir = ds_dir / dir_name
+            if alt_gt_dir.exists():
+                gt_dir = alt_gt_dir
+                break
+        else:
+            # 没有找到GT目录
+            return []
+    
+    if not input_dir.exists():
         return []
 
     input_files = [p for p in input_dir.rglob("*") if _is_img(p)]
@@ -154,20 +192,41 @@ def find_paired_images(
     return pairs
 
 
-def find_dehaze_pairs(data_root: Path, dataset_id: str, limit: int = 5) -> List[PairedImage]:
-    return find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt", limit=limit)
+def find_dehaze_pairs(data_root: Path, owner_id: str, dataset_id: str, limit: int = 5) -> List[PairedImage]:
+    return find_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt", limit=limit)
 
 
 def count_paired_images(
     data_root: Path,
+    owner_id: str,
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
 ) -> int:
-    ds_dir = data_root / dataset_id
+    # 尝试使用用户独有的目录结构
+    user_dir = data_root / owner_id
+    ds_dir = user_dir / dataset_id
+    
+    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    if not ds_dir.exists():
+        ds_dir = data_root / dataset_id
+    
     input_dir = ds_dir / input_dirname
     gt_dir = ds_dir / gt_dirname
-    if not input_dir.exists() or not gt_dir.exists():
+    
+    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
+    if not gt_dir.exists():
+        possible_gt_dirs = ["groundtruth", "reference", "target"]
+        for dir_name in possible_gt_dirs:
+            alt_gt_dir = ds_dir / dir_name
+            if alt_gt_dir.exists():
+                gt_dir = alt_gt_dir
+                break
+        else:
+            # 没有找到GT目录
+            return 0
+    
+    if not input_dir.exists():
         return 0
 
     gt_keys = {_pair_token(p.name) for p in gt_dir.rglob("*") if _is_img(p)}
@@ -189,15 +248,36 @@ def count_paired_images(
 
 def find_paired_videos(
     data_root: Path,
+    owner_id: str,
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
     limit: int = 5,
 ) -> List[PairedVideo]:
-    ds_dir = data_root / dataset_id
+    # 尝试使用用户独有的目录结构
+    user_dir = data_root / owner_id
+    ds_dir = user_dir / dataset_id
+    
+    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    if not ds_dir.exists():
+        ds_dir = data_root / dataset_id
+    
     input_dir = ds_dir / input_dirname
     gt_dir = ds_dir / gt_dirname
-    if not input_dir.exists() or not gt_dir.exists():
+    
+    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
+    if not gt_dir.exists():
+        possible_gt_dirs = ["groundtruth", "reference", "target"]
+        for dir_name in possible_gt_dirs:
+            alt_gt_dir = ds_dir / dir_name
+            if alt_gt_dir.exists():
+                gt_dir = alt_gt_dir
+                break
+        else:
+            # 没有找到GT目录
+            return []
+    
+    if not input_dir.exists():
         return []
 
     input_files = [p for p in input_dir.rglob("*") if _is_video(p)]
@@ -230,14 +310,35 @@ def find_paired_videos(
 
 def count_paired_videos(
     data_root: Path,
+    owner_id: str,
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
 ) -> int:
-    ds_dir = data_root / dataset_id
+    # 尝试使用用户独有的目录结构
+    user_dir = data_root / owner_id
+    ds_dir = user_dir / dataset_id
+    
+    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    if not ds_dir.exists():
+        ds_dir = data_root / dataset_id
+    
     input_dir = ds_dir / input_dirname
     gt_dir = ds_dir / gt_dirname
-    if not input_dir.exists() or not gt_dir.exists():
+    
+    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
+    if not gt_dir.exists():
+        possible_gt_dirs = ["groundtruth", "reference", "target"]
+        for dir_name in possible_gt_dirs:
+            alt_gt_dir = ds_dir / dir_name
+            if alt_gt_dir.exists():
+                gt_dir = alt_gt_dir
+                break
+        else:
+            # 没有找到GT目录
+            return 0
+    
+    if not input_dir.exists():
         return 0
 
     gt_keys = {_pair_token(p.name) for p in gt_dir.rglob("*") if _is_video(p)}

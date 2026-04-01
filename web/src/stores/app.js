@@ -704,15 +704,30 @@ export const useAppStore = defineStore("app", {
      * @param {number} limit
      */
     async fetchRuns(limit = 200) {
-      const list = await runsApi.listRuns({ limit });
-      const mapped = (list ?? []).map((x) => this._mapRunOut(x));
+      if (!this.user.isLoggedIn) {
+        // 未登录用户清空任务列表
+        this.runs = [];
+        saveState({ runs: this.runs });
+        return;
+      }
+      try {
+        const list = await runsApi.listRuns({ limit });
+        const mapped = (list ?? []).map((x) => this._mapRunOut(x));
 
-      // 覆盖式同步：以 Redis 为准
-      this.runs = mapped;
-      saveState({ runs: this.runs });
-      // 对未结束的 run 自动补轮询
-      for (const r of this.runs) {
-        if (!isTerminal(r.status)) this.startPolling(r.id);
+        // 覆盖式同步：以 Redis 为准
+        this.runs = mapped;
+        saveState({ runs: this.runs });
+        // 对未结束的 run 自动补轮询
+        for (const r of this.runs) {
+          if (!isTerminal(r.status)) this.startPolling(r.id);
+        }
+      } catch (error) {
+        if (error?.response?.status === 401) {
+          // 认证失败，清空任务列表
+          this.runs = [];
+          saveState({ runs: this.runs });
+        }
+        throw error;
       }
     },
 

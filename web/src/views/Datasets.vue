@@ -10,11 +10,11 @@
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" icon="Plus" @click="openCreate">新建数据集</el-button>
-          <el-button icon="Folder" @click="quickAddFromDisk">按ID登记磁盘目录</el-button>
-          <el-button icon="Upload" @click="chooseZipForNew">导入 ZIP</el-button>
+          <el-button type="primary" class="centered-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">新建数据集</el-button>
+          <el-button class="centered-btn" @click="quickAddFromDisk" :disabled="!store.user.isLoggedIn">按ID登记磁盘目录</el-button>
+          <el-button class="centered-btn" @click="chooseZipForNew" :disabled="!store.user.isLoggedIn">导入 ZIP</el-button>
         </div>
-        <el-button icon="QuestionFilled" @click="showDatasetLayoutGuide" class="guide-btn">目录规范说明</el-button>
+        <el-button @click="showDatasetLayoutGuide" class="guide-btn centered-btn">目录规范说明</el-button>
       </div>
 
       <div class="selector-row">
@@ -25,7 +25,13 @@
           </el-select>
           <el-checkbox v-model="overwriteOnImport" label="导入时覆盖原数据" class="checkbox" />
         </div>
-        <el-button type="success" :loading="scanningDatasets.has(selectedDatasetId)" @click="scanCurrent" icon="Refresh" class="scan-btn">
+        <el-button
+          type="success"
+          :loading="selectedDatasetExists && scanningDatasets.has(selectedDatasetId)"
+          @click="scanCurrent"
+          class="scan-btn centered-btn"
+          :disabled="!store.user.isLoggedIn || !selectedDatasetExists"
+        >
           {{ scanningDatasets.has(selectedDatasetId) ? '扫描中...' : '扫描当前数据集' }}
         </el-button>
       </div>
@@ -43,18 +49,18 @@
       <el-table-column label="操作" width="120">
         <template #default="{ row }">
           <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
-            <el-button size="small" :loading="scanningDatasets.has(row.id)">
+            <el-button size="small" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
               管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="scan" icon="Refresh" :disabled="scanningDatasets.has(row.id)">
+                <el-dropdown-item command="scan" icon="Refresh" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
                   扫描统计
                 </el-dropdown-item>
-                <el-dropdown-item command="zip" icon="Upload" :disabled="scanningDatasets.has(row.id)">
+                <el-dropdown-item command="zip" icon="Upload" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
                   导入 ZIP
                 </el-dropdown-item>
-                <el-dropdown-item command="delete" divided icon="Delete" type="danger" :disabled="scanningDatasets.has(row.id)">
+                <el-dropdown-item command="delete" divided icon="Delete" type="danger" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
                   删除
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -86,15 +92,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="closeCreate">取消</el-button>
-        <el-button type="primary" @click="submitCreate">确认创建</el-button>
+        <el-button class="centered-btn" @click="closeCreate">取消</el-button>
+        <el-button type="primary" class="centered-btn" @click="submitCreate">确认创建</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useAppStore } from "../stores/app";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
@@ -113,6 +119,10 @@ const form = reactive({
   size: "",
 });
 
+const selectedDatasetExists = computed(() =>
+  (store.datasets || []).some((d) => d.id === selectedDatasetId.value)
+);
+
 onMounted(async () => {
   try {
     await store.fetchDatasets();
@@ -123,6 +133,17 @@ onMounted(async () => {
     // ignore
   }
 });
+
+watch(
+  () => store.datasets,
+  (datasets) => {
+    const exists = (datasets || []).some((d) => d.id === selectedDatasetId.value);
+    if (!exists) {
+      selectedDatasetId.value = "";
+    }
+  },
+  { deep: true }
+);
 
 function openCreate() {
   form.id = "";
@@ -202,7 +223,20 @@ async function submitCreate() {
       ElMessage({ type: "error", message: `创建数据集失败：${e?.message || e}` });
       return;
     }
-    createdDsId = wantedId;
+    // 数据集已存在，检查是否属于当前用户
+    try {
+      const datasets = await store.fetchDatasets();
+      const existingDataset = datasets.find(ds => ds.id === wantedId);
+      if (!existingDataset) {
+        ElMessage({ type: "error", message: "数据集不存在或不属于当前用户，请重新创建" });
+        return;
+      }
+      // 继续执行，因为数据集存在且属于当前用户
+      createdDsId = wantedId;
+    } catch (e) {
+      ElMessage({ type: "error", message: `获取数据集列表失败：${e?.message || e}` });
+      return;
+    }
   }
   const finalId = createdDsId;
   if (!finalId) {
@@ -324,6 +358,9 @@ async function remove(id) {
   }
   try {
     await store.removeDataset(id);
+    if (selectedDatasetId.value === id) {
+      selectedDatasetId.value = "";
+    }
   } catch (e) {
     ElMessage({ type: "error", message: `删除失败：${e?.message || e}` });
   }
@@ -374,8 +411,16 @@ function _ensureFileInput() {
       ElMessage({ type: "info", message: "正在导入 ZIP，请稍候..." });
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`http://127.0.0.1:8000/datasets/${encodeURIComponent(dsId)}/import_zip_file?overwrite=${overwriteOnImport.value ? "true" : "false"}`, {
+      // 使用 request 函数来导入 ZIP 文件，这样会自动传递认证令牌
+      const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+      const token = localStorage.getItem("token");
+      const headers = {}
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/datasets/${encodeURIComponent(dsId)}/import_zip_file?overwrite=${overwriteOnImport.value ? "true" : "false"}`, {
         method: "POST",
+        headers,
         body: fd,
       });
       const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -553,6 +598,20 @@ async function scanCurrent() {
   font-size: 14px;
   line-height: 1.6;
   max-width: 800px;
+}
+
+.centered-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.centered-btn > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .action-bar {

@@ -1,92 +1,35 @@
-# 项目系统功能总览（快速了解版）
+# 项目系统功能总览
 
-## 1. 一句话说明
+## 一句话说明
+这是一个面向图像与视频增强/复原任务的算法评测平台，目标是实现“可复现、可解释、可导出”的完整评测闭环。
 
-这是一个面向图像/视频增强与复原任务的算法评测平台，支持从数据集管理、算法管理、Run 执行、指标对比到导出汇报的完整闭环。
+## 主线闭环
+数据集管理 -> 算法管理 -> 创建 Run -> Celery 异步执行 -> 指标计算 -> Compare 对比推荐 -> CSV/XLSX/Markdown 导出
 
-## 2. 系统能做什么
+## 已支持任务
+- 图像任务：`denoise`、`deblur`、`dehaze`、`sr`、`lowlight`
+- 视频任务：`video_denoise`、`video_sr`
 
-- 支持任务：`denoise / deblur / dehaze / sr / lowlight / video_denoise / video_sr`
-- 支持对象管理：数据集、算法、参数预设
-- 支持执行链路：创建 Run、异步执行、状态跟踪、取消、失败重试
-- 支持评测指标：PSNR、SSIM、NIQE（含耗时信息）
-- 支持对比推荐：Compare 页面权重推荐 + 核心算法快速选型（增强版 LinUCB）
-- 支持结果导出：CSV、XLSX、Markdown
+## 核心能力
+- 数据集扫描、目录配对、strict_validate 校验
+- 算法配置、默认参数、参数预设与方案复用
+- Run 生命周期管理：排队、执行、取消、失败回写、记录留痕
+- 指标计算：PSNR、SSIM、NIQE
+- Compare 加权排序推荐
+- LinUCB 快速选型与一键创建 Run
+- CSV / XLSX / Markdown 导出
 
-## 3. 系统架构（分层）
+## 2026-04-01 本轮更新
+- 修复 `NewRun` 预设指标高亮回显。
+- 修复 `Compare.vue` 重复声明导致的编译报错。
+- 后端执行链路改为真正按所选指标计算。
+- Compare 批量/快速选型创建 Run 改为按参数指纹判重。
+- 导出请求统一纳入 `authFetch` 处理。
+- 核心入口与主展示页完成模板层和主要脚本提示文案清洗，`Runs / Compare` 的状态、导出、图表与评分提示已统一为正常中文。
+- 全任务类型基线算法目录扩充为多组可运行变体，`Compare` 与 `Algorithms` 页面可直接展示并批量创建更丰富的正式对比实验。
 
-- **Web 前端（Vue3 + Vite + Pinia）**
-  - 页面：Datasets / Algorithms / NewRun / Runs / Compare
-- **API 层（FastAPI）**
-  - 负责参数校验、任务编排、查询与导出
-- **任务执行层（Celery Worker）**
-  - 负责算法执行与指标计算
-- **存储层（Redis）**
-  - 存储 run/dataset/algorithm/preset 与在线 bandit 模型
-
-## 4. 核心功能模块
-
-### 4.1 数据集管理
-
-- 新建、更新、删除、扫描
-- 维护数据集 `meta`（任务支持、目录计数、配对计数）
-- strict 校验时用于判断是否允许创建 Run
-
-### 4.2 算法管理
-
-- 新建、更新、删除算法
-- 维护算法任务归属与默认参数
-- 内置算法只读，用户算法用于沉淀参数方案
-- “系统内置默认参数”作为统一参数基线
-
-### 4.3 Run 执行与任务中心
-
-- 创建 Run（支持 strict\_validate）
-- NewRun 仅选择平台内置算法种类；用户差异通过参数方案体现
-- 状态机：`queued -> running -> done/failed`，并支持 `canceling/canceled`
-- Worker 写回 `record`（资源、重试、数据模式、时序等）
-- 失败路径输出结构化错误码
-
-### 4.4 对比分析与导出
-
-- Compare 支持多指标归一化加权排序
-- 支持批量创建基线 Run 与批次追踪
-- 导出推荐结果与结论文档（CSV/XLSX/Markdown）
-
-### 4.5 核心算法模块（快速选型）
-
-- 方法：增强版 Contextual Bandit（LinUCB）
-- 机制：时间衰减、冷启动补偿、低样本惩罚、可靠度门控
-- 在线学习：Run 完成后增量更新模型，推荐优先读取在线模型
-- 输出：`score/expected_reward/uncertainty/reliability` 等可解释字段
-
-## 5. 关键业务流程（端到端）
-
-1. 在 Datasets 导入/扫描数据集，形成可用任务配对信息
-2. 在 Algorithms 维护内置算法基线与用户参数方案
-3. 在 NewRun 选择内置算法种类 + 参数方案创建 Run
-4. Worker 异步执行并写回指标与记录
-5. 在 Runs/Compare 查看结果、筛选、推荐
-6. 导出结论用于汇报与论文材料
-
-## 6. 快速启动（Windows）
-
-- 标准一键联调：`.\scripts\dev.cmd up`
-- 外部 Redis 快速模式（手动开 Docker 后，一键启动 Backend/Worker/Web）：`.\scripts\dev.cmd up -ExternalRedis`
-- 兼容直启命令（自动拉起 Docker+Redis，并打开三个 PowerShell）：`powershell -ExecutionPolicy Bypass -File .\scripts\manual_up.ps1`
-- 停止：`.\scripts\dev.cmd down`
-- 重启并安装依赖：`.\scripts\dev.cmd restart -InstallDeps`
-- 说明：
-  - 一键脚本会优先复用已存在的 `algo-redis` 容器，减少冷启动耗时
-  - 若只需手动控制 Docker，使用 `-ExternalRedis` 可避免脚本等待 Docker daemon
-- 访问：
-  - API 文档：`http://127.0.0.1:8000/docs`
-  - Web 页面：`http://localhost:5173/`
-
-## 7. 建议先读的文档
-
-- 系统设计总说明：`docs/graduation/系统架构_流程_ER_实现说明.md`
-- 核心算法说明：`docs/graduation/核心算法_快速选型模块说明.md`
-- 字段口径说明：`docs/graduation/EXPERIMENT_RECORD_FIELDS.md`
-- 错误码说明：`docs/graduation/ERROR_CODES.md`
-- 文献补库清单：`docs/graduation/论文库盘点_已在库与待补充.md`
+## 建议优先阅读
+- `docs/graduation/系统架构_流程_ER_实现说明.md`
+- `docs/graduation/导师演示_全流程操作手册.md`
+- `docs/graduation/系统总测试表_验收版.md`
+- `docs/graduation/PROCESS_LOG.md`

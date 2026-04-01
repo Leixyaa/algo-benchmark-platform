@@ -2,7 +2,7 @@
   <el-container class="shell">
     <el-aside width="236px" class="sidebar">
       <div class="brand">
-        <div class="brandIcon">◈</div>
+        <div class="brandIcon">V</div>
         <div>
           <div class="brandTitle">图像算法评测平台</div>
           <div class="brandSub">Image Benchmark Studio</div>
@@ -24,7 +24,7 @@
           <div class="topTitle">{{ title }}</div>
           <div class="topSub">图像与视频增强 · 评测 · 对比 · 导出</div>
         </div>
-        
+
         <div class="headerRight">
           <el-dropdown v-if="store.user.isLoggedIn">
             <span class="user-info">
@@ -82,10 +82,12 @@ async function handleLogout() {
   router.push("/login");
 }
 
-// 监听登录状态变化，重新拉取数据
-watch(() => store.user.isLoggedIn, async () => {
-  await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
-});
+watch(
+  () => store.user.isLoggedIn,
+  async () => {
+    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+  }
+);
 
 onMounted(async () => {
   try {
@@ -124,6 +126,7 @@ onMounted(async () => {
   color: #ffffff;
   background: #2f6bff;
   box-shadow: none;
+  font-weight: 700;
 }
 
 .brandTitle {

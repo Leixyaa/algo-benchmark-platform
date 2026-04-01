@@ -49,12 +49,37 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
     return {"PSNR": psnr, "SSIM": ssim, "NIQE": niqe}
 
 
+ALLOWED_METRICS = ("PSNR", "SSIM", "NIQE")
+
+
+def _normalize_selected_metrics(params: dict[str, Any] | None) -> list[str]:
+    src = params if isinstance(params, dict) else {}
+    raw = src.get("metrics")
+    if not isinstance(raw, list):
+        return list(ALLOWED_METRICS)
+    out: list[str] = []
+    for item in raw:
+        name = str(item or "").strip().upper()
+        if name in ALLOWED_METRICS and name not in out:
+            out.append(name)
+    return out or list(ALLOWED_METRICS)
+
+
+def _filter_metrics(metrics: dict[str, float], selected_metrics: list[str]) -> dict[str, float]:
+    wanted = set(selected_metrics or ALLOWED_METRICS)
+    return {k: v for k, v in metrics.items() if k in wanted}
+
+
+def _filter_sample_metrics(sample: dict[str, Any], selected_metrics: list[str]) -> dict[str, Any]:
+    wanted = set(selected_metrics or ALLOWED_METRICS)
+    return {k: v for k, v in sample.items() if k == "name" or k in wanted}
+
+
 
 def _make_synthetic_dehaze_pair(h: int = 360, w: int = 640) -> tuple[np.ndarray, np.ndarray]:
     """
-    ??????????????????GT ?? Hazy?????????????????????
-    GT: ??????? + ????
-    Hazy: I = J * t + A * (1 - t)
+    构造一组可复现的合成去雾样本，用于无真实配对数据时的演示兜底。
+    GT 表示清晰图像，Hazy 按大气散射模型 I = J * t + A * (1 - t) 生成。
     """
     # base texture
     base = np.random.rand(h, w, 3).astype(np.float32)
@@ -89,7 +114,7 @@ def _compute_psnr_ssim(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[
 
 def _resize_to_match(gt_bgr_u8: np.ndarray, pred_bgr_u8: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    ?? gt resize ?? pred ???????????????????????????????
+    将 GT 尺寸对齐到预测结果，避免因分辨率不一致导致指标计算失败。
     """
     if gt_bgr_u8.shape[:2] == pred_bgr_u8.shape[:2]:
         return gt_bgr_u8, pred_bgr_u8
@@ -226,6 +251,7 @@ def _compute_run_for_task_from_pairs(
     seed: int,
     check_cancel,
     strict_validate: bool,
+    selected_metrics: list[str],
 ) -> tuple[dict[str, float], dict[str, Any], list[dict[str, Any]]]:
     psnr_list: list[float] = []
     ssim_list: list[float] = []
@@ -237,6 +263,9 @@ def _compute_run_for_task_from_pairs(
     samples: list[dict[str, Any]] = []
     read_ok = 0
     read_fail = 0
+    processed_count = 0
+    need_psnr_ssim = "PSNR" in selected_metrics or "SSIM" in selected_metrics
+    need_niqe = "NIQE" in selected_metrics
 
     for pair in pairs:
         check_cancel()
@@ -250,30 +279,30 @@ def _compute_run_for_task_from_pairs(
         t0 = time.time()
         pred_u8 = compute_pred(inp_u8, gt_u8, pair)
         algo_elapsed_list.append(time.time() - t0)
+        processed_count += 1
 
         gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
         m0 = time.time()
-        psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-        metric_psnr_ssim_elapsed_list.append(time.time() - m0)
-        psnr_list.append(psnr)
-        ssim_list.append(ssim)
+        sample = {"name": getattr(pair, "name", None) or ""}
+        if need_psnr_ssim:
+            psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
+            metric_psnr_ssim_elapsed_list.append(time.time() - m0)
+            psnr_list.append(psnr)
+            ssim_list.append(ssim)
+            sample["PSNR"] = round(float(psnr), 3)
+            sample["SSIM"] = round(float(ssim), 4)
 
-        m1 = time.time()
-        niqe = float(niqe_score(pred_u8))
-        metric_niqe_elapsed_list.append(time.time() - m1)
-        niqe_list.append(float(niqe))
+        if need_niqe:
+            m1 = time.time()
+            niqe = float(niqe_score(pred_u8))
+            metric_niqe_elapsed_list.append(time.time() - m1)
+            niqe_list.append(float(niqe))
+            sample["NIQE"] = round(float(niqe), 3)
+
         metric_elapsed_list.append(time.time() - m0)
+        samples.append(_filter_sample_metrics(sample, selected_metrics))
 
-        samples.append(
-            {
-                "name": getattr(pair, "name", None) or "",
-                "PSNR": round(float(psnr), 3),
-                "SSIM": round(float(ssim), 4),
-                "NIQE": round(float(niqe), 3),
-            }
-        )
-
-    if not psnr_list:
+    if processed_count <= 0:
         if strict_validate:
             raise RunFailed(
                 err.E_READ_IMAGE_FAIL,
@@ -283,13 +312,10 @@ def _compute_run_for_task_from_pairs(
         remain = min_demo_seconds - (time.time() - demo_start)
         if remain > 0:
             time.sleep(remain)
-        metrics = _simulate_metrics(seed)
+        metrics = _filter_metrics(_simulate_metrics(seed), selected_metrics)
         params = {"data_mode": "dataset_read_failed_or_empty"}
         return metrics, params, samples
 
-    psnr_mean = float(np.mean(psnr_list))
-    ssim_mean = float(np.mean(ssim_list))
-    niqe_mean = float(np.mean(niqe_list))
     algo_elapsed_mean = float(np.mean(algo_elapsed_list)) if algo_elapsed_list else 0.0
     algo_elapsed_sum = float(np.sum(algo_elapsed_list)) if algo_elapsed_list else 0.0
     metric_elapsed_mean = float(np.mean(metric_elapsed_list)) if metric_elapsed_list else 0.0
@@ -303,14 +329,16 @@ def _compute_run_for_task_from_pairs(
     if remain > 0:
         time.sleep(remain)
 
-    metrics = {
-        "PSNR": round(psnr_mean, 3),
-        "SSIM": round(ssim_mean, 4),
-        "NIQE": round(niqe_mean, 3),
-    }
+    metrics: dict[str, float] = {}
+    if psnr_list and "PSNR" in selected_metrics:
+        metrics["PSNR"] = round(float(np.mean(psnr_list)), 3)
+    if ssim_list and "SSIM" in selected_metrics:
+        metrics["SSIM"] = round(float(np.mean(ssim_list)), 4)
+    if niqe_list:
+        metrics["NIQE"] = round(float(np.mean(niqe_list)), 3)
     params = {
         "data_mode": "real_dataset",
-        "data_used": len(psnr_list),
+        "data_used": processed_count,
         "algo_elapsed_mean": round(float(algo_elapsed_mean), 6),
         "algo_elapsed_sum": round(float(algo_elapsed_sum), 6),
         "metric_elapsed_mean": round(float(metric_elapsed_mean), 6),
@@ -465,6 +493,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
             algorithm_id = (algorithm_id or "").lower()
             algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
+            selected_metrics = _normalize_selected_metrics(algo_params)
             data_root = Path(__file__).resolve().parents[1] / "data"  # backend/app/.. -> backend/data
 
             min_demo_seconds = 1.6
@@ -481,17 +510,19 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             }
             input_dirname = input_dir_by_task.get(task_type, "hazy")
             is_video_task = task_type.startswith("video_")
+            # 获取数据集所有者
+            owner_id = run.get("owner_id", "system")
             if is_video_task:
-                pairs = find_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
+                pairs = find_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
             else:
-                pairs = find_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
+                pairs = find_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
             try:
                 from .vision.dataset_io import count_paired_images, count_paired_videos
 
                 if is_video_task:
-                    total_pairs = count_paired_videos(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+                    total_pairs = count_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
                 else:
-                    total_pairs = count_paired_images(data_root=data_root, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+                    total_pairs = count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
             except Exception:
                 total_pairs = None
             record = run.get("record") if isinstance(run.get("record"), dict) else {}
@@ -508,49 +539,61 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
             def pick_impl_name() -> str:
                 if task_type == "dehaze":
-                    if algorithm_id in {"alg_dehaze_clahe"}:
+                    if algorithm_id.startswith("alg_dehaze_clahe"):
                         return "CLAHE"
-                    if algorithm_id in {"alg_dehaze_gamma"}:
+                    if algorithm_id.startswith("alg_dehaze_gamma"):
                         return "Gamma"
                     return "DCP"
                 if task_type == "denoise":
-                    if algorithm_id in {"alg_denoise_bilateral"}:
+                    if algorithm_id.startswith("alg_denoise_bilateral"):
                         return "Bilateral"
-                    if algorithm_id in {"alg_denoise_gaussian"}:
+                    if algorithm_id.startswith("alg_denoise_gaussian"):
                         return "Gaussian"
-                    if algorithm_id in {"alg_denoise_median"}:
+                    if algorithm_id.startswith("alg_denoise_median"):
                         return "Median"
                     return "FastNLMeans"
                 if task_type == "deblur":
-                    if algorithm_id in {"alg_deblur_laplacian"}:
+                    if algorithm_id.startswith("alg_deblur_laplacian"):
                         return "LaplacianSharpen"
                     return "UnsharpMask"
                 if task_type == "sr":
-                    if algorithm_id in {"alg_sr_nearest"}:
+                    if algorithm_id == "alg_sr_nearest":
                         return "Nearest"
-                    if algorithm_id in {"alg_sr_lanczos"}:
+                    if algorithm_id == "alg_sr_linear":
+                        return "Linear"
+                    if algorithm_id.startswith("alg_sr_lanczos"):
                         return "Lanczos"
+                    if algorithm_id.startswith("alg_sr_bicubic"):
+                        return "Bicubic"
                     return "Bicubic"
                 if task_type == "lowlight":
-                    if algorithm_id in {"alg_lowlight_clahe"}:
+                    if algorithm_id.startswith("alg_lowlight_clahe"):
                         return "CLAHE"
+                    if algorithm_id == "alg_lowlight_hybrid":
+                        return "GammaCLAHEHybrid"
                     return "Gamma"
                 if task_type == "video_denoise":
-                    if algorithm_id in {"alg_video_denoise_median"}:
+                    if algorithm_id.startswith("alg_video_denoise_median"):
                         return "VideoMedian"
                     return "VideoGaussian"
                 if task_type == "video_sr":
-                    if algorithm_id in {"alg_video_sr_lanczos"}:
+                    if algorithm_id == "alg_video_sr_nearest":
+                        return "VideoNearest"
+                    if algorithm_id == "alg_video_sr_linear":
+                        return "VideoLinear"
+                    if algorithm_id.startswith("alg_video_sr_lanczos"):
                         return "VideoLanczos"
+                    if algorithm_id.startswith("alg_video_sr_bicubic"):
+                        return "VideoBicubic"
                     return "VideoBicubic"
                 return "Baseline"
 
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
                 if task_type == "dehaze":
-                    if algorithm_id in {"alg_dehaze_clahe"}:
+                    if algorithm_id.startswith("alg_dehaze_clahe"):
                         clip = _get_num(algo_params, "clahe_clip_limit", 2.0, 0.1, 40.0)
                         return _apply_clahe_bgr(inp_u8, clip_limit=clip)
-                    if algorithm_id in {"alg_dehaze_gamma"}:
+                    if algorithm_id.startswith("alg_dehaze_gamma"):
                         gamma = _get_num(algo_params, "gamma", 0.75, 0.05, 5.0)
                         return _apply_gamma_bgr(inp_u8, gamma=gamma)
                     patch = _get_int(algo_params, "dcp_patch", 15, 3, 51)
@@ -558,15 +601,15 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     t0 = _get_num(algo_params, "dcp_t0", 0.1, 0.01, 0.5)
                     return dehaze_dcp(inp_u8, patch=patch, omega=omega, t0=t0)
                 if task_type == "denoise":
-                    if algorithm_id in {"alg_denoise_bilateral"}:
+                    if algorithm_id.startswith("alg_denoise_bilateral"):
                         d = _get_int(algo_params, "bilateral_d", 7, 1, 25)
                         sc = _get_num(algo_params, "bilateral_sigmaColor", 35, 1, 200)
                         ss = _get_num(algo_params, "bilateral_sigmaSpace", 35, 1, 200)
                         return cv2.bilateralFilter(inp_u8, d=d, sigmaColor=sc, sigmaSpace=ss)
-                    if algorithm_id in {"alg_denoise_gaussian"}:
+                    if algorithm_id.startswith("alg_denoise_gaussian"):
                         sigma = _get_num(algo_params, "gaussian_sigma", 1.0, 0.05, 20.0)
                         return cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=sigma)
-                    if algorithm_id in {"alg_denoise_median"}:
+                    if algorithm_id.startswith("alg_denoise_median"):
                         k = _get_int(algo_params, "median_ksize", 3, 1, 31)
                         if k % 2 == 0:
                             k += 1
@@ -581,7 +624,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         sw += 1
                     return cv2.fastNlMeansDenoisingColored(inp_u8, None, h, hc, tw, sw)
                 if task_type == "deblur":
-                    if algorithm_id in {"alg_deblur_laplacian"}:
+                    if algorithm_id.startswith("alg_deblur_laplacian"):
                         st = _get_num(algo_params, "laplacian_strength", 0.7, 0.0, 5.0)
                         return _laplacian_sharpen(inp_u8, strength=st)
                     sigma = _get_num(algo_params, "unsharp_sigma", 1.0, 0.05, 10.0)
@@ -589,19 +632,37 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     return _unsharp_mask(inp_u8, sigma=sigma, amount=amount)
                 if task_type == "sr":
                     h, w = gt_u8.shape[:2]
-                    if algorithm_id in {"alg_sr_nearest"}:
+                    if algorithm_id == "alg_sr_nearest":
                         return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_NEAREST)
-                    if algorithm_id in {"alg_sr_lanczos"}:
-                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LANCZOS4)
+                    if algorithm_id == "alg_sr_linear":
+                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LINEAR)
+                    if algorithm_id.startswith("alg_sr_lanczos"):
+                        pred = cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LANCZOS4)
+                        if algorithm_id.endswith("_sharp"):
+                            sigma = _get_num(algo_params, "unsharp_sigma", 0.8, 0.05, 10.0)
+                            amount = _get_num(algo_params, "unsharp_amount", 1.2, 1.0, 5.0)
+                            return _unsharp_mask(pred, sigma=sigma, amount=amount)
+                        return pred
+                    if algorithm_id.startswith("alg_sr_bicubic"):
+                        pred = cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
+                        if algorithm_id.endswith("_sharp"):
+                            sigma = _get_num(algo_params, "unsharp_sigma", 0.8, 0.05, 10.0)
+                            amount = _get_num(algo_params, "unsharp_amount", 1.3, 1.0, 5.0)
+                            return _unsharp_mask(pred, sigma=sigma, amount=amount)
+                        return pred
                     return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
                 if task_type == "lowlight":
-                    if algorithm_id in {"alg_lowlight_clahe"}:
+                    if algorithm_id.startswith("alg_lowlight_clahe"):
                         clip = _get_num(algo_params, "clahe_clip_limit", 2.5, 0.1, 40.0)
                         return _apply_clahe_bgr(inp_u8, clip_limit=clip)
+                    if algorithm_id == "alg_lowlight_hybrid":
+                        gamma = _get_num(algo_params, "lowlight_gamma", 0.62, 0.05, 5.0)
+                        clip = _get_num(algo_params, "clahe_clip_limit", 2.6, 0.1, 40.0)
+                        return _apply_clahe_bgr(_apply_gamma_bgr(inp_u8, gamma=gamma), clip_limit=clip)
                     gamma = _get_num(algo_params, "lowlight_gamma", 0.6, 0.05, 5.0)
                     return _apply_gamma_bgr(inp_u8, gamma=gamma)
                 if task_type == "video_denoise":
-                    if algorithm_id in {"alg_video_denoise_median"}:
+                    if algorithm_id.startswith("alg_video_denoise_median"):
                         k = _get_int(algo_params, "median_ksize", 3, 1, 31)
                         if k % 2 == 0:
                             k += 1
@@ -610,9 +671,23 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     return cv2.GaussianBlur(inp_u8, (0, 0), sigmaX=sigma)
                 if task_type == "video_sr":
                     h, w = gt_u8.shape[:2]
-                    if algorithm_id in {"alg_video_sr_lanczos"}:
-                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LANCZOS4)
-                    return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
+                    if algorithm_id == "alg_video_sr_nearest":
+                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_NEAREST)
+                    if algorithm_id == "alg_video_sr_linear":
+                        return cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LINEAR)
+                    if algorithm_id.startswith("alg_video_sr_lanczos"):
+                        pred = cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_LANCZOS4)
+                        if algorithm_id.endswith("_sharp"):
+                            sigma = _get_num(algo_params, "unsharp_sigma", 0.8, 0.05, 10.0)
+                            amount = _get_num(algo_params, "unsharp_amount", 1.2, 1.0, 5.0)
+                            return _unsharp_mask(pred, sigma=sigma, amount=amount)
+                        return pred
+                    pred = cv2.resize(inp_u8, (w, h), interpolation=cv2.INTER_CUBIC)
+                    if algorithm_id.startswith("alg_video_sr_bicubic") and algorithm_id.endswith("_sharp"):
+                        sigma = _get_num(algo_params, "unsharp_sigma", 0.8, 0.05, 10.0)
+                        amount = _get_num(algo_params, "unsharp_amount", 1.3, 1.0, 5.0)
+                        return _unsharp_mask(pred, sigma=sigma, amount=amount)
+                    return pred
                 return inp_u8
 
             if pairs:
@@ -633,20 +708,32 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         read_ok += 1
                         pred_u8 = compute_pred(inp_u8, gt_u8, pair)
                         gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
-                        psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-                        niqe = float(niqe_score(pred_u8))
-                        psnr_list.append(float(psnr))
-                        ssim_list.append(float(ssim))
-                        niqe_list.append(float(niqe))
-                        samples.append({"name": getattr(pair, "name", None) or "", "PSNR": round(float(psnr), 3), "SSIM": round(float(ssim), 4), "NIQE": round(float(niqe), 3)})
-                    if not psnr_list:
+                        sample = {"name": getattr(pair, "name", None) or ""}
+                        if "PSNR" in selected_metrics or "SSIM" in selected_metrics:
+                            psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
+                            psnr_list.append(float(psnr))
+                            ssim_list.append(float(ssim))
+                            sample["PSNR"] = round(float(psnr), 3)
+                            sample["SSIM"] = round(float(ssim), 4)
+                        if "NIQE" in selected_metrics:
+                            niqe = float(niqe_score(pred_u8))
+                            niqe_list.append(float(niqe))
+                            sample["NIQE"] = round(float(niqe), 3)
+                        samples.append(_filter_sample_metrics(sample, selected_metrics))
+                    if read_ok <= 0:
                         if strict_validate:
                             raise RunFailed(err.E_READ_IMAGE_FAIL, "video_read_failed_or_empty", {"pair_used": len(pairs), "read_ok": read_ok, "read_fail": read_fail})
-                        metrics = _simulate_metrics(seed)
+                        metrics = _filter_metrics(_simulate_metrics(seed), selected_metrics)
                         params_patch = {"data_mode": "dataset_read_failed_or_empty"}
                     else:
-                        metrics = {"PSNR": round(float(np.mean(psnr_list)), 3), "SSIM": round(float(np.mean(ssim_list)), 4), "NIQE": round(float(np.mean(niqe_list)), 3)}
-                        params_patch = {"data_mode": "real_dataset", "data_used": len(psnr_list), "read_ok": read_ok, "read_fail": read_fail}
+                        metrics = {}
+                        if psnr_list and "PSNR" in selected_metrics:
+                            metrics["PSNR"] = round(float(np.mean(psnr_list)), 3)
+                        if ssim_list and "SSIM" in selected_metrics:
+                            metrics["SSIM"] = round(float(np.mean(ssim_list)), 4)
+                        if niqe_list:
+                            metrics["NIQE"] = round(float(np.mean(niqe_list)), 3)
+                        params_patch = {"data_mode": "real_dataset", "data_used": read_ok, "read_ok": read_ok, "read_fail": read_fail}
                 else:
                     metrics, params_patch, samples = _compute_run_for_task_from_pairs(
                         pairs=pairs,
@@ -656,6 +743,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         seed=seed,
                         check_cancel=check_cancel,
                         strict_validate=strict_validate,
+                        selected_metrics=selected_metrics,
                     )
                 finished = time.time()
                 run["status"] = "done"
@@ -709,11 +797,25 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             algo_elapsed = time.time() - t0
             gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
             m0 = time.time()
-            psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-            m_psnr_ssim = time.time() - m0
-            m1 = time.time()
-            niqe = float(niqe_score(pred_u8))
-            m_niqe = time.time() - m1
+            metrics = {}
+            sample = {"name": "synthetic"}
+            m_psnr_ssim = 0.0
+            m_niqe = 0.0
+            if "PSNR" in selected_metrics or "SSIM" in selected_metrics:
+                psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
+                m_psnr_ssim = time.time() - m0
+                if "PSNR" in selected_metrics:
+                    metrics["PSNR"] = round(float(psnr), 3)
+                if "SSIM" in selected_metrics:
+                    metrics["SSIM"] = round(float(ssim), 4)
+                sample["PSNR"] = round(float(psnr), 3)
+                sample["SSIM"] = round(float(ssim), 4)
+            if "NIQE" in selected_metrics:
+                m1 = time.time()
+                niqe = float(niqe_score(pred_u8))
+                m_niqe = time.time() - m1
+                metrics["NIQE"] = round(float(niqe), 3)
+                sample["NIQE"] = round(float(niqe), 3)
             metric_elapsed = time.time() - m0
 
             remain = min_demo_seconds - (time.time() - demo_start)
@@ -725,7 +827,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             run["status"] = "done"
             run["finished_at"] = finished
             run["elapsed"] = round(finished - run["started_at"], 3)
-            run["metrics"] = {"PSNR": round(float(psnr), 3), "SSIM": round(float(ssim), 4), "NIQE": round(float(niqe), 3)}
+            run["metrics"] = metrics
             run["error"] = None
             run["error_code"] = None
             run["error_detail"] = None
@@ -744,7 +846,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             params["real_algo"] = pick_impl_name()
             params["input_dir"] = input_dirname
             run["params"] = params
-            run["samples"] = [{"name": "synthetic", "PSNR": round(float(psnr), 3), "SSIM": round(float(ssim), 4), "NIQE": round(float(niqe), 3)}]
+            run["samples"] = [_filter_sample_metrics(sample, selected_metrics)]
             record = run.get("record") if isinstance(run.get("record"), dict) else {}
             record["data_mode"] = "synthetic_no_dataset"
             record["pair_used"] = 0
@@ -773,7 +875,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         sleep_s = random.uniform(1.2, 3.0)
         time.sleep(sleep_s)
 
-        metrics = _simulate_metrics(seed)
+        metrics = _filter_metrics(_simulate_metrics(seed), selected_metrics)
         finished = time.time()
         run["status"] = "done"
         run["finished_at"] = finished

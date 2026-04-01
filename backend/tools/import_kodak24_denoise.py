@@ -1,4 +1,4 @@
-# -*- coding: gb18030 -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json
@@ -65,7 +65,7 @@ def _patch_json(url: str, data: dict) -> dict:
 
 def main() -> None:
     project_root = Path(__file__).resolve().parents[2]
-    src_gt = project_root / "?????" / "???" / "kodak24" / "gt"
+    src_gt = project_root / "数据集" / "去噪"
     if not src_gt.exists():
         raise SystemExit(f"source not found: {src_gt}")
 
@@ -100,7 +100,12 @@ def main() -> None:
         print("backend_not_running: skip register/scan")
         return
 
-    payload = {"dataset_id": dataset_id, "name": "Kodak24(?????????)", "type": "???", "size": f"{count} ??"}
+    payload = {
+        "dataset_id": dataset_id,
+        "name": "Kodak24 图像去噪数据集",
+        "type": "图像",
+        "size": f"{count} 张",
+    }
     try:
         _post_json(base + "/datasets", payload)
     except urllib.error.HTTPError:

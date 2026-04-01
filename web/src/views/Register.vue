@@ -7,11 +7,11 @@
 
     <el-card class="register-card" shadow="always">
       <div class="header">
-        <div class="logo">◈</div>
+        <div class="logo">V</div>
         <h2>注册账号</h2>
         <p>创建您的私有算法评测空间</p>
       </div>
-      
+
       <el-form :model="form" :rules="rules" ref="formRef" label-position="top" @keyup.enter="handleRegister" size="large">
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="建议使用学号或英文名" prefix-icon="User" clearable />
@@ -22,10 +22,10 @@
         <el-form-item label="确认密码" prop="confirmPassword">
           <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" prefix-icon="Lock" show-password />
         </el-form-item>
-        
+
         <div class="actions">
           <el-button type="primary" :loading="loading" @click="handleRegister" class="submit-btn">注册并登录</el-button>
-          
+
           <div class="divider">
             <span>已有账号？</span>
           </div>
@@ -81,10 +81,10 @@ const rules = {
 
 async function handleRegister() {
   if (!formRef.value) return;
-  
+
   await formRef.value.validate(async (valid) => {
     if (!valid) return;
-    
+
     loading.value = true;
     try {
       await store.register(form.username, form.password);
@@ -174,6 +174,7 @@ function continueAsGuest() {
   justify-content: center;
   border-radius: 15px;
   box-shadow: none;
+  font-weight: 700;
 }
 
 .header h2 {
@@ -244,21 +245,15 @@ function continueAsGuest() {
   color: #409eff;
   text-decoration: none;
   font-size: 14px;
-  font-weight: 500;
-}
-
-.login-link:hover {
-  text-decoration: underline;
 }
 
 .guest-btn {
-  font-size: 14px;
-  color: #606266;
+  color: #64748b;
 }
 
 .footer-info {
-  margin-top: 30px;
-  color: #909399;
+  margin-top: 24px;
+  color: #94a3b8;
   font-size: 12px;
   z-index: 1;
 }

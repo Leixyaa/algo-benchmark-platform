@@ -3,10 +3,10 @@
     <div class="header-section">
       <div class="header-left">
         <h2 class="page-title">运行任务中心</h2>
-        <p class="page-subtitle">监控算法运行状态、查看量化指标、导出评测结果与排查失败原因</p>
+        <p class="page-subtitle">监控算法运行状态、查看量化指标、导出评测结果并排查失败原因</p>
       </div>
       <div class="header-right">
-        <el-button type="primary" size="large" icon="Plus" class="create-btn" @click="goNewRun">新建运行任务</el-button>
+        <el-button type="primary" size="large" class="create-btn centered-btn" @click="goNewRun" :disabled="!store.user.isLoggedIn">新建运行任务</el-button>
       </div>
     </div>
 
@@ -21,42 +21,49 @@
             <template #prefix><el-icon><Grid /></el-icon></template>
             <el-option v-for="x in taskOptions" :key="x.value" :label="x.label" :value="x.value" />
           </el-select>
-          <el-input
-            v-model="keyword"
-            clearable
-            placeholder="搜索算法、数据集、参数方案..."
-            class="filter-item search-input"
-          >
+          <el-input v-model="keyword" clearable placeholder="搜索算法、数据集、参数方案..." class="filter-item search-input">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
-          <el-button icon="Refresh" circle class="refresh-btn" @click="refresh" />
+          <el-button class="refresh-btn centered-btn" @click="clearFilters">清除筛选</el-button>
         </div>
 
         <div class="action-group">
-          <el-dropdown trigger="click">
-            <el-button size="small" icon="Download">
+          <el-dropdown trigger="click" :disabled="!store.user.isLoggedIn">
+            <el-button size="small" icon="Download" :disabled="!store.user.isLoggedIn">
               导出数据<el-icon class="el-icon--right"><arrow-down /></el-icon>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item icon="Document" @click="exportDoneCsv">导出已完成 (CSV)</el-dropdown-item>
-                <el-dropdown-item icon="TrendCharts" @click="exportDoneXlsx">导出已完成 (Excel)</el-dropdown-item>
+                <el-dropdown-item icon="Document" @click="exportDoneCsv">导出已完成（CSV）</el-dropdown-item>
+                <el-dropdown-item icon="TrendCharts" @click="exportDoneXlsx">导出已完成（Excel）</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button size="small" type="danger" plain icon="Delete" @click="clearDone">清理已完成</el-button>
+          <el-button
+            size="small"
+            type="danger"
+            plain
+            class="centered-btn"
+            @click="clearSelected"
+            :disabled="!store.user.isLoggedIn || selectedIds.length === 0"
+          >
+            批量清除
+          </el-button>
+          <el-button size="small" type="danger" plain class="centered-btn" @click="clearDone" :disabled="!store.user.isLoggedIn">清理已完成</el-button>
         </div>
       </div>
 
-      <el-table 
-        :data="filteredRows" 
+      <el-table
+        :data="filteredRows"
         class="custom-table"
         style="width: 100%"
-        stripe 
+        stripe
         size="small"
         row-key="id"
         v-loading="store.loading"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="46" :selectable="canBatchClearRow" reserve-selection />
         <el-table-column prop="task" label="算法任务" width="110">
           <template #default="{ row }">
             <div class="task-cell">
@@ -71,39 +78,44 @@
             <div class="algo-cell">
               <span class="algo-name">{{ row.algorithm }}</span>
               <span class="algo-scheme">{{ row.paramSchemeText }}</span>
+              <span class="algo-auth" :class="`algo-auth--${authenticityType(row)}`">{{ authenticityLabel(row) }}</span>
             </div>
           </template>
         </el-table-column>
 
-        <el-table-column label="运行状态" width="110">
+        <el-table-column label="运行状态" width="120" align="center">
           <template #default="{ row }">
-            <el-tag 
-              :type="statusTagType(row.status)" 
-              effect="light" 
-              class="status-tag"
-              round
-            >
-              <el-icon v-if="row.status === '运行中' || row.status === 'running'"><Loading /></el-icon>
-              {{ statusText(row.status) }}
-            </el-tag>
+            <div class="status-cell">
+              <span class="status-pill" :class="`status-pill--${statusTagType(row.status)}`">
+                <el-icon v-if="statusText(row.status) === '运行中'" class="status-pill__icon"><Loading /></el-icon>
+                <span>{{ statusText(row.status) }}</span>
+              </span>
+            </div>
           </template>
         </el-table-column>
 
         <el-table-column label="综合评分" width="90" align="center">
           <template #default="{ row }">
-            <div v-if="row.score !== null" class="score-cell">
-              <span class="score-val">{{ row.score }}</span>
+            <div class="score-wrap">
+              <div v-if="row.score !== null && isRealDatasetRun(row)" class="score-cell">
+                <span class="score-val">{{ row.score }}</span>
+              </div>
+              <span v-else-if="row.score !== null" class="score-simulated">演示</span>
+              <span v-else-if="isActiveStatus(row.status)" class="score-pending">
+                <el-icon class="score-pending__icon"><Loading /></el-icon>
+                计算中
+              </span>
+              <span v-else class="score-null">-</span>
             </div>
-            <span v-else class="score-null">-</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="170">
+        <el-table-column label="操作" width="180" align="center">
           <template #default="{ row }">
             <div class="row-actions">
-              <el-button size="small" class="op-btn" type="primary" plain @click="openDetail(row)">详情</el-button>
-              <el-button v-if="canCancel(row)" size="small" class="op-btn" type="warning" plain @click="cancel(row.id)">取消</el-button>
-              <el-button size="small" class="op-btn" type="danger" plain @click="remove(row.id)">隐藏</el-button>
+              <el-button size="small" class="op-btn centered-btn" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
+              <el-button v-if="canCancel(row)" size="small" class="op-btn centered-btn" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
+              <el-button v-if="!isActiveStatus(row.status)" size="small" class="op-btn centered-btn" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">隐藏</el-button>
             </div>
           </template>
         </el-table-column>
@@ -113,18 +125,10 @@
         </template>
       </el-table>
 
-      <div class="pagination-mock">
-        共 {{ filteredRows.length }} 条记录
-      </div>
+      <div class="pagination-mock">共 {{ filteredRows.length }} 条记录</div>
     </el-card>
 
-    <el-dialog 
-      v-model="detailVisible" 
-      title="运行任务详情" 
-      width="800px" 
-      class="detail-dialog"
-      destroy-on-close
-    >
+    <el-dialog v-model="detailVisible" title="运行任务详情" width="800px" class="detail-dialog" destroy-on-close>
       <div v-if="detail" class="detail-container">
         <div class="detail-header-card">
           <div class="detail-main-info">
@@ -144,7 +148,6 @@
         </div>
 
         <div class="detail-section-grid">
-          <!-- 基础信息 -->
           <div class="detail-card">
             <div class="card-title"><el-icon><Memo /></el-icon> 基本配置</div>
             <div class="card-content">
@@ -157,47 +160,61 @@
                 <span class="kv-value">{{ detail.dataset }}</span>
               </div>
               <div class="kv-row">
-                <span class="kv-label">算法种类</span>
+                <span class="kv-label">算法名称</span>
                 <span class="kv-value">{{ detail.algorithm }}</span>
               </div>
               <div class="kv-row">
                 <span class="kv-label">参数方案</span>
-                <span class="kv-value">{{ detail.paramSchemeText || "-" }}</span>
+                <span class="kv-value">{{ detail.paramSchemeText || '-' }}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-label">执行口径</span>
+                <span class="kv-value">
+                  <span class="algo-auth" :class="`algo-auth--${authenticityType(detail)}`">{{ authenticityLabel(detail) }}</span>
+                </span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-label">实际算法</span>
+                <span class="kv-value">{{ detail.raw?.params?.real_algo || '-' }}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-label">输入目录</span>
+                <span class="kv-value">{{ detail.raw?.params?.input_dir || '-' }}</span>
               </div>
             </div>
           </div>
 
-          <!-- 指标数据 -->
           <div class="detail-card">
             <div class="card-title"><el-icon><DataLine /></el-icon> 量化指标</div>
             <div class="card-content">
               <div class="metric-grid">
                 <div class="metric-box">
                   <div class="metric-label">PSNR</div>
-                  <div class="metric-value">{{ detail.psnr ?? "-" }}</div>
+                  <div class="metric-value">{{ detail.psnr ?? '-' }}</div>
                 </div>
                 <div class="metric-box">
                   <div class="metric-label">SSIM</div>
-                  <div class="metric-value">{{ detail.ssim ?? "-" }}</div>
+                  <div class="metric-value">{{ detail.ssim ?? '-' }}</div>
                 </div>
                 <div class="metric-box">
                   <div class="metric-label">NIQE</div>
-                  <div class="metric-value">{{ detail.niqe ?? "-" }}</div>
+                  <div class="metric-value">{{ detail.niqe ?? '-' }}</div>
                 </div>
                 <div class="metric-box highlighted">
                   <div class="metric-label">综合评分</div>
-                  <div class="metric-value">{{ detail.score ?? "-" }}</div>
+                  <div class="metric-value">{{ isRealDatasetRun(detail) ? (detail.score ?? '-') : '仅真实数据计分' }}</div>
                 </div>
               </div>
               <div class="performance-info">
-                <div class="perf-item"><span>总耗时:</span> <strong>{{ detail.elapsed ?? "-" }}</strong></div>
-                <div class="perf-item"><span>样本数:</span> <strong>{{ detail.raw?.params?.data_used ?? "-" }}</strong></div>
+                <div class="perf-item"><span>总耗时:</span> <strong>{{ detail.elapsed ?? '-' }}</strong></div>
+                <div class="perf-item"><span>样本数:</span> <strong>{{ detail.raw?.params?.data_used ?? '-' }}</strong></div>
+                <div class="perf-item"><span>读取成功:</span> <strong>{{ detail.raw?.params?.read_ok ?? '-' }}</strong></div>
+                <div class="perf-item"><span>读取失败:</span> <strong>{{ detail.raw?.params?.read_fail ?? '-' }}</strong></div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 参数详情 -->
         <div class="detail-card full-width">
           <div class="card-title"><el-icon><Setting /></el-icon> 运行参数详情</div>
           <div class="card-content">
@@ -218,7 +235,6 @@
           </div>
         </div>
 
-        <!-- 推荐理由 -->
         <div v-if="detail.reason" class="detail-card full-width reason-card">
           <div class="card-title"><el-icon><MagicStick /></el-icon> 推荐分析</div>
           <div class="card-content">
@@ -226,7 +242,6 @@
           </div>
         </div>
 
-        <!-- 错误详情 -->
         <div v-if="detail.raw?.error || detail.raw?.error_code" class="detail-card full-width error-card">
           <div class="card-title"><el-icon><Warning /></el-icon> 异常报告</div>
           <div class="card-content">
@@ -236,7 +251,6 @@
       </div>
     </el-dialog>
   </div>
-
 </template>
 
 <script setup>
@@ -244,38 +258,24 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { authFetch } from "../api/http";
 
 const router = useRouter();
 const store = useAppStore();
 
 const HIDDEN_KEY = "hiddenRunIds_v1";
-const BUILTIN_ALGORITHM_IDS = new Set([
-  "alg_dn_cnn",
-  "alg_denoise_bilateral",
-  "alg_denoise_gaussian",
-  "alg_denoise_median",
-  "alg_dehaze_dcp",
-  "alg_dehaze_clahe",
-  "alg_dehaze_gamma",
-  "alg_deblur_unsharp",
-  "alg_deblur_laplacian",
-  "alg_sr_bicubic",
-  "alg_sr_lanczos",
-  "alg_sr_nearest",
-  "alg_lowlight_gamma",
-  "alg_lowlight_clahe",
-  "alg_video_denoise_gaussian",
-  "alg_video_denoise_median",
-  "alg_video_sr_bicubic",
-  "alg_video_sr_lanczos",
-]);
+function isBuiltinAlgorithm(alg) {
+  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
+}
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
+const selectedIds = ref([]);
 
 function persistHidden() {
   localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value)));
 }
 
-function downloadFile(url, filename) {
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -283,16 +283,35 @@ function downloadFile(url, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  URL.revokeObjectURL(url);
 }
 
-function exportDoneCsv() {
-  const url = "http://127.0.0.1:8000/runs/export?format=csv&status=done";
-  downloadFile(url, "runs_done.csv");
+async function exportDone(format, filename) {
+  const res = await authFetch("/runs/export", {
+    query: { format, status: "done" },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `导出失败(${res.status})`);
+  }
+  const blob = await res.blob();
+  downloadFile(blob, filename);
 }
 
-function exportDoneXlsx() {
-  const url = "http://127.0.0.1:8000/runs/export?format=xlsx&status=done";
-  downloadFile(url, "runs_done.xlsx");
+async function exportDoneCsv() {
+  try {
+    await exportDone("csv", "runs_done.csv");
+  } catch (e) {
+    ElMessage({ type: "error", message: `导出失败：${e?.message || e}` });
+  }
+}
+
+async function exportDoneXlsx() {
+  try {
+    await exportDone("xlsx", "runs_done.xlsx");
+  } catch (e) {
+    ElMessage({ type: "error", message: `导出失败：${e?.message || e}` });
+  }
 }
 
 async function clearDone() {
@@ -302,8 +321,9 @@ async function clearDone() {
       confirmButtonText: "清理",
       cancelButtonText: "取消",
     });
-    const res = await fetch("http://127.0.0.1:8000/runs/clear?status=done", {
+    const res = await authFetch("/runs/clear", {
       method: "POST",
+      query: { status: "done" },
     });
     const data = await res.json();
     if (!res.ok) throw new Error(JSON.stringify(data));
@@ -312,6 +332,48 @@ async function clearDone() {
   } catch (e) {
     if (e === "cancel" || e === "close") return;
     ElMessage({ type: "error", message: `清理失败：${e?.message || e}` });
+  }
+}
+
+function canBatchClearRow(row) {
+  return !isActiveStatus(row?.status);
+}
+
+function handleSelectionChange(selection) {
+  selectedIds.value = (selection || []).map((row) => row?.id).filter(Boolean);
+}
+
+async function clearSelected() {
+  if (!selectedIds.value.length) {
+    ElMessage({ type: "warning", message: "请先勾选要清除的任务" });
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认批量清除已勾选的 ${selectedIds.value.length} 条任务吗？运行中和排队中的任务不会被清除。`,
+      "批量清除确认",
+      {
+        type: "warning",
+        confirmButtonText: "批量清除",
+        cancelButtonText: "取消",
+      }
+    );
+    const res = await authFetch("/runs/batch-clear", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: selectedIds.value }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    selectedIds.value = [];
+    ElMessage({
+      type: "success",
+      message: `已清除 ${data.deleted || 0} 条任务${data.skipped ? `，跳过 ${data.skipped} 条` : ""}`,
+    });
+    await refresh();
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `批量清除失败：${e?.message || e}` });
   }
 }
 
@@ -345,12 +407,12 @@ const taskFilter = ref("");
 const keyword = ref("");
 
 const statusOptions = [
-  { value: "排队中", label: "排队中" },
-  { value: "运行中", label: "运行中" },
-  { value: "已完成", label: "已完成" },
-  { value: "失败", label: "失败" },
-  { value: "取消中", label: "取消中" },
-  { value: "已取消", label: "已取消" },
+  { value: "queued", label: "排队中" },
+  { value: "running", label: "运行中" },
+  { value: "done", label: "已完成" },
+  { value: "failed", label: "失败" },
+  { value: "canceling", label: "取消中" },
+  { value: "canceled", label: "已取消" },
 ];
 
 const taskOptions = computed(() =>
@@ -370,6 +432,12 @@ const filteredRows = computed(() => {
 
 function goNewRun() {
   router.push("/new-run");
+}
+
+function clearFilters() {
+  statusFilter.value = "";
+  taskFilter.value = "";
+  keyword.value = "";
 }
 
 function formatJson(v) {
@@ -400,8 +468,12 @@ function formatRunError(raw) {
 function resolveParamSchemeText(run) {
   const p = run?.raw?.params && typeof run.raw.params === "object" && !Array.isArray(run.raw.params) ? run.raw.params : {};
   const s = String(p.param_scheme || "").trim().toLowerCase();
-  if (String(p.user_scheme_name || "").trim()) return `用户：${String(p.user_scheme_name).trim()}`;
-  if (s.startsWith("user:")) return `用户：${s.slice(5)}`;
+  if (String(p.user_scheme_name || "").trim()) {
+    return `用户：${extractSchemeDisplayName(String(p.user_scheme_name).trim(), run?.algorithm || "")}`;
+  }
+  if (s.startsWith("user:")) {
+    return `用户：${extractSchemeDisplayName(String(p.param_scheme || "").trim().slice(5), run?.algorithm || "")}`;
+  }
   const alg = (store.algorithms || []).find((a) => String(a?.id || "") === String(run?.algorithmId || ""));
   const runEff = pickEffectiveParams(p);
   if (alg) {
@@ -420,13 +492,13 @@ function resolveParamSchemeText(run) {
     const candidates = (store.algorithms || [])
       .filter(
         (x) =>
-          !BUILTIN_ALGORITHM_IDS.has(String(x?.id || "")) &&
+          !isBuiltinAlgorithm(x) &&
           String(x?.task || "") === String(alg?.task || "") &&
           normalizeSchemeBaseName(x?.name || "") === base
       );
     for (const x of candidates) {
       const up = pickEffectiveParams(x?.defaultParams && typeof x.defaultParams === "object" ? x.defaultParams : {});
-      if (isSameParams(runEff, up)) return `用户：${String(x?.name || "用户方案")}`;
+      if (isSameParams(runEff, up)) return `用户：${extractSchemeDisplayName(String(x?.name || "用户方案"), alg?.name || run?.algorithm || "")}`;
     }
   }
   if (s === "speed") return "系统：速度优先";
@@ -435,10 +507,24 @@ function resolveParamSchemeText(run) {
   return Object.keys(runEff).length ? "用户自定义参数方案" : "系统内置默认参数";
 }
 
+function extractSchemeDisplayName(fullName, baseName = "") {
+  const full = String(fullName || "").trim();
+  const base = String(baseName || "").trim();
+  if (!full) return "用户方案";
+  if (base && full.startsWith(base)) {
+    const rest = full.slice(base.length).trim();
+    if (rest) {
+      return rest.replace(/^[（(]\s*/, "").replace(/\s*[）)]$/, "").trim() || full;
+    }
+  }
+  const m = full.match(/[（(]([^（）()]+)[）)]$/);
+  return m?.[1]?.trim() || full;
+}
+
 function normalizeSchemeBaseName(name) {
   const n = String(name || "").trim();
-  if (!n.endsWith("）")) return n;
-  const i = n.lastIndexOf("（");
+  if (!n.endsWith("版")) return n;
+  const i = n.lastIndexOf("版");
   if (i <= 0) return n;
   return n.slice(0, i);
 }
@@ -467,12 +553,12 @@ const PARAM_LABELS = {
   gamma: "伽马值",
   lowlight_gamma: "低照增强强度",
   nlm_h: "去噪强度",
-  nlm_hColor: "色彩去噪强度",
+  nlm_hColor: "彩色去噪强度",
   nlm_templateWindowSize: "模板窗口大小",
   nlm_searchWindowSize: "搜索窗口大小",
   bilateral_d: "邻域直径",
-  bilateral_sigmaColor: "色域平滑系数",
-  bilateral_sigmaSpace: "空间平滑系数",
+  bilateral_sigmaColor: "颜色域平滑系数",
+  bilateral_sigmaSpace: "空间域平滑系数",
   gaussian_sigma: "高斯标准差",
   median_ksize: "中值核大小",
   unsharp_sigma: "锐化半径",
@@ -481,12 +567,12 @@ const PARAM_LABELS = {
 };
 
 const PARAM_DESC = {
-  dcp_patch: "越大去雾更明显，但细节可能变少。",
-  dcp_omega: "越大去雾更强。",
+  dcp_patch: "越大去雾越明显，但细节可能减少。",
+  dcp_omega: "越大去雾越强。",
   dcp_t0: "用于保护暗区，避免过度增强噪声。",
   clahe_clip_limit: "越大对比越强，过高可能放大噪声。",
   gamma: "小于 1 会提亮画面。",
-  lowlight_gamma: "建议 0.5~0.8 起步。",
+  lowlight_gamma: "建议从 0.5~0.8 起步。",
   nlm_h: "越大去噪越强，细节可能减少。",
   nlm_hColor: "建议与去噪强度接近。",
   nlm_templateWindowSize: "常用奇数 7。",
@@ -497,7 +583,7 @@ const PARAM_DESC = {
   gaussian_sigma: "越大模糊越强。",
   median_ksize: "应为奇数。",
   unsharp_sigma: "控制锐化作用范围。",
-  unsharp_amount: "越大边缘越锐，过高易发白边。",
+  unsharp_amount: "越大边缘越锐，过高容易产生白边。",
   laplacian_strength: "越大锐化越明显。",
 };
 
@@ -543,34 +629,69 @@ function splitParamRows(paramsObj) {
       key,
       label: PARAM_LABELS[key] || key,
       value: prettyValue(value),
-      desc: PARAM_DESC[key] || "该参数用于控制算法处理强度或范围。",
+      desc: PARAM_DESC[key] || "当前参数暂无补充说明，可结合算法原理与预览结果进行调整。",
     });
   }
   return { userParamRows, systemParamRows };
 }
 
 function statusText(status) {
-  if (status === "done" || status === "completed" || status === "已完成") return "已完成";
-  if (status === "running" || status === "运行中") return "运行中";
-  if (status === "failed" || status === "失败") return "失败";
-  if (status === "queued" || status === "排队中") return "排队中";
-  if (status === "canceling" || status === "取消中") return "取消中";
-  if (status === "canceled" || status === "已取消") return "已取消";
+  const s = String(status ?? "").trim().toLowerCase();
+  if (["done", "completed", "success", "已完成"].includes(s)) return "已完成";
+  if (["running", "运行中"].includes(s)) return "运行中";
+  if (["failed", "error", "失败"].includes(s)) return "失败";
+  if (["queued", "pending", "排队中"].includes(s)) return "排队中";
+  if (["canceling", "cancelling", "取消中"].includes(s)) return "取消中";
+  if (["canceled", "cancelled", "已取消"].includes(s)) return "已取消";
   return status || "-";
 }
 
 function statusTagType(status) {
-  if (status === "done" || status === "completed" || status === "已完成") return "success";
-  if (status === "running" || status === "运行中") return "warning";
-  if (status === "failed" || status === "失败") return "danger";
-  if (status === "canceling" || status === "取消中") return "warning";
-  if (status === "canceled" || status === "已取消") return "info";
-  if (status === "queued" || status === "排队中") return "info";
+  const text = statusText(status);
+  if (text === "已完成") return "success";
+  if (text === "运行中") return "warning";
+  if (text === "失败") return "danger";
+  if (text === "取消中") return "warning";
+  if (text === "已取消") return "info";
+  if (text === "排队中") return "info";
   return "info";
 }
 
 function canCancel(row) {
-  return row?.status === "排队中" || row?.status === "运行中" || row?.status === "取消中" || row?.status === "queued" || row?.status === "running" || row?.status === "canceling";
+  const text = statusText(row?.status);
+  return text === "排队中" || text === "运行中" || text === "取消中";
+}
+
+function isActiveStatus(status) {
+  const text = statusText(status);
+  return text === "排队中" || text === "运行中" || text === "取消中";
+}
+
+function getDataMode(row) {
+  return String(row?.raw?.params?.data_mode || row?.raw?.record?.data_mode || "").trim();
+}
+
+function isRealDatasetRun(row) {
+  return getDataMode(row) === "real_dataset";
+}
+
+function authenticityType(row) {
+  const mode = getDataMode(row);
+  if (mode === "real_dataset") return "real";
+  if (mode === "synthetic_no_dataset") return "demo";
+  if (mode === "dataset_read_failed_or_empty") return "fallback";
+  if (mode === "paired_images" || mode === "paired_videos") return "real";
+  return "unknown";
+}
+
+function authenticityLabel(row) {
+  const mode = getDataMode(row);
+  if (mode === "real_dataset") return "真实数据评测";
+  if (mode === "paired_images") return "真实图像配对";
+  if (mode === "paired_videos") return "真实视频配对";
+  if (mode === "synthetic_no_dataset") return "演示兜底结果";
+  if (mode === "dataset_read_failed_or_empty") return "读取失败兜底";
+  return "执行口径未标注";
 }
 
 async function cancel(runId) {
@@ -632,6 +753,10 @@ function buildScoringContext(allRuns) {
 }
 
 function scoreOne(run, ctx) {
+  if (!isRealDatasetRun(run)) {
+    return { score: null, reason: `${authenticityLabel(run)}，该结果仅用于流程演示，不参与真实性能评分` };
+  }
+
   const psnr = toNumber(run.psnr);
   const ssim = toNumber(run.ssim);
   const niqe = toNumber(run.niqe);
@@ -652,10 +777,10 @@ function scoreOne(run, ctx) {
     ctx.W.time * (1 - nTIME);
 
   const parts = [];
-  if (nPSNR >= 0.8) parts.push("PSNR表现突出");
-  if (nSSIM >= 0.8) parts.push("SSIM表现突出");
-  if (nNIQE <= 0.2) parts.push("NIQE表现优秀（越低越好）");
-  if (nTIME <= 0.2) parts.push("耗时表现优秀");
+  if (nPSNR >= 0.8) parts.push("PSNR 表现优秀");
+  if (nSSIM >= 0.8) parts.push("SSIM 表现优秀");
+  if (nNIQE <= 0.2) parts.push("NIQE 表现优秀（越低越好）");
+  if (nTIME <= 0.2) parts.push("耗时表现较好");
   if (parts.length === 0) parts.push("综合表现均衡");
 
   return {
@@ -741,6 +866,20 @@ function openDetail(row) {
   font-size: 14px;
 }
 
+.centered-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.centered-btn > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
 .create-btn {
   box-shadow: none;
   transition: none;
@@ -804,6 +943,10 @@ function openDetail(row) {
   width: 100%;
 }
 
+.custom-table :deep(.el-table__cell) {
+  vertical-align: middle;
+}
+
 .custom-table :deep(.el-table__body-wrapper) {
   overflow-x: auto;
 }
@@ -843,25 +986,141 @@ function openDetail(row) {
   color: #64748b;
 }
 
-.status-tag {
+.algo-auth {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.algo-auth--real {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.algo-auth--demo {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.algo-auth--fallback {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.algo-auth--unknown {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.status-cell,
+.score-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 4px;
+  min-width: 72px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  font-size: 13px;
   font-weight: 600;
-  padding: 0 10px;
+  line-height: 1;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+}
+
+.status-pill__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.status-pill--success {
+  color: #166534;
+  border-color: #86efac;
+  background: #dcfce7;
+}
+
+.status-pill--warning {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #dbeafe;
+}
+
+.status-pill--danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.status-pill--info {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 
 .score-cell {
   background: #eef6ff;
   border-radius: 6px;
   padding: 4px 8px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+}
+
+.score-pending {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 52px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.score-pending__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
 }
 
 .score-val {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
   color: #0369a1;
+}
+
+.score-simulated {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fef3c7;
+  border-radius: 6px;
+  padding: 4px 8px;
 }
 
 .score-null {
@@ -871,7 +1130,9 @@ function openDetail(row) {
 .row-actions {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  flex-wrap: nowrap;
 }
 
 .op-btn {
@@ -1086,3 +1347,5 @@ function openDetail(row) {
   }
 }
 </style>
+
+

@@ -21,7 +21,7 @@ const routes = [
       { path: "algorithms", component: Algorithms },
       { path: "new-run", component: NewRun },
       { path: "compare", component: Compare },
-      { path: "/runs", name: "Runs", component: Runs },
+      { path: "runs", name: "Runs", component: Runs },
     ],
   },
 ];

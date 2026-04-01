@@ -6,7 +6,7 @@
         <p class="page-subtitle">通过简单的三个步骤，快速配置并启动您的算法性能评测</p>
       </div>
       <div class="header-right">
-        <el-button icon="Back" @click="goRuns">返回任务中心</el-button>
+        <el-button class="centered-btn" @click="goRuns">返回任务中心</el-button>
       </div>
     </div>
 
@@ -40,8 +40,8 @@
                   />
                 </el-select>
                 <div v-if="form.presetId" class="preset-actions">
-                  <el-button type="info" plain size="small" @click="clearPreset">解除预设锁定</el-button>
-                  <el-button type="danger" plain size="small" @click="removePreset">永久删除预设</el-button>
+                  <el-button type="info" plain size="small" class="centered-btn" @click="clearPreset">解除预设锁定</el-button>
+                  <el-button type="danger" plain size="small" class="centered-btn" @click="removePreset">永久删除预设</el-button>
                 </div>
               </div>
               <el-alert v-if="form.presetId" title="已加载预设：部分选项已按预设锁定，如需修改请先解除锁定。" type="success" :closable="false" show-icon class="preset-alert" />
@@ -83,8 +83,7 @@
                 v-if="form.datasetId" 
                 size="small" 
                 plain 
-                icon="Search" 
-                class="scan-btn"
+                class="scan-btn centered-btn"
                 @click="scanSelectedDataset"
               >
                 立即扫描数据集配对
@@ -119,11 +118,35 @@
             </el-form-item>
 
             <el-form-item label="评测指标">
-              <el-checkbox-group v-model="form.metrics" :disabled="!!form.presetId" class="metrics-group">
-                <el-checkbox-button value="PSNR">PSNR</el-checkbox-button>
-                <el-checkbox-button value="SSIM">SSIM</el-checkbox-button>
-                <el-checkbox-button value="NIQE">NIQE (无参考)</el-checkbox-button>
-              </el-checkbox-group>
+              <div class="metrics-group">
+                <button
+                  type="button"
+                  class="metric-chip"
+                  :class="{ active: isMetricSelected('PSNR'), locked: !!form.presetId }"
+                  :disabled="!!form.presetId"
+                  @click="toggleMetric('PSNR')"
+                >
+                  PSNR
+                </button>
+                <button
+                  type="button"
+                  class="metric-chip"
+                  :class="{ active: isMetricSelected('SSIM'), locked: !!form.presetId }"
+                  :disabled="!!form.presetId"
+                  @click="toggleMetric('SSIM')"
+                >
+                  SSIM
+                </button>
+                <button
+                  type="button"
+                  class="metric-chip metric-chip-wide"
+                  :class="{ active: isMetricSelected('NIQE'), locked: !!form.presetId }"
+                  :disabled="!!form.presetId"
+                  @click="toggleMetric('NIQE')"
+                >
+                  NIQE (无参考)
+                </button>
+              </div>
             </el-form-item>
           </el-form>
         </div>
@@ -165,7 +188,7 @@
                   type="success" 
                   plain 
                   :disabled="!!form.presetId || !form.presetName.trim()" 
-                  icon="CollectionTag"
+                  class="centered-btn"
                   @click="savePreset"
                 >
                   保存预设
@@ -177,11 +200,11 @@
 
         <div class="form-footer">
           <div class="footer-left">
-            <el-button v-if="activeStep > 0" size="large" icon="ArrowLeft" @click="activeStep--">上一步</el-button>
+            <el-button v-if="activeStep > 0" size="large" class="centered-btn" @click="activeStep--">上一步</el-button>
           </div>
           <div class="footer-center">
-            <el-button v-if="activeStep < 2" type="primary" size="large" :disabled="!isNextEnabled" @click="activeStep++">下一步</el-button>
-            <el-button v-if="activeStep === 2" type="primary" size="large" class="launch-btn" icon="Rocket" @click="create">启动评测任务</el-button>
+            <el-button v-if="activeStep < 2" type="primary" size="large" class="centered-btn" :disabled="!isNextEnabled" @click="activeStep++">下一步</el-button>
+            <el-button v-if="activeStep === 2" type="primary" size="large" class="launch-btn centered-btn" @click="create">启动评测任务</el-button>
           </div>
           <div class="footer-right">
             <!-- Space for balance -->
@@ -205,34 +228,21 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore, toTaskLabel, toTaskType } from "../stores/app";
 
 const NEWRUN_CACHE_KEY = "newrun_form_v2";
-const BUILTIN_ALGORITHM_IDS = new Set([
-  "alg_dn_cnn",
-  "alg_denoise_bilateral",
-  "alg_denoise_gaussian",
-  "alg_denoise_median",
-  "alg_dehaze_dcp",
-  "alg_dehaze_clahe",
-  "alg_dehaze_gamma",
-  "alg_deblur_unsharp",
-  "alg_deblur_laplacian",
-  "alg_sr_bicubic",
-  "alg_sr_lanczos",
-  "alg_sr_nearest",
-  "alg_lowlight_gamma",
-  "alg_lowlight_clahe",
-  "alg_video_denoise_gaussian",
-  "alg_video_denoise_median",
-  "alg_video_sr_bicubic",
-  "alg_video_sr_lanczos",
-]);
+function isBuiltinAlgorithm(alg) {
+  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
+}
 const router = useRouter();
 const store = useAppStore();
 const applyingPreset = ref(false);
 const activeStep = ref(0);
 
+// 使用ref创建响应式的metrics变量
+const metrics = ref(["PSNR", "SSIM"]);
+const ALLOWED_METRICS = ["PSNR", "SSIM", "NIQE"];
+
 const isNextEnabled = computed(() => {
   if (activeStep.value === 0) return !!form.taskType && !!form.datasetId;
-  if (activeStep.value === 1) return !!form.algorithmId && form.metrics.length > 0;
+  if (activeStep.value === 1) return !!form.algorithmId && metrics.value.length > 0;
   return true;
 });
 
@@ -262,7 +272,7 @@ const form = reactive({
   taskType: "denoise",
   datasetId: "",
   algorithmId: "",
-  metrics: ["PSNR", "SSIM"],
+  metrics: [], // 不再使用，改用metrics.value
   paramSchemeKey: "__default__",
   paramsText: "{}",
   strictValidate: true,
@@ -277,7 +287,7 @@ try {
     else if (typeof cached.task === "string") form.taskType = toTaskType(cached.task);
     if (cached.datasetId) form.datasetId = cached.datasetId;
     if (cached.algorithmId) form.algorithmId = cached.algorithmId;
-    if (Array.isArray(cached.metrics)) form.metrics = cached.metrics;
+    if (Array.isArray(cached.metrics)) metrics.value = cached.metrics;
     if (typeof cached.paramsText === "string") form.paramsText = cached.paramsText;
     if (typeof cached.presetId === "string") form.presetId = cached.presetId;
     if (typeof cached.presetName === "string") form.presetName = cached.presetName;
@@ -289,7 +299,7 @@ try {
 
 
 watch(
-  () => ({ ...form, metrics: Array.isArray(form.metrics) ? [...form.metrics] : [] }),
+  () => ({ ...form, metrics: Array.isArray(metrics.value) ? [...metrics.value] : [] }),
   (val) => {
     localStorage.setItem(NEWRUN_CACHE_KEY, JSON.stringify(val));
   },
@@ -301,7 +311,7 @@ const taskTypeOptions = computed(() =>
 );
 
 const filteredAlgorithms = computed(() =>
-  store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && BUILTIN_ALGORITHM_IDS.has(String(a.id || "")))
+  store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && isBuiltinAlgorithm(a))
 );
 
 const presetsAll = computed(() => {
@@ -372,7 +382,7 @@ const userSchemeEntries = computed(() => {
   if (!alg) return [];
   const base = normalizeSchemeBaseName(alg.name);
   return store.algorithms
-    .filter((x) => !BUILTIN_ALGORITHM_IDS.has(String(x?.id || "")) && x?.task === alg.task)
+    .filter((x) => !isBuiltinAlgorithm(x) && x?.task === alg.task)
     .map((x) => ({
       id: String(x.id || ""),
       name: String(x.name || ""),
@@ -454,24 +464,29 @@ function applyPreset() {
   if (!pid) return;
   const p = (store.presets || []).find((x) => x.id === pid);
   if (!p) return;
-  applyingPreset.value = true;
+  // 直接更新表单数据
   form.presetName = p.name || "";
   form.taskType = p.taskType;
   form.datasetId = p.datasetId || "";
   form.algorithmId = p.algorithmId || "";
-  form.metrics = Array.isArray(p.metrics) && p.metrics.length ? [...p.metrics] : ["PSNR", "SSIM"];
+  metrics.value = normalizeMetrics(p.metrics);
   const params = p.params && typeof p.params === "object" && !Array.isArray(p.params) ? p.params : {};
   form.paramSchemeKey = resolveSchemeKeyByParams(params);
   form.paramsText = JSON.stringify(params, null, 2);
-  setTimeout(() => {
-    applyingPreset.value = false;
-  }, 0);
+}
+
+function normalizeMetrics(list) {
+  if (!Array.isArray(list)) return ["PSNR", "SSIM"];
+  const normalized = list
+    .map((item) => String(item || "").trim().toUpperCase())
+    .filter((item) => ALLOWED_METRICS.includes(item));
+  return normalized.length ? [...new Set(normalized)] : ["PSNR", "SSIM"];
 }
 
 watch(
   () => form.presetId,
-  () => {
-    if (!form.presetId) return;
+  (newVal) => {
+    if (!newVal) return;
     applyPreset();
   }
 );
@@ -572,7 +587,7 @@ async function savePreset() {
   if (!form.presetName.trim()) return ElMessage({ type: "warning", message: "请填写预设名称" });
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
   if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
-  if (!form.metrics.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
+  if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
   {
     const wanted = normalizePresetName(form.presetName);
     const dup = (store.presets || []).find(
@@ -610,10 +625,11 @@ async function savePreset() {
       task: toTaskLabel(form.taskType),
       datasetId: form.datasetId,
       algorithmId: form.algorithmId,
-      metrics: [...form.metrics],
+      metrics: [...metrics.value],
       params,
     });
     form.presetId = out?.id || "";
+    form.presetName = "";
     ElMessage({ type: "success", message: "预设保存成功" });
   } catch (e) {
     ElMessage({ type: "error", message: `保存预设失败：${e?.message || e}` });
@@ -646,7 +662,7 @@ function clearPreset() {
 async function create() {
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
   if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
-  if (!form.metrics.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
+  if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
 
   const tt = form.taskType;
   const d = selectedDataset.value;
@@ -669,19 +685,47 @@ async function create() {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return ElMessage({ type: "error", message: '参数必须是 JSON 对象，例如 { "dcp_patch": 15 }' });
   }
+  if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) {
+    if (form.paramSchemeKey === "__default__") {
+      params.param_scheme = "default";
+    } else if (String(form.paramSchemeKey).startsWith("__user__")) {
+      const sid = String(form.paramSchemeKey).replace("__user__", "");
+      const picked = userSchemeEntries.value.find((x) => x.id === sid);
+      params.param_scheme = picked?.name ? `user:${picked.name}` : "user";
+      if (picked?.name) params.user_scheme_name = picked.name;
+    }
+  }
 
   try {
     await store.createRun({
       task: toTaskLabel(form.taskType),
       datasetId: form.datasetId,
       algorithmId: form.algorithmId,
-      metrics: [...form.metrics],
+      metrics: [...metrics.value],
       params,
       strictValidate: true,
     });
-    localStorage.removeItem(NEWRUN_CACHE_KEY);
-    ElMessage({ type: "success", message: "Run 创建成功" });
-    router.push("/runs");
+    // 让用户选择是否留在当前页面或转到任务中心
+    try {
+      await ElMessageBox.confirm(
+        "Run 创建成功，是否跳转到任务中心查看？",
+        "操作选择",
+        {
+          confirmButtonText: "转到任务中心",
+          cancelButtonText: "留在当前页面",
+          type: "success"
+        }
+      );
+      // 用户选择转到任务中心
+      router.push("/runs");
+    } catch (e) {
+      // 用户选择留在当前页面或取消
+      if (e !== "cancel" && e !== "close") {
+        throw e;
+      }
+      // 重置到第一步，但保留预设等内容
+      activeStep.value = 0;
+    }
   } catch (e) {
     const d = e?.detail;
     if (d && typeof d === "object") {
@@ -711,6 +755,27 @@ async function create() {
     }
     ElMessage({ type: "error", message: `创建 Run 失败：${e?.message || e}` });
   }
+}
+
+function getPresetMetrics() {
+  if (!form.presetId) return "无";
+  const preset = presetsAll.value.find(p => p.id === form.presetId);
+  return preset?.metrics?.join(', ') || "无";
+}
+
+// 检查指标是否被选中
+function isMetricSelected(metric) {
+  return metrics.value.includes(metric);
+}
+
+function toggleMetric(metric) {
+  if (form.presetId) return;
+  const next = normalizeMetrics(metrics.value);
+  if (next.includes(metric)) {
+    metrics.value = next.filter((item) => item !== metric);
+    return;
+  }
+  metrics.value = [...next, metric];
 }
 
 function goRuns() {
@@ -744,6 +809,20 @@ function goRuns() {
   margin: 4px 0 0;
   color: #64748b;
   font-size: 14px;
+}
+
+.centered-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.centered-btn > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 /* Main Card & Steps */
@@ -901,7 +980,58 @@ function goRuns() {
 .metrics-group {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
+
+.metric-chip {
+  appearance: none;
+  border: 1px solid #cddcf7;
+  background: #ffffff;
+  color: #64748b;
+  border-radius: 14px;
+  min-width: 88px;
+  height: 38px;
+  padding: 0 18px;
+  font-size: 14px;
+  line-height: 38px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.metric-chip:hover:not(:disabled) {
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+
+.metric-chip.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.18);
+}
+
+.metric-chip.metric-chip-wide {
+  min-width: 152px;
+}
+
+.metric-chip:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.metric-chip.locked {
+  background: #f8fbff;
+  border-color: #cddcf7;
+  color: #94a3b8;
+}
+
+.metric-chip.locked.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
 
 /* Parameters Preview */
 .readonly-param-container {

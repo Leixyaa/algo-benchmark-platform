@@ -10,8 +10,8 @@
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" icon="Plus" @click="openCreate">新增算法</el-button>
-          <el-button icon="RefreshLeft" @click="resetToBuiltins">清理自定义算法</el-button>
+          <el-button type="primary" icon="Plus" @click="openCreate" :disabled="!store.user.isLoggedIn">新增算法</el-button>
+          <el-button icon="RefreshLeft" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">清理自定义算法</el-button>
         </div>
       </div>
 
@@ -56,8 +56,8 @@
         <el-table-column prop="createdAt" label="创建时间" width="180" />
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button size="small" icon="Edit" @click="openEdit(row)">编辑</el-button>
-            <el-button size="small" type="danger" icon="Delete" @click="remove(row.id)">删除</el-button>
+            <el-button size="small" icon="Edit" @click="openEdit(row)" :disabled="!store.user.isLoggedIn">编辑</el-button>
+            <el-button size="small" type="danger" icon="Delete" @click="remove(row.id)" :disabled="!store.user.isLoggedIn">删除</el-button>
           </template>
         </el-table-column>
         <template #empty>
@@ -87,8 +87,15 @@
         <el-descriptions-item label="版本">{{ paramDialogVersion || "-" }}</el-descriptions-item>
       </el-descriptions>
       
-      <div class="param-section-title">默认参数 (JSON)</div>
-      <pre class="code-box">{{ paramDialogJson }}</pre>
+      <div class="param-section-title">默认参数（可视化）</div>
+      <div v-if="paramDialogRows.length === 0" class="no-params">该内置算法无默认参数。</div>
+      <div v-else class="param-kv-list">
+        <div v-for="item in paramDialogRows" :key="`pk-${item.key}`" class="param-kv-item">
+          <span class="param-kv-key">{{ item.key }}</span>
+          <span class="param-kv-type">{{ item.type }}</span>
+          <span class="param-kv-val">{{ item.text }}</span>
+        </div>
+      </div>
       
       <div class="param-section-title">参数说明</div>
       <div v-if="paramDialogExplainList.length === 0" class="no-params">该算法无默认参数。</div>
@@ -105,7 +112,7 @@
     </el-dialog>
 
     <!-- 新增/编辑算法弹窗 -->
-    <el-dialog v-model="showCreate" :title="isEditing ? '编辑算法' : '新增算法'" width="1100px" top="5vh">
+    <el-dialog v-model="editorVisible" :title="isEditing ? '编辑算法' : '新增算法'" width="1100px" top="5vh">
       <div class="algorithm-form-container">
         <div class="form-left">
           <el-form :model="isEditing ? editForm : form" label-position="top">
@@ -149,7 +156,7 @@
 
           <div class="param-actions">
             <el-button-group size="small">
-              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'default')">推荐默认</el-button>
+              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'default')">恢复默认参数</el-button>
               <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'safe')">稳妥模式</el-button>
               <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'strong')">增强模式</el-button>
             </el-button-group>
@@ -201,26 +208,9 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
-const BUILTIN_ALGORITHM_IDS = new Set([
-  "alg_dn_cnn",
-  "alg_denoise_bilateral",
-  "alg_denoise_gaussian",
-  "alg_denoise_median",
-  "alg_dehaze_dcp",
-  "alg_dehaze_clahe",
-  "alg_dehaze_gamma",
-  "alg_deblur_unsharp",
-  "alg_deblur_laplacian",
-  "alg_sr_bicubic",
-  "alg_sr_lanczos",
-  "alg_sr_nearest",
-  "alg_lowlight_gamma",
-  "alg_lowlight_clahe",
-  "alg_video_denoise_gaussian",
-  "alg_video_denoise_median",
-  "alg_video_sr_bicubic",
-  "alg_video_sr_lanczos",
-]);
+function isBuiltinAlgorithm(alg) {
+  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
+}
 const TASK_SORT_ORDER = {
   去雾: 1,
   去噪: 2,
@@ -268,8 +258,8 @@ const filteredAlgorithms = computed(() => {
     return text.includes(kw);
   });
 });
-const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => BUILTIN_ALGORITHM_IDS.has(String(a?.id || ""))));
-const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !BUILTIN_ALGORITHM_IDS.has(String(a?.id || ""))));
+const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isBuiltinAlgorithm(a)));
+const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isBuiltinAlgorithm(a)));
 const pageCount = computed(() => {
   const n = Math.ceil(filteredUserAlgorithms.value.length / Number(pageSize.value || 20));
   return n > 0 ? n : 1;
@@ -428,7 +418,7 @@ const paramDialogTask = ref("");
 const paramDialogImpl = ref("");
 const paramDialogVersion = ref("");
 const paramDialogExplainList = ref([]);
-const paramDialogJson = ref("");
+const paramDialogRows = ref([]);
 
 function toParamRows(obj) {
   return Object.entries(obj || {}).map(([key, value]) => {
@@ -684,17 +674,25 @@ function validateDefaultParamsByTask(task, presetKey, defaultParams) {
 }
 
 function applyParamStyle(scope, style) {
+  const hint =
+    style === "default"
+      ? "已恢复为预设默认参数"
+      : style === "safe"
+        ? "已应用稳妥模式参数"
+        : "已应用增强模式参数";
   if (scope === "create") {
     const p = (PRESET_BY_TASK[form.task] || []).find((x) => x.key === form.presetKey);
     const base = p?.defaultParams || rowsToParamObject(createParamRows.value);
     const next = applyStyleToObject(base, style);
     setCreateParamsObject(next);
+    ElMessage({ type: "success", message: hint });
     return;
   }
   const p = (PRESET_BY_TASK[editForm.task] || []).find((x) => x.key === editForm.presetKey);
   const base = p?.defaultParams || rowsToParamObject(editParamRows.value);
   const next = applyStyleToObject(base, style);
   setEditParamsObject(next);
+  ElMessage({ type: "success", message: hint });
 }
 
 function buildAlgorithmName(task, presetKey, customTag, fallbackName = "") {
@@ -754,7 +752,14 @@ onMounted(async () => {
 const isEditing = ref(false);
 const activeParamMode = computed({
   get: () => (isEditing.value ? editParamMode.value : createParamMode.value),
-  set: (val) => (isEditing.value ? (editParamMode.value = val) : (createParamMode.value = val)),
+  set: (val) => (isEditing.value ? switchEditParamMode(val) : switchCreateParamMode(val)),
+});
+const editorVisible = computed({
+  get: () => (isEditing.value ? showEdit.value : showCreate.value),
+  set: (val) => {
+    if (isEditing.value) showEdit.value = Boolean(val);
+    else showCreate.value = Boolean(val);
+  },
 });
 const activeParamRows = computed(() => (isEditing.value ? editParamRows.value : createParamRows.value));
 const activeParamsText = computed({
@@ -775,6 +780,7 @@ function removeActiveParamRow(idx) {
 
 function openCreate() {
   isEditing.value = false;
+  createParamMode.value = "visual";
   suppressCreatePresetSync.value = true;
   form.task = "去噪";
   form.presetKey = "";
@@ -801,6 +807,7 @@ function closeCreate() {
 
 function openEdit(a) {
   isEditing.value = true;
+  editParamMode.value = "visual";
   suppressEditPresetSync.value = true;
   editForm.id = a?.id || "";
   editForm.task = a?.task || "去噪";
@@ -988,14 +995,17 @@ async function submitCreate() {
 function viewBuiltinParams(a) {
   const name = String(a?.name || "");
   const params = a?.defaultParams && typeof a.defaultParams === "object" ? a.defaultParams : {};
-  const text = Object.keys(params).length ? JSON.stringify(params, null, 2) : "该内置算法无默认参数。";
   paramDialogTitle.value = name;
   paramDialogId.value = String(a?.id || "");
   paramDialogTask.value = String(a?.task || "");
   paramDialogImpl.value = String(a?.impl || "");
   paramDialogVersion.value = String(a?.version || "");
   paramDialogExplainList.value = Object.keys(params).map((k) => getParamDoc(k)).filter(Boolean);
-  paramDialogJson.value = text;
+  paramDialogRows.value = Object.entries(params).map(([key, value]) => ({
+    key,
+    type: typeof value,
+    text: typeof value === "object" ? JSON.stringify(value) : String(value),
+  }));
   showParamDialog.value = true;
 }
 
@@ -1155,21 +1165,50 @@ async function resetToBuiltins() {
   border-left: 4px solid #409eff;
 }
 
-.code-box {
-  background: #282c34;
-  color: #abb2bf;
-  padding: 16px;
-  border-radius: 8px;
-  font-family: "Fira Code", monospace;
-  font-size: 13px;
-  overflow: auto;
-  max-height: 200px;
-}
-
 .param-explain-list {
   background: #f5f7fa;
   padding: 16px;
   border-radius: 8px;
+}
+
+.param-kv-list {
+  background: #f8faff;
+  border: 1px solid #dce7ff;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.param-kv-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px dashed #e6eeff;
+}
+
+.param-kv-item:last-child {
+  border-bottom: none;
+}
+
+.param-kv-key {
+  min-width: 220px;
+  font-weight: 700;
+  color: #1f2f57;
+}
+
+.param-kv-type {
+  min-width: 56px;
+  font-size: 12px;
+  color: #409eff;
+  background: #ecf5ff;
+  border-radius: 999px;
+  text-align: center;
+  padding: 2px 8px;
+}
+
+.param-kv-val {
+  color: #303133;
+  word-break: break-all;
 }
 
 .explain-item {

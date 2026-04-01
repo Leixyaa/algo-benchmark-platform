@@ -1,44 +1,21 @@
 // web/src/api/http.js
 // 通用 HTTP 请求封装：自动拼 query，JSON 请求与错误透传
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 /**
  * @param {string} path 例如 "/runs"
  * @param {{method?: string, query?: Record<string, any>, body?: any}} opts
  */
 export async function request(path, { method = "GET", query, body } = {}) {
-  const url = new URL(API_BASE + path);
-  if (query && typeof query === "object") {
-    for (const [k, v] of Object.entries(query)) {
-      if (v === undefined || v === null) continue;
-      url.searchParams.set(k, String(v));
-    }
-  }
-
-  const headers = {
-    "Content-Type": "application/json",
-  };
-  const token = localStorage.getItem("token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(url.toString(), {
+  const res = await authFetch(path, {
     method,
-    headers,
+    query,
     body: body === undefined ? undefined : JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
   });
 
   if (!res.ok) {
-    if (res.status === 401) {
-      const hadToken = !!localStorage.getItem("token");
-      localStorage.removeItem("token");
-      localStorage.removeItem("username");
-      if (hadToken && window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
-    }
     let data = null;
     let detail = "";
     try {
@@ -65,6 +42,43 @@ export async function request(path, { method = "GET", query, body } = {}) {
   const text = await res.text();
   if (!text) return null;
   return JSON.parse(text);
+}
+
+function buildUrl(path, query) {
+  const url = new URL(API_BASE + path);
+  if (query && typeof query === "object") {
+    for (const [k, v] of Object.entries(query)) {
+      if (v === undefined || v === null) continue;
+      url.searchParams.set(k, String(v));
+    }
+  }
+  return url;
+}
+
+function handleUnauthorized(res) {
+  if (res.status !== 401) return;
+  const hadToken = !!localStorage.getItem("token");
+  localStorage.removeItem("token");
+  localStorage.removeItem("username");
+  if (hadToken && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
+export async function authFetch(path, { method = "GET", query, headers = {}, body } = {}) {
+  const url = buildUrl(path, query);
+  const mergedHeaders = { ...headers };
+  const token = localStorage.getItem("token");
+  if (token) {
+    mergedHeaders.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(url.toString(), {
+    method,
+    headers: mergedHeaders,
+    body,
+  });
+  handleUnauthorized(res);
+  return res;
 }
 
 // 导出便捷方法
