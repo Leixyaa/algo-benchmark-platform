@@ -38,10 +38,24 @@
             <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
             <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
             <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
-            <el-table-column label="&#25805;&#20316;" width="150">
+            <el-table-column label="&#25805;&#20316;" width="180">
               <template #default="{ row }">
-                <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
-                <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
+                <el-dropdown v-if="canManagePlatformAlgorithm(row)" trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="view">&#26597;&#30475;&#21442;&#25968;</el-dropdown-item>
+                      <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>&#19979;&#26550;</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <template v-else>
+                  <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
+                  <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
+                </template>
               </template>
             </el-table-column>
           </el-table>
@@ -62,7 +76,7 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="community">{{ row.visibility === 'public' ? '&#26356;&#26032;&#31038;&#53306;&#20449;&#24687;' : '&#19978;&#20256;&#21040;&#31038;&#53306;' }}</el-dropdown-item>
+                      <el-dropdown-item command="community">{{ isSelfPublishedAlgorithm(row) ? '&#26356;&#26032;&#31038;&#53306;&#20449;&#24687;' : '&#19978;&#20256;&#21040;&#31038;&#53306;' }}</el-dropdown-item>
                       <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
                       <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
                       <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
@@ -258,8 +272,56 @@ const TEXT = {
   manage: "\u7ba1\u7406",
   use: "\u4f7f\u7528",
 };
-function isBuiltinAlgorithm(alg) {
-  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
+const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
+  "alg_dn_cnn_light",
+  "alg_dn_cnn_strong",
+  "alg_denoise_bilateral_soft",
+  "alg_denoise_bilateral_strong",
+  "alg_denoise_gaussian_light",
+  "alg_denoise_gaussian_strong",
+  "alg_denoise_median_light",
+  "alg_denoise_median_strong",
+  "alg_dehaze_dcp_fast",
+  "alg_dehaze_dcp_strong",
+  "alg_dehaze_clahe_mild",
+  "alg_dehaze_clahe_strong",
+  "alg_dehaze_gamma_mild",
+  "alg_dehaze_gamma_strong",
+  "alg_deblur_unsharp_light",
+  "alg_deblur_unsharp_strong",
+  "alg_deblur_laplacian_light",
+  "alg_deblur_laplacian_strong",
+  "alg_sr_nearest",
+  "alg_sr_linear",
+  "alg_sr_bicubic_sharp",
+  "alg_sr_lanczos_sharp",
+  "alg_lowlight_gamma_soft",
+  "alg_lowlight_gamma_strong",
+  "alg_lowlight_clahe_soft",
+  "alg_lowlight_clahe_strong",
+  "alg_video_denoise_gaussian_light",
+  "alg_video_denoise_gaussian_strong",
+  "alg_video_denoise_median_light",
+  "alg_video_denoise_median_strong",
+  "alg_video_sr_nearest",
+  "alg_video_sr_linear",
+  "alg_video_sr_bicubic_sharp",
+  "alg_video_sr_lanczos_sharp",
+]);
+function isPlatformAlgorithm(alg) {
+  return String(alg?.raw?.owner_id || "") === "system";
+}
+function isVisiblePlatformAlgorithm(alg) {
+  if (!isPlatformAlgorithm(alg)) return false;
+  if (alg?.raw?.is_active === false) return false;
+  const hasCommunitySource = String(alg?.sourceUploaderId || "").trim() || String(alg?.sourceAlgorithmId || "").trim();
+  if (hasCommunitySource) return true;
+  return !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(alg?.id || ""));
+}
+function canManagePlatformAlgorithm(alg) {
+  if (store.user.role !== "admin") return false;
+  if (!isPlatformAlgorithm(alg)) return false;
+  return true;
 }
 const TASK_SORT_ORDER = {
   "去雾": 1,
@@ -310,10 +372,20 @@ const filteredAlgorithms = computed(() => {
     return text.includes(kw);
   });
 });
-const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isBuiltinAlgorithm(a)));
-const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isBuiltinAlgorithm(a)));
-const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => !String(a?.sourceUploaderId || "").trim()));
-const filteredDownloadedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => String(a?.sourceUploaderId || "").trim()));
+const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isVisiblePlatformAlgorithm(a)));
+const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isPlatformAlgorithm(a)));
+function hasAlgorithmCommunitySource(row) {
+  return Boolean(String(row?.sourceUploaderId || "").trim() || String(row?.sourceAlgorithmId || "").trim());
+}
+const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => !hasAlgorithmCommunitySource(a)));
+const filteredDownloadedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => hasAlgorithmCommunitySource(a)));
+
+function isSelfPublishedAlgorithm(row) {
+  if (!row) return false;
+  if (String(row?.uploaderId || "") !== String(store.user?.username || "")) return false;
+  if (hasAlgorithmCommunitySource(row)) return false;
+  return String(row?.visibility || "").toLowerCase() === "public";
+}
 const pageCount = computed(() => {
   const n = Math.ceil(filteredOwnedAlgorithms.value.length / Number(pageSize.value || 20));
   return n > 0 ? n : 1;
@@ -433,7 +505,7 @@ const editParamMode = ref("visual");
 const createParamRows = ref([]);
 const editParamRows = ref([]);
 const form = reactive({
-  task: "鍘诲櫔",
+  task: "去噪",
   presetKey: "",
   name: "",
   customTag: "",
@@ -444,7 +516,7 @@ const form = reactive({
 
 const editForm = reactive({
   id: "",
-  task: "鍘诲櫔",
+  task: "去噪",
   presetKey: "",
   name: "",
   customTag: "",
@@ -836,7 +908,7 @@ function openCreate() {
   isEditing.value = false;
   createParamMode.value = "visual";
   suppressCreatePresetSync.value = true;
-  form.task = "鍘诲櫔";
+  form.task = "去噪";
   form.presetKey = "";
   form.name = "";
   form.customTag = "";
@@ -864,7 +936,7 @@ function openEdit(a) {
   editParamMode.value = "visual";
   suppressEditPresetSync.value = true;
   editForm.id = a?.id || "";
-  editForm.task = a?.task || "鍘诲櫔";
+  editForm.task = a?.task || "去噪";
   editForm.name = a?.name || "";
   const parsed = parseAlgorithmName(editForm.task, editForm.name);
   editForm.presetKey = parsed.presetKey;
@@ -1129,6 +1201,20 @@ async function handleAlgorithmAction(row, command) {
   }
 }
 
+async function handlePlatformAlgorithmAction(row, command) {
+  if (command === "view") {
+    viewBuiltinParams(row);
+    return;
+  }
+  if (command === "edit") {
+    openEdit(row);
+    return;
+  }
+  if (command === "delete") {
+    await remove(row?.id);
+  }
+}
+
 async function exportAlgorithmToLocal(row) {
   const algorithmId = String(row?.id || "");
   if (!algorithmId) return;
@@ -1154,15 +1240,16 @@ async function exportAlgorithmToLocal(row) {
 
 async function uploadAlgorithmToCommunity(row) {
   if (!row?.id) return;
+  const alreadyPublished = isSelfPublishedAlgorithm(row);
   try {
     const { value } = await ElMessageBox.prompt(
       "请输入算法在社区中心展示的描述。",
-      row.visibility === "public" ? "更新社区信息" : "上传到社区",
+      alreadyPublished ? "更新社区信息" : "上传到社区",
       {
         inputType: "textarea",
         inputValue: String(row.description || ""),
         inputPlaceholder: "例如：适用于图像去噪任务，基于 OpenCV FastNLMeans 的实验版本。",
-        confirmButtonText: row.visibility === "public" ? "保存" : "上传",
+        confirmButtonText: alreadyPublished ? "保存" : "上传",
         cancelButtonText: "取消",
       }
     );
@@ -1172,7 +1259,7 @@ async function uploadAlgorithmToCommunity(row) {
       allowUse: true,
       allowDownload: true,
     });
-    ElMessage({ type: "success", message: row.visibility === "public" ? "社区信息已更新" : "算法已上传到社区" });
+    ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "算法已上传到社区" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
     ElMessage({ type: "error", message: "上传社区失败：" + String((e && e.message) || e) });

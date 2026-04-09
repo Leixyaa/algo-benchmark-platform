@@ -213,7 +213,7 @@ class PresetOut(BaseModel):
 
 class FastSelectRequest(BaseModel):
     task_type: str = Field(..., description="denoise/deblur/dehaze/sr/lowlight/video_denoise/video_sr")
-    dataset_id: str
+    dataset_id: Optional[str] = None
     candidate_algorithm_ids: List[str] = Field(default_factory=list)
     top_k: int = 3
     alpha: float = 0.35
@@ -234,11 +234,13 @@ class FastSelectItem(BaseModel):
     cold_start_bonus: float = 0.0
     reliability: float = 0.0
     sample_count: int
+    direct_sample_count: int = 0
+    shadow_sample_count: int = 0
 
 
 class FastSelectResponse(BaseModel):
     task_type: str
-    dataset_id: str
+    dataset_id: Optional[str] = None
     top_k: int
     reward_formula: str
     context: Dict[str, Any] = Field(default_factory=dict)

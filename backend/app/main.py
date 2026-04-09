@@ -437,6 +437,17 @@ def _make_unique_algorithm_id(r, source_id: str, target_owner: str) -> str:
     return f"{candidate}_{idx}"
 
 
+def _make_platform_algorithm_id(r, source_id: str) -> str:
+    base = f"platform_{str(source_id or 'algorithm').strip() or 'algorithm'}"
+    candidate = base
+    if not load_algorithm(r, candidate):
+        return candidate
+    idx = 2
+    while load_algorithm(r, f"{base}_{idx}"):
+        idx += 1
+    return f"{base}_{idx}"
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "ts": time.time()}
@@ -665,22 +676,13 @@ def _ensure_catalog_defaults(r):
             continue
         # 增量修复逻辑
         need_patch = False
-        for k in ("task", "name", "impl", "version"):
-            if cur.get(k) != x[k]:
-                cur[k] = x[k]
-                need_patch = True
-        if cur.get("default_params") != x.get("default_params"):
-            cur["default_params"] = dict(x.get("default_params") or {})
-            need_patch = True
-        if cur.get("param_presets") != x.get("param_presets"):
-            cur["param_presets"] = dict(x.get("param_presets") or {})
-            need_patch = True
         if str(cur.get("owner_id") or "") != "system":
             cur["owner_id"] = "system"
             need_patch = True
+        if not isinstance(cur.get("created_at"), (int, float)):
+            cur["created_at"] = created
+            need_patch = True
         if need_patch:
-            if not isinstance(cur.get("created_at"), (int, float)):
-                cur["created_at"] = created
             save_algorithm(r, x["algorithm_id"], cur)
 
     _pin_dataset_and_algorithm_owners(r)
@@ -909,6 +911,13 @@ def _size_by_declared_type(declared_type: str, inferred_type: str, inferred_size
     if inferred_type == "\u56fe\u50cf/\u89c6\u9891":
         return f"{gt_image_count} \u5f20 + {gt_video_count} \u6bb5"
     return inferred_size
+
+
+def _dataset_runtime_owner_and_storage(dataset: dict | None, fallback_owner: str | None = None) -> tuple[str, str | None]:
+    ds = dataset if isinstance(dataset, dict) else {}
+    owner_id = str(ds.get("owner_id") or fallback_owner or "system").strip() or "system"
+    storage_path = str(ds.get("storage_path") or "").strip() or None
+    return owner_id, storage_path
 
 
 def _username_of(current_user: Optional[dict]) -> str:
@@ -1236,6 +1245,70 @@ def _require_admin(current_user: dict) -> None:
         err.api_error(403, err.E_HTTP, "admin_required")
 
 
+def _is_algorithm_active(algorithm: dict | None) -> bool:
+    if not isinstance(algorithm, dict):
+        return True
+    return bool(algorithm.get("is_active", True))
+
+
+def _assert_algorithm_manage_access(algorithm: dict, current_user: dict) -> None:
+    owner_id = str((algorithm or {}).get("owner_id") or "system").strip() or "system"
+    if owner_id == "system":
+        _require_admin(current_user)
+        return
+    _assert_resource_access(algorithm, current_user, allow_system=False)
+
+
+def _list_all_runs(r, limit: int = 5000) -> list[dict]:
+    items: list[dict] = []
+    for key in r.scan_iter(match="run:*", count=1000):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("run_id"):
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
+    return items[:limit]
+
+
+def _aggregate_dataset_meta_for_task(r, task_type: str, current_user: Optional[dict]) -> tuple[dict, int, int]:
+    is_admin = _normalize_user_role(current_user) == "admin"
+    if is_admin:
+        datasets = list_datasets(r, limit=5000, owner_id=None, include_public=True) or []
+    else:
+        owner_id = _username_of(current_user) or None
+        datasets = list_datasets(r, limit=5000, owner_id=owner_id, include_public=True) or []
+    counts_by_dir: dict[str, int] = {}
+    pairs_by_task: dict[str, int] = {}
+    supported_tasks: set[str] = set()
+    dataset_count = 0
+    for ds in datasets:
+        meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
+        pair_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
+        pair_count = int(pair_map.get(task_type) or 0)
+        if pair_count <= 0:
+            continue
+        dataset_count += 1
+        for key, value in (meta.get("counts_by_dir") if isinstance(meta.get("counts_by_dir"), dict) else {}).items():
+            counts_by_dir[str(key)] = int(counts_by_dir.get(str(key), 0) or 0) + int(value or 0)
+        for key, value in pair_map.items():
+            k = str(key)
+            v = int(value or 0)
+            pairs_by_task[k] = int(pairs_by_task.get(k, 0) or 0) + v
+            if v > 0:
+                supported_tasks.add(k)
+    meta = {
+        "counts_by_dir": counts_by_dir,
+        "pairs_by_task": pairs_by_task,
+        "supported_task_types": sorted(supported_tasks),
+    }
+    return meta, int(pairs_by_task.get(task_type) or 0), dataset_count
+
+
 def _list_all_comments(r) -> list[dict]:
     items: list[dict] = []
     for key in r.scan_iter(match="comment:*:*:*", count=1000):
@@ -1496,7 +1569,7 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
             err.api_error(409, err.E_HTTP, "dataset_already_downloaded", dataset_id=dataset_id)
 
     target_dataset_id = _make_unique_dataset_id(r, dataset_id, target_owner)
-    source_dir = _resolve_dataset_dir(source_owner, dataset_id)
+    source_dir = _dataset_dir_from_record(source)
     if not _dataset_has_files(source_dir):
         err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
     target_dir = _dataset_storage_root() / target_owner / target_dataset_id
@@ -1797,7 +1870,8 @@ def scan_dataset(
         # 缓存永不过期，只有在数据集变化时才会失效
         r.set(cache_key, json.dumps(cache_data))
     
-    meta = dict(meta or {})
+    existing_meta = cur.get("meta") if isinstance(cur.get("meta"), dict) else {}
+    meta = {**existing_meta, **dict(meta or {})}
     meta["inferred_type"] = t
     current_type = str(cur.get("type") or "").strip()
     if not current_type:
@@ -1949,6 +2023,7 @@ def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user:
     _ensure_catalog_defaults(r)
     include_public = str(scope or "manage").lower() == "community"
     owner_id = None if include_public else (current_user["username"] if current_user else None)
+    is_admin = _normalize_user_role(current_user) == "admin"
     catalog = _builtin_algorithm_catalog()
     defaults_by_id = {x["algorithm_id"]: dict(x.get("default_params") or {}) for x in catalog}
     presets_by_id = {x["algorithm_id"]: dict(x.get("param_presets") or {}) for x in catalog}
@@ -1968,6 +2043,8 @@ def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user:
             if repaired_task != str(x.get("task") or ""):
                 x = {**x, "task": repaired_task}
                 save_algorithm(r, alg_id, x)
+        if not is_admin and str(x.get("owner_id") or "") == "system" and not _is_algorithm_active(x):
+            continue
         out.append(AlgorithmOut(**x).model_dump())
     return out
 
@@ -2033,13 +2110,11 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
 def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    if algorithm_id in BUILTIN_ALGORITHM_IDS:
-        err.api_error(400, err.E_HTTP, "builtin_algorithm_readonly", algorithm_id=algorithm_id)
     cur = load_algorithm(r, algorithm_id)
     if not cur:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
-    
-    _assert_resource_access(cur, current_user, allow_system=True)
+
+    _assert_algorithm_manage_access(cur, current_user)
         
     if payload.task is not None:
         cur["task"] = _normalize_algorithm_task_label(payload.task)
@@ -2069,16 +2144,43 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: di
 def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    if algorithm_id in BUILTIN_ALGORITHM_IDS:
-        err.api_error(400, err.E_HTTP, "builtin_algorithm_readonly", algorithm_id=algorithm_id)
     cur = load_algorithm(r, algorithm_id)
     if not cur:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
-    
-    _assert_resource_access(cur, current_user, allow_system=True)
-        
+
+    _assert_algorithm_manage_access(cur, current_user)
+
+    owner_id = str(cur.get("owner_id") or "system").strip() or "system"
+    if owner_id == "system":
+        source_name = str(cur.get("name") or algorithm_id).strip() or algorithm_id
+        for item in _list_all_algorithm_records(r):
+            item_owner = str(item.get("owner_id") or "").strip()
+            if item_owner in {"", "system"}:
+                continue
+            if str(item.get("source_algorithm_id") or "") != algorithm_id:
+                continue
+            if str(item.get("source_owner_id") or "") != "system":
+                continue
+            _delete_algorithm_record_with_related_state(r, item)
+            _create_notice(
+                r,
+                item_owner,
+                "平台算法已下架",
+                f"你下载的平台注册算法“{source_name}”已被管理员下架，相关副本已从你的算法库中移除。",
+                kind="warning",
+            )
+        if algorithm_id in BUILTIN_ALGORITHM_IDS:
+            cur["is_active"] = False
+            cur["visibility"] = "private"
+            cur["allow_use"] = False
+            cur["allow_download"] = False
+            save_algorithm(r, algorithm_id, cur)
+            return {"ok": True, "algorithm_id": algorithm_id, "archived": True}
+        delete_algorithm(r, algorithm_id)
+        return {"ok": True, "algorithm_id": algorithm_id, "archived": False}
+
     delete_algorithm(r, algorithm_id)
-    return {"ok": True, "algorithm_id": algorithm_id}
+    return {"ok": True, "algorithm_id": algorithm_id, "archived": False}
 
 
 @app.get("/algorithms/{algorithm_id}/export")
@@ -2292,6 +2394,8 @@ def admin_list_community_algorithms(current_user: dict = Depends(get_current_use
       visibility = str(item.get("visibility") or "private").lower()
       if owner_id == "system":
           continue
+      if not _is_algorithm_active(item):
+          continue
       if visibility != "public":
           continue
       out.append(AlgorithmOut(**item))
@@ -2382,6 +2486,71 @@ def admin_takedown_algorithm(algorithm_id: str, current_user: dict = Depends(get
                 kind="warning",
             )
     return AlgorithmOut(**cur)
+
+
+@app.post("/admin/community/algorithms/{algorithm_id}/promote", response_model=AlgorithmOut)
+def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    source = load_algorithm(r, algorithm_id)
+    if not source:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+
+    source_owner = str(source.get("owner_id") or "system").strip() or "system"
+    visibility = str(source.get("visibility") or "private").lower()
+    if source_owner == "system":
+        err.api_error(409, err.E_HTTP, "algorithm_already_platform_owned", algorithm_id=algorithm_id)
+    if visibility != "public":
+        err.api_error(403, err.E_HTTP, "algorithm_not_public", algorithm_id=algorithm_id)
+
+    for existing in list_algorithms(r, limit=5000, owner_id="system", include_public=True) or []:
+        if (
+            str(existing.get("owner_id") or "") == "system"
+            and str(existing.get("source_algorithm_id") or "") == algorithm_id
+            and str(existing.get("source_owner_id") or "") == source_owner
+        ):
+            if _is_algorithm_active(existing):
+                return AlgorithmOut(**existing)
+            restored = dict(existing)
+            restored["task"] = source.get("task")
+            restored["name"] = str(source.get("name") or algorithm_id).strip() or algorithm_id
+            restored["impl"] = source.get("impl")
+            restored["version"] = source.get("version")
+            restored["description"] = source.get("description")
+            restored["default_params"] = dict(source.get("default_params") or {})
+            restored["param_presets"] = dict(source.get("param_presets") or {})
+            restored["visibility"] = "public"
+            restored["allow_use"] = True
+            restored["allow_download"] = True
+            restored["is_active"] = True
+            restored["updated_at"] = time.time()
+            save_algorithm(r, str(existing.get("algorithm_id") or ""), restored)
+            return AlgorithmOut(**restored)
+
+    promoted = dict(source)
+    promoted["algorithm_id"] = _make_platform_algorithm_id(r, algorithm_id)
+    promoted["owner_id"] = "system"
+    promoted["name"] = _make_unique_algorithm_name(r, str(source.get("name") or algorithm_id).strip() or algorithm_id)
+    promoted["created_at"] = time.time()
+    promoted["visibility"] = "public"
+    promoted["allow_use"] = True
+    promoted["allow_download"] = True
+    promoted["is_active"] = True
+    promoted["source_algorithm_id"] = algorithm_id
+    promoted["source_owner_id"] = source_owner
+    save_algorithm(r, promoted["algorithm_id"], promoted)
+
+    if source_owner:
+        _create_notice(
+            r,
+            source_owner,
+            "社区算法已被平台收录",
+            f"你上传的社区算法“{str(source.get('name') or algorithm_id).strip() or algorithm_id}”已被管理员收录进平台标准算法库。",
+            kind="success",
+        )
+
+    return AlgorithmOut(**promoted)
 
 
 @app.post("/admin/community/datasets/{dataset_id}/takedown", response_model=DatasetOut)
@@ -2592,29 +2761,42 @@ def remove_preset(preset_id: str, current_user: dict = Depends(get_current_user)
 def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     username = _username_of(current_user)
+    is_admin = _normalize_user_role(current_user) == "admin"
     task_type = (payload.task_type or "").strip().lower()
     dataset_id = (payload.dataset_id or "").strip()
     if task_type not in TASK_LABEL_BY_TYPE:
         err.api_error(400, err.E_BAD_TASK_TYPE, "bad_task_type", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+    aggregate_dataset_count = 0
     if not dataset_id:
-        err.api_error(400, err.E_DATASET_ID_REQUIRED, "dataset_id_required")
-
-    ds = load_dataset(r, dataset_id)
-    if not ds:
-        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
-    _assert_resource_access(ds, current_user, allow_system=True)
-    meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
-    pairs_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
-    pair_count = int(pairs_map.get(task_type) or 0)
-    if pair_count <= 0:
-        err.api_error(
-            409,
-            err.E_DATASET_NO_PAIR,
-            "dataset_no_pair_for_task",
-            task_type=task_type,
-            dataset_id=dataset_id,
-            pair_count=pair_count,
-        )
+        if not is_admin:
+            err.api_error(400, err.E_DATASET_ID_REQUIRED, "dataset_id_required")
+        meta, pair_count, aggregate_dataset_count = _aggregate_dataset_meta_for_task(r, task_type, current_user)
+        if pair_count <= 0:
+            err.api_error(
+                409,
+                err.E_DATASET_NO_PAIR,
+                "dataset_no_pair_for_task",
+                task_type=task_type,
+                dataset_id="",
+                pair_count=pair_count,
+            )
+    else:
+        ds = load_dataset(r, dataset_id)
+        if not ds:
+            err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+        _assert_resource_access(ds, current_user, allow_system=True)
+        meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
+        pairs_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
+        pair_count = int(pairs_map.get(task_type) or 0)
+        if pair_count <= 0:
+            err.api_error(
+                409,
+                err.E_DATASET_NO_PAIR,
+                "dataset_no_pair_for_task",
+                task_type=task_type,
+                dataset_id=dataset_id,
+                pair_count=pair_count,
+            )
 
     task_label = TASK_LABEL_BY_TYPE.get(task_type, "")
     if payload.candidate_algorithm_ids:
@@ -2649,6 +2831,47 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
                 return n[:i].strip()
         return n
 
+    def _algorithm_family_tokens(alg: dict | None) -> set[str]:
+        if not isinstance(alg, dict):
+            return set()
+        tokens: set[str] = set()
+        for raw in (
+            _scheme_base_name(str(alg.get("name") or "")),
+            str(alg.get("impl") or ""),
+            str(alg.get("algorithm_id") or ""),
+        ):
+            text = str(raw or "").strip().lower()
+            if not text:
+                continue
+            tokens.add(text)
+            plain = "".join(ch for ch in text if ch.isalnum())
+            if plain:
+                tokens.add(plain)
+        alias_map = {
+            "fastnlmeans": {"fastnlmeans", "dncnn"},
+            "dncnn": {"fastnlmeans", "dncnn"},
+            "bilateral": {"bilateral"},
+            "gaussian": {"gaussian", "videogaussian"},
+            "median": {"median", "videomedian"},
+            "clahe": {"clahe"},
+            "gamma": {"gamma"},
+            "dcp": {"dcp", "darkchannel"},
+            "unsharpmask": {"unsharpmask", "unsharp"},
+            "laplaciansharpen": {"laplaciansharpen", "laplacian"},
+            "bicubic": {"bicubic", "videobicubic"},
+            "lanczos": {"lanczos", "videolanczos"},
+            "nearest": {"nearest", "videonearest"},
+            "linear": {"linear", "videolinear"},
+            "gammaclahehybrid": {"gammaclahehybrid", "hybrid"},
+        }
+        expanded = set(tokens)
+        for token in list(tokens):
+            for key, aliases in alias_map.items():
+                if key in token or any(alias in token for alias in aliases):
+                    expanded.update(aliases)
+                    expanded.add(key)
+        return expanded
+
     uniq = []
     seen = set()
     for aid in candidate_ids:
@@ -2667,7 +2890,13 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
         alg = load_algorithm(r, aid)
         if not alg:
             err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=aid)
-        _assert_resource_access(alg, current_user, allow_system=True)
+        alg_owner = str((alg.get("owner_id") or "system")).strip() or "system"
+        alg_visibility = str((alg.get("visibility") or "private")).lower()
+        if is_admin and alg_owner != "system":
+            if alg_visibility != "public":
+                err.api_error(403, err.E_HTTP, "algorithm_not_public", algorithm_id=aid)
+        else:
+            _assert_resource_access(alg, current_user, allow_system=True)
         if str((alg.get("task") or "")).strip() != task_label:
             err.api_error(
                 409,
@@ -2705,7 +2934,7 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
     )
     model = load_online_model(r, task_type)
     historical_done_count = 0
-    if model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
+    if (not is_admin) and model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
         arm_stats = fast_select_algorithms_online(
             task_type=task_type,
             candidate_algorithm_ids=valid_ids,
@@ -2716,7 +2945,7 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
         arms = model.get("arms") if isinstance(model.get("arms"), dict) else {}
         historical_done_count = int(sum(int((v or {}).get("sample_count") or 0) for v in arms.values() if isinstance(v, dict)))
     else:
-        runs = list_runs(r, limit=5000, owner_id=(username or None)) or []
+        runs = (_list_all_runs(r, limit=5000) if is_admin else list_runs(r, limit=5000, owner_id=(username or None))) or []
         run_alg_cache: dict[str, dict] = {}
         augmented_runs = list(runs)
         for run in runs:
@@ -2731,23 +2960,25 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
                 run_alg_cache[run_alg_id] = load_algorithm(r, run_alg_id) or {}
             run_alg = run_alg_cache.get(run_alg_id) or {}
             run_base = _scheme_base_name(str(run_alg.get("name") or ""))
+            run_family = _algorithm_family_tokens(run_alg)
             run_eff = _normalize_effective_params(run.get("params") if isinstance(run.get("params"), dict) else {})
-            if not run_eff:
-                continue
             for aid in valid_ids:
                 if aid == run_alg_id:
                     continue
                 cand_alg = alg_by_id.get(aid) or {}
                 cand_base = _scheme_base_name(str(cand_alg.get("name") or ""))
+                cand_family = _algorithm_family_tokens(cand_alg)
                 cand_eff = candidate_defaults.get(aid) or {}
-                if not cand_eff:
+                same_base = bool(cand_base and run_base and cand_base == run_base)
+                same_family = bool(cand_family and run_family and (cand_family & run_family))
+                if not same_base and not same_family:
                     continue
-                if cand_base and run_base and cand_base != run_base:
-                    continue
-                if run_eff != cand_eff:
+                if run_eff and cand_eff and run_eff != cand_eff:
                     continue
                 shadow = dict(run)
                 shadow["algorithm_id"] = aid
+                shadow["_shadow_reused"] = True
+                shadow["_shadow_source_algorithm_id"] = run_alg_id
                 augmented_runs.append(shadow)
         arm_stats = fast_select_algorithms(
             task_type=task_type,
@@ -2776,6 +3007,8 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
             cold_start_bonus=x.cold_start_bonus,
             reliability=x.reliability,
             sample_count=x.sample_count,
+            direct_sample_count=x.direct_sample_count,
+            shadow_sample_count=x.shadow_sample_count,
         )
         for x in arm_stats[:top_k]
     ]
@@ -2794,6 +3027,8 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
         "low_support_penalty": low_support_penalty,
         "min_support": min_support,
         "online_model": bool(model),
+        "dataset_mode": "single" if dataset_id else "aggregate",
+        "aggregate_dataset_count": aggregate_dataset_count,
     }
 
     return FastSelectResponse(
@@ -2841,7 +3076,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
             algorithm_task=(alg.get("task") or "").strip(),
         )
 
-    from .vision.dataset_io import count_paired_images, count_paired_videos
+    from .vision.dataset_access import count_paired_images, count_paired_videos
 
     data_root = Path(__file__).resolve().parents[1] / "data"
     # 确保数据目录存在
@@ -2858,10 +3093,25 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
     input_dirname = input_dir_by_task.get(task_type)
     if not input_dirname:
         err.api_error(400, err.E_BAD_TASK_TYPE, "\u4e0d\u652f\u6301\u7684\u4efb\u52a1\u7c7b\u578b", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
+    dataset_owner_id, dataset_storage_path = _dataset_runtime_owner_and_storage(ds, owner_id)
     if task_type.startswith("video_"):
-        pair_count = count_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+        pair_count = count_paired_videos(
+            data_root=data_root,
+            owner_id=dataset_owner_id,
+            dataset_id=dataset_id,
+            input_dirname=input_dirname,
+            gt_dirname="gt",
+            storage_path=dataset_storage_path,
+        )
     else:
-        pair_count = count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+        pair_count = count_paired_images(
+            data_root=data_root,
+            owner_id=dataset_owner_id,
+            dataset_id=dataset_id,
+            input_dirname=input_dirname,
+            gt_dirname="gt",
+            storage_path=dataset_storage_path,
+        )
     if pair_count <= 0:
         err.api_error(
             409,
@@ -2897,6 +3147,15 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         "error": None,
         "error_code": None,
         "error_detail": None,
+        "record": {
+            "dataset": {
+                "dataset_id": dataset_id,
+                "owner_id": dataset_owner_id,
+                "storage_path": dataset_storage_path,
+                "source_owner_id": ds.get("source_owner_id"),
+                "source_dataset_id": ds.get("source_dataset_id"),
+            }
+        },
     }
     save_run(r, run_id, run)
 

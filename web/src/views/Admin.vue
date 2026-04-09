@@ -14,6 +14,73 @@
     />
 
     <el-tabs v-model="tab" class="resource-tabs">
+      <el-tab-pane label="标准算法收录推荐" name="screening">
+        <div class="screening-panel">
+          <div class="screening-intro">
+            <div class="screening-title">平台标准算法库智能筛选</div>
+            <div class="screening-subtitle">
+              管理员基于指定任务与全平台历史评测数据，对社区公开算法执行 LinUCB 智能筛选，再决定是否收录进平台标准算法库。
+            </div>
+          </div>
+
+          <div class="screening-toolbar">
+            <el-select v-model="screeningTask" placeholder="选择任务" class="screening-select">
+              <el-option v-for="item in screeningTaskOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-input v-model="screeningKeyword" placeholder="搜索候选算法名称 / 上传者ID" clearable class="screening-search" />
+            <el-input-number v-model="screeningTopK" :min="1" :max="10" class="screening-number" />
+            <el-input-number v-model="screeningAlpha" :min="0" :max="2" :step="0.1" class="screening-number" />
+            <el-button type="primary" @click="runScreening" :loading="screeningLoading">执行智能筛选</el-button>
+          </div>
+
+          <div class="screening-hint">
+            候选池默认来自“社区算法”中的公开资源；收录后会复制为平台算法，普通用户后续使用的是平台标准库版本。
+          </div>
+
+          <el-table :data="screeningCandidates" border stripe class="data-table">
+            <el-table-column prop="name" label="候选算法" min-width="220" />
+            <el-table-column prop="task" label="任务" width="120" />
+            <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+            <el-table-column prop="downloadCount" label="下载量" width="100" />
+            <el-table-column label="平台状态" width="130">
+              <template #default="{ row }">
+                <el-tag v-if="row.promoted" type="success">已收录</el-tag>
+                <el-tag v-else type="info">待筛选</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="推荐结果" width="180">
+              <template #default="{ row }">
+                <div v-if="row.recommendation" class="screening-rank-cell">
+                  <el-tag type="success">第 {{ row.recommendation.rank }} 名</el-tag>
+                  <div class="screening-score">评分 {{ row.recommendation.score }}</div>
+                </div>
+                <span v-else class="empty-text">未进入 Top-K</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="220">
+              <template #default="{ row }">
+                <el-button size="small" plain @click="openResourceDetail('algorithm', row)">详情</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  @click="promoteAlgorithm(row)"
+                  :disabled="row.promoted"
+                  :loading="promotingAlgorithmIds.has(row.id)"
+                >
+                  {{ row.promoted ? "已收录" : "收录为平台算法" }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div v-if="screeningContext" class="screening-context">
+            本次基于 {{ screeningContext.historical_run_count ?? 0 }} 条历史完成 Run，候选算法 {{ screeningContext.candidate_count ?? 0 }} 个，
+            聚合有效配对数 {{ screeningContext.pair_count ?? 0 }}，
+            参与数据集 {{ screeningContext.aggregate_dataset_count ?? 0 }} 个，alpha={{ screeningContext.alpha ?? screeningAlpha }}。
+          </div>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="社区算法" name="algorithms">
         <div class="toolbar">
           <el-input v-model="algorithmKeyword" placeholder="搜索算法名称 / 上传者ID" clearable class="search-input" />
@@ -140,6 +207,23 @@
           <div class="description-box">{{ detailItem.description || "暂无描述" }}</div>
         </div>
 
+        <div v-if="detailType === 'algorithm' && detailItem.recommendation" class="detail-block">
+          <div class="block-title">智能筛选结果</div>
+          <div class="detail-grid">
+            <div>推荐排名：第 {{ detailItem.recommendation.rank }} 位</div>
+            <div>推荐评分：{{ detailItem.recommendation.score }}</div>
+            <div>历史均值：{{ detailItem.recommendation.meanReward }}</div>
+            <div>总样本数：{{ detailItem.recommendation.sampleCount }}</div>
+            <div>直接样本：{{ detailItem.recommendation.directSampleCount }}</div>
+            <div>同族先验：{{ detailItem.recommendation.shadowSampleCount }}</div>
+          </div>
+        </div>
+
+        <div v-else-if="detailType === 'algorithm'" class="detail-block">
+          <div class="block-title">智能筛选结果</div>
+          <div class="empty-text">当前未进入本轮推荐 Top-K。</div>
+        </div>
+
         <div class="detail-block">
           <div class="block-title">评论列表</div>
           <div v-if="!detailComments.length" class="empty-text">当前资源暂无评论。</div>
@@ -238,7 +322,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { adminApi } from "../api/admin";
-import { useAppStore } from "../stores/app";
+import { toTaskType, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 
@@ -252,12 +336,15 @@ const algorithmKeyword = ref("");
 const datasetKeyword = ref("");
 const pendingReportKeyword = ref("");
 const reportLogKeyword = ref("");
+const screeningKeyword = ref("");
 
 const loadingAlgorithmIds = ref(new Set());
 const loadingDatasetIds = ref(new Set());
 const deletingCommentIds = ref(new Set());
 const resolvingReportIds = ref(new Set());
+const promotingAlgorithmIds = ref(new Set());
 const clearingReports = ref(false);
+const screeningLoading = ref(false);
 
 const detailVisible = ref(false);
 const detailType = ref("algorithm");
@@ -270,6 +357,11 @@ const reportProcessNote = ref("");
 const reportProcessSubmitting = ref(false);
 const reportTargetDetail = ref(null);
 const reportTargetComment = ref(null);
+const screeningTask = ref("");
+const screeningTopK = ref(3);
+const screeningAlpha = ref(0.35);
+const screeningContext = ref(null);
+const screeningRecommendations = ref([]);
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -402,6 +494,68 @@ const handledReportsCount = computed(() =>
 
 const detailTitle = computed(() => (detailType.value === "algorithm" ? "算法详情" : "数据集详情"));
 
+const screeningTaskOptions = computed(() => {
+  const seen = new Set();
+  return (algorithms.value || [])
+    .map((item) => {
+      const task = String(item.task || "").trim();
+      const value = toTaskType(task);
+      return value ? { label: task, value } : null;
+    })
+    .filter((item) => item && !seen.has(item.value) && seen.add(item.value));
+});
+
+const promotedSourceKeys = computed(() => {
+  const keys = new Set();
+  for (const item of store.algorithms || []) {
+    if (String(item?.uploaderId || "") !== "system") continue;
+    if (item?.raw?.is_active === false) continue;
+    const sourceAlgorithmId = String(item?.sourceAlgorithmId || "").trim();
+    const sourceUploaderId = String(item?.sourceUploaderId || "").trim();
+    if (sourceAlgorithmId && sourceUploaderId) {
+      keys.add(`${sourceUploaderId}::${sourceAlgorithmId}`);
+    }
+  }
+  return keys;
+});
+
+const screeningRecommendationMap = computed(() => {
+  const out = new Map();
+  (screeningRecommendations.value || []).forEach((item, index) => {
+    out.set(String(item.algorithm_id || ""), {
+      rank: index + 1,
+      score: item.score,
+      meanReward: item.mean_reward,
+      sampleCount: item.sample_count,
+      directSampleCount: item.direct_sample_count ?? 0,
+      shadowSampleCount: item.shadow_sample_count ?? 0,
+    });
+  });
+  return out;
+});
+
+const screeningCandidates = computed(() => {
+  const taskLabel = screeningTaskOptions.value.find((item) => item.value === screeningTask.value)?.label || "";
+  const items = (algorithms.value || [])
+    .filter((item) => !taskLabel || String(item.task || "") === taskLabel)
+    .filter((item) => includesKeyword([item.name, item.task, item.uploaderId], screeningKeyword.value))
+    .map((item) => {
+      const key = `${String(item.uploaderId || "")}::${String(item.id || "")}`;
+      return {
+        ...item,
+        promoted: promotedSourceKeys.value.has(key),
+        recommendation: screeningRecommendationMap.value.get(String(item.id || "")) || null,
+      };
+    })
+    .filter((item) => !item.promoted);
+  if (!(screeningRecommendations.value || []).length) {
+    return items;
+  }
+  return items
+    .filter((item) => item.recommendation)
+    .sort((a, b) => Number(a?.recommendation?.rank || 9999) - Number(b?.recommendation?.rank || 9999));
+});
+
 const detailComments = computed(() =>
   (comments.value || []).filter(
     (item) =>
@@ -422,7 +576,21 @@ async function loadAll() {
   datasets.value = (dsRes || []).map(mapDataset);
   comments.value = (commentRes || []).map(mapComment);
   reports.value = (reportRes || []).map(mapReport);
+  if (!screeningTask.value && screeningTaskOptions.value.length) {
+    screeningTask.value = screeningTaskOptions.value[0].value;
+  }
 }
+
+watch(screeningTaskOptions, (next) => {
+  if (!screeningTask.value && next.length) {
+    screeningTask.value = next[0].value;
+  }
+});
+
+watch([screeningTask, screeningTopK, screeningAlpha, screeningKeyword], () => {
+  screeningRecommendations.value = [];
+  screeningContext.value = null;
+});
 
 function openResourceDetail(type, row) {
   detailType.value = type;
@@ -440,6 +608,55 @@ async function takedownAlgorithm(row) {
     ElMessage.error(e?.message || "算法下架失败");
   } finally {
     setLoading(loadingAlgorithmIds, row.id, false);
+  }
+}
+
+async function runScreening() {
+  const taskType = String(screeningTask.value || "").trim();
+  const candidates = screeningCandidates.value.filter((item) => !item.promoted);
+  if (!taskType) {
+    ElMessage.warning("请先选择任务");
+    return;
+  }
+  if (!candidates.length) {
+    ElMessage.warning("当前没有可筛选的社区候选算法");
+    return;
+  }
+  try {
+    screeningLoading.value = true;
+    const res = await store.fastSelect({
+      task_type: taskType,
+      allow_empty_dataset_id: true,
+      candidate_algorithm_ids: candidates.map((item) => item.id),
+      top_k: Number(screeningTopK.value || 3),
+      alpha: Number(screeningAlpha.value || 0.35),
+    });
+    screeningRecommendations.value = Array.isArray(res?.recommendations) ? res.recommendations : [];
+    screeningContext.value = res?.context && typeof res.context === "object" ? res.context : null;
+    if (!screeningRecommendations.value.length) {
+      ElMessage.warning("智能筛选已执行，但当前没有返回推荐结果");
+      return;
+    }
+    ElMessage.success(`已完成智能筛选，返回 ${screeningRecommendations.value.length} 条推荐结果`);
+  } catch (e) {
+    screeningRecommendations.value = [];
+    screeningContext.value = null;
+    ElMessage.error(e?.message || "智能筛选失败");
+  } finally {
+    screeningLoading.value = false;
+  }
+}
+
+async function promoteAlgorithm(row) {
+  try {
+    setLoading(promotingAlgorithmIds, row.id, true);
+    await adminApi.promoteCommunityAlgorithm(row.id);
+    await store.fetchAlgorithms();
+    ElMessage.success("已收录到平台标准算法库");
+  } catch (e) {
+    ElMessage.error(e?.message || "收录失败");
+  } finally {
+    setLoading(promotingAlgorithmIds, row.id, false);
   }
 }
 
@@ -640,6 +857,59 @@ onMounted(loadAll);
   margin-bottom: 20px;
 }
 
+.screening-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.screening-intro {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #f8fbff;
+  border: 1px solid #dce7ff;
+}
+
+.screening-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2f57;
+}
+
+.screening-subtitle,
+.screening-hint,
+.screening-context {
+  color: #5d6c8c;
+  line-height: 1.7;
+}
+
+.screening-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.screening-select {
+  width: 220px;
+}
+
+.screening-search {
+  width: 260px;
+}
+
+.screening-number {
+  width: 140px;
+}
+
+.recommend-cell {
+  display: grid;
+  gap: 4px;
+  color: #334466;
+  line-height: 1.5;
+}
+
 .toolbar {
   margin-bottom: 14px;
   display: flex;
@@ -686,6 +956,23 @@ onMounted(loadAll);
 .detail-block {
   display: grid;
   gap: 10px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  color: #334466;
+}
+
+.screening-rank-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.screening-score {
+  color: #1f4fd1;
+  font-weight: 700;
 }
 
 .block-title {

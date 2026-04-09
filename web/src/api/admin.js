@@ -1,6 +1,9 @@
 import { request } from "./http";
 
 export const adminApi = {
+  promoteCommunityAlgorithm(algorithmId) {
+    return request(`/admin/community/algorithms/${algorithmId}/promote`, { method: "POST" });
+  },
   listCommunityAlgorithms() {
     return request("/admin/community/algorithms", { method: "GET" });
   },

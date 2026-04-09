@@ -490,7 +490,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
         if task_type in {"dehaze", "denoise", "deblur", "sr", "lowlight", "video_denoise", "video_sr"}:
             from pathlib import Path
-            from .vision.dataset_io import find_paired_images, find_paired_videos
+            from .vision.dataset_access import find_paired_images, find_paired_videos, count_paired_images, count_paired_videos
 
             algorithm_id = (algorithm_id or "").lower()
             algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
@@ -512,11 +512,20 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             input_dirname = input_dir_by_task.get(task_type, "hazy")
             is_video_task = task_type.startswith("video_")
             dataset = load_dataset(r, dataset_id) or {}
-            owner_id = str(dataset.get("owner_id") or run.get("owner_id") or "system")
-            storage_path = str(dataset.get("storage_path") or "").strip() or None
+            record_dataset = record.get("dataset") if isinstance(record.get("dataset"), dict) else {}
+            owner_id = str(
+                dataset.get("owner_id")
+                or record_dataset.get("owner_id")
+                or run.get("owner_id")
+                or "system"
+            ).strip() or "system"
+            storage_path = str(
+                dataset.get("storage_path")
+                or record_dataset.get("storage_path")
+                or ""
+            ).strip() or None
             # 获取数据集所有者
             owner_id = run.get("owner_id", "system")
-            owner_id = str(dataset.get("owner_id") or owner_id or "system")
             if is_video_task:
                 pairs = find_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5, storage_path=storage_path)
             else:

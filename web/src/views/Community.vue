@@ -59,7 +59,7 @@
               :loading="downloadingAlgorithmIds.has(row.id)"
               :disabled="!store.user.isLoggedIn || isOwnedByCurrentUser(row) || isAlgorithmDownloaded(row)"
             >
-              {{ isAlgorithmDownloaded(row) ? "已下载" : "下载" }}
+              {{ getAlgorithmActionLabel(row) }}
             </el-button>
           </template>
         </el-table-column>
@@ -87,7 +87,7 @@
               :loading="downloadingDatasetIds.has(row.id)"
               :disabled="!store.user.isLoggedIn || isOwnedByCurrentUser(row) || isDatasetDownloaded(row)"
             >
-              {{ isDatasetDownloaded(row) ? "已下载" : "下载" }}
+              {{ getDatasetActionLabel(row) }}
             </el-button>
           </template>
         </el-table-column>
@@ -295,14 +295,36 @@ function isOwnedByCurrentUser(item) {
   return String(item?.raw?.owner_id || "") === String(store.user?.username || "");
 }
 
+function getAlgorithmActionLabel(row) {
+  if (isOwnedByCurrentUser(row)) return "自传";
+  if (isAlgorithmDownloaded(row)) return "已下载";
+  return "下载";
+}
+
+function getDatasetActionLabel(row) {
+  if (isOwnedByCurrentUser(row)) return "自传";
+  if (isDatasetDownloaded(row)) return "已下载";
+  return "下载";
+}
+
+function findDownloadedAlgorithmCopy(row) {
+  const currentUser = String(store.user?.username || "").trim();
+  const sourceAlgorithmId = String(row?.id || "").trim();
+  const sourceUploaderId = String(row?.uploaderId || "").trim();
+  if (!currentUser || !sourceAlgorithmId || !sourceUploaderId) return null;
+  return (
+    (store.algorithms || []).find((item) => {
+      if (String(item?.uploaderId || "").trim() !== currentUser) return false;
+      if (String(item?.raw?.owner_id || "").trim() === "system") return false;
+      if (String(item?.sourceAlgorithmId || "").trim() !== sourceAlgorithmId) return false;
+      return String(item?.sourceUploaderId || "").trim() === sourceUploaderId;
+    }) || null
+  );
+}
+
 function isAlgorithmDownloaded(row) {
   if (locallyDownloadedAlgorithmIds.value.has(String(row?.id || ""))) return true;
-  const currentUser = String(store.user?.username || "");
-  return (store.algorithms || []).some((item) => {
-    if (String(item?.uploaderId || "") !== currentUser) return false;
-    if (String(item?.sourceUploaderId || "") !== String(row?.uploaderId || "")) return false;
-    return String(item?.sourceAlgorithmId || "") === String(row?.id || "");
-  });
+  return Boolean(findDownloadedAlgorithmCopy(row));
 }
 
 function isDatasetDownloaded(row) {
@@ -522,10 +544,14 @@ async function downloadAlgorithm(row) {
     ElMessage({ type: "success", message: "已下载到数据库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("algorithm_already_downloaded")) {
-      locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
       await store.fetchAlgorithms();
       await loadCommunity();
-      ElMessage({ type: "info", message: "该算法已下载到你的算法库中" });
+      if (findDownloadedAlgorithmCopy(row)) {
+        locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
+        ElMessage({ type: "info", message: "该算法已存在于你的算法库中" });
+      } else {
+        ElMessage({ type: "warning", message: "后端判定该算法已有副本，但当前账号下未找到对应记录，已自动刷新算法库" });
+      }
       return;
     }
     ElMessage({ type: "error", message: `下载算法失败：${e?.message || e}` });

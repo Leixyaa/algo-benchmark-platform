@@ -864,12 +864,13 @@ export const useAppStore = defineStore("app", {
         throw new Error("task_type_required");
       }
       const datasetId = String(payload.dataset_id || payload.datasetId || "").trim();
-      if (!datasetId) {
+      const allowEmptyDatasetId = Boolean(payload.allow_empty_dataset_id ?? payload.allowEmptyDatasetId ?? false);
+      if (!datasetId && !allowEmptyDatasetId) {
         throw new Error("dataset_id_required");
       }
       const out = await runsApi.fastSelect({
         task_type: taskType,
-        dataset_id: datasetId,
+        dataset_id: datasetId || null,
         candidate_algorithm_ids: Array.isArray(payload.candidate_algorithm_ids)
           ? payload.candidate_algorithm_ids
           : (Array.isArray(payload.candidateAlgorithmIds) ? payload.candidateAlgorithmIds : []),

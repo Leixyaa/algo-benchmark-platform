@@ -61,7 +61,7 @@
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
-                      <el-dropdown-item command="community">{{ row.visibility === "public" ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
+                      <el-dropdown-item command="community">{{ isSelfPublishedDataset(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
                       <el-dropdown-item command="export">下载到本地</el-dropdown-item>
                       <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
                       <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
@@ -168,8 +168,19 @@ const visibleDatasets = computed(() =>
   (store.datasets || []).filter((d) => String(d?.raw?.owner_id || "") === String(store.user?.username || ""))
 );
 
-const ownedDatasets = computed(() => visibleDatasets.value.filter((d) => !String(d?.sourceUploaderId || "").trim()));
-const downloadedDatasets = computed(() => visibleDatasets.value.filter((d) => String(d?.sourceUploaderId || "").trim()));
+function isDownloadedCommunityDataset(dataset) {
+  return Boolean(String(dataset?.sourceUploaderId || "").trim() || String(dataset?.sourceDatasetId || "").trim());
+}
+
+function isSelfPublishedDataset(dataset) {
+  if (!dataset) return false;
+  if (String(dataset?.uploaderId || "") !== String(store.user?.username || "")) return false;
+  if (isDownloadedCommunityDataset(dataset)) return false;
+  return String(dataset?.visibility || "").toLowerCase() === "public";
+}
+
+const ownedDatasets = computed(() => visibleDatasets.value.filter((d) => !isDownloadedCommunityDataset(d)));
+const downloadedDatasets = computed(() => visibleDatasets.value.filter((d) => isDownloadedCommunityDataset(d)));
 const selectedDatasetExists = computed(() => ownedDatasets.value.some((d) => d.id === selectedDatasetId.value));
 
 function getDatasetById(id) {
@@ -357,6 +368,7 @@ async function uploadDatasetToCommunity(id) {
     ElMessage({ type: "warning", message: "未找到当前数据集" });
     return;
   }
+  const alreadyPublished = isSelfPublishedDataset(current);
   if (isDatasetEmpty(current)) {
     ElMessage({ type: "warning", message: "空数据集不能上传到社区，请先导入 ZIP 或补充有效文件" });
     return;
@@ -364,12 +376,12 @@ async function uploadDatasetToCommunity(id) {
   try {
     const { value } = await ElMessageBox.prompt(
       "请输入数据集在社区中心展示的描述",
-      current.visibility === "public" ? "更新社区信息" : "上传到社区",
+      alreadyPublished ? "更新社区信息" : "上传到社区",
       {
         inputType: "textarea",
         inputValue: String(current.description || ""),
         inputPlaceholder: "例如：适用于图像去雾任务，包含 gt 与 hazy 配对样本。",
-        confirmButtonText: current.visibility === "public" ? "保存" : "上传",
+        confirmButtonText: alreadyPublished ? "保存" : "上传",
         cancelButtonText: "取消",
       }
     );
@@ -379,7 +391,7 @@ async function uploadDatasetToCommunity(id) {
       allowUse: true,
       allowDownload: true,
     });
-    ElMessage({ type: "success", message: current.visibility === "public" ? "社区信息已更新" : "数据集已上传到社区" });
+    ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "数据集已上传到社区" });
   } catch (action) {
     if (action !== "cancel" && action !== "close") {
       ElMessage({ type: "error", message: `上传社区失败：${action?.message || action}` });

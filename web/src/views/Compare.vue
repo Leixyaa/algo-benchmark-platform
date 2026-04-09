@@ -2,8 +2,8 @@
   <div class="page">
     <div class="header-section">
       <div class="header-left">
-        <h2 class="page-title">综合对比与智能推荐</h2>
-        <p class="page-subtitle">多维量化指标分析，支持 LinUCB 快速选型、结果推荐与导出报告</p>
+        <h2 class="page-title">平台算法智能推荐</h2>
+        <p class="page-subtitle">面向平台标准算法库的多维指标分析与 LinUCB 智能推荐，支持对比展示与结论导出</p>
       </div>
         <div class="header-right">
           <el-button-group>
@@ -74,15 +74,14 @@
     <el-card shadow="never" class="tool-card">
       <div class="tool-tabs">
         <div class="tool-section">
-          <div class="tool-title"><el-icon><Cpu /></el-icon> 智能选型（LinUCB）</div>
+          <div class="tool-title"><el-icon><Cpu /></el-icon> 平台算法智能推荐（LinUCB）</div>
           <div class="tool-actions">
             <span class="tool-label">Top-K</span>
             <el-input-number v-model="fastTopK" :min="1" :max="10" size="small" :disabled="!store.user.isLoggedIn" />
             <span class="tool-label">探索系数</span>
             <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.1" size="small" :disabled="!store.user.isLoggedIn" />
-            <el-checkbox v-model="fastIncludeCustom" :disabled="!store.user.isLoggedIn">包含自定义算法</el-checkbox>
-            <el-button type="primary" icon="MagicStick" :loading="fastLoading" @click="runFastSelect" :disabled="!store.user.isLoggedIn">分析推荐</el-button>
-            <el-button type="warning" plain icon="VideoPlay" :disabled="!store.user.isLoggedIn || !fastRecommendations.length" @click="createRunsByFastSelect">一键创建任务</el-button>
+            <el-button type="primary" icon="MagicStick" :loading="fastLoading" @click="runFastSelect" :disabled="!store.user.isLoggedIn">分析平台推荐</el-button>
+            <el-button type="warning" plain icon="VideoPlay" :disabled="!store.user.isLoggedIn || !fastRecommendations.length" @click="createRunsByFastSelect">按推荐创建平台任务</el-button>
           </div>
         </div>
         <el-divider direction="vertical" />
@@ -107,13 +106,13 @@
             </template>
           </el-table-column>
           <el-table-column prop="algorithm_name" label="推荐算法" />
-          <el-table-column prop="algorithm_scope" label="算法类型" width="110" align="center" />
+          <el-table-column prop="algorithm_scope" label="算法范围" width="110" align="center" />
           <el-table-column prop="score" label="UCB 得分" width="100" />
           <el-table-column prop="mean_reward" label="历史均值" width="100" />
           <el-table-column prop="sample_count" label="样本数" width="80" />
         </el-table>
         <div class="fast-meta" v-if="fastContext">
-          基于 {{ fastContext.historical_run_count }} 组历史数据分析，当前 alpha={{ fastContext.alpha }}，候选范围：{{ fastIncludeCustom ? '基线算法 + 自定义算法' : '仅基线算法' }}
+          基于 {{ fastContext.historical_run_count }} 组历史数据分析，当前 alpha={{ fastContext.alpha }}，候选范围：平台标准算法库
         </div>
         <div v-if="recommendationDifferenceText" class="fast-note">
           {{ recommendationDifferenceText }}
@@ -225,7 +224,6 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 const task = ref("");
 const datasetId = ref("");
 const onlyDone = ref(true);
-const fastIncludeCustom = ref(false);
 const _LS_KEY = "compare_filters_v1";
 
 const wPSNR = ref(3.5);
@@ -257,7 +255,6 @@ function loadCache() {
 
     if (obj.chartMetric != null) chartMetric.value = String(obj.chartMetric);
     if (obj.chartTopN != null) chartTopN.value = clampNumber(obj.chartTopN, 1, 50, 10);
-    if (typeof obj.fastIncludeCustom === "boolean") fastIncludeCustom.value = obj.fastIncludeCustom;
   } catch {
     return;
   }
@@ -275,7 +272,6 @@ function saveCache() {
       wTIME: wTIME.value,
       chartMetric: chartMetric.value,
       chartTopN: chartTopN.value,
-      fastIncludeCustom: fastIncludeCustom.value,
     };
     localStorage.setItem(_LS_KEY, JSON.stringify(obj));
   } catch {
@@ -297,7 +293,6 @@ function resetAllConfig() {
   chartTopN.value = 10;
   fastRecommendations.value = [];
   fastContext.value = null;
-  fastIncludeCustom.value = false;
   clearCache();
   saveCache();
 }
@@ -345,7 +340,7 @@ const taskOptions = computed(() => {
   return Array.from(s);
 });
 
-watch([task, datasetId, onlyDone, wPSNR, wSSIM, wNIQE, wTIME, fastIncludeCustom], () => saveCache());
+watch([task, datasetId, onlyDone, wPSNR, wSSIM, wNIQE, wTIME], () => saveCache());
 
 function sanitizeFilters() {
   const tasks = new Set(taskOptions.value || []);
@@ -433,6 +428,61 @@ function getDatasetSupportInfo(dsId, taskType) {
     pairCount,
     datasetName: ds?.name || dsId || "-",
   };
+}
+
+function isPlatformAlgorithm(alg) {
+  return String(alg?.uploaderId || "") === "system";
+}
+
+const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
+  "alg_dn_cnn_light",
+  "alg_dn_cnn_strong",
+  "alg_denoise_bilateral_soft",
+  "alg_denoise_bilateral_strong",
+  "alg_denoise_gaussian_light",
+  "alg_denoise_gaussian_strong",
+  "alg_denoise_median_light",
+  "alg_denoise_median_strong",
+  "alg_dehaze_dcp_fast",
+  "alg_dehaze_dcp_strong",
+  "alg_dehaze_clahe_mild",
+  "alg_dehaze_clahe_strong",
+  "alg_dehaze_gamma_mild",
+  "alg_dehaze_gamma_strong",
+  "alg_deblur_unsharp_light",
+  "alg_deblur_unsharp_strong",
+  "alg_deblur_laplacian_light",
+  "alg_deblur_laplacian_strong",
+  "alg_sr_nearest",
+  "alg_sr_linear",
+  "alg_sr_bicubic_sharp",
+  "alg_sr_lanczos_sharp",
+  "alg_lowlight_gamma_soft",
+  "alg_lowlight_gamma_strong",
+  "alg_lowlight_clahe_soft",
+  "alg_lowlight_clahe_strong",
+  "alg_video_denoise_gaussian_light",
+  "alg_video_denoise_gaussian_strong",
+  "alg_video_denoise_median_light",
+  "alg_video_denoise_median_strong",
+  "alg_video_sr_nearest",
+  "alg_video_sr_linear",
+  "alg_video_sr_bicubic_sharp",
+  "alg_video_sr_lanczos_sharp",
+]);
+
+function isVisiblePlatformAlgorithm(alg) {
+  if (!isPlatformAlgorithm(alg)) return false;
+  if (alg?.raw?.is_active === false) return false;
+  const hasCommunitySource = String(alg?.sourceUploaderId || "").trim() || String(alg?.sourceAlgorithmId || "").trim();
+  if (hasCommunitySource) return true;
+  return !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(alg?.id || ""));
+}
+
+function getPlatformAlgorithmsForTask(taskLabel, taskType) {
+  return (store.algorithms || []).filter(
+    (a) => isVisiblePlatformAlgorithm(a) && matchesTask(a, taskLabel, taskType)
+  );
 }
 
 const bulkRunning = ref(false);
@@ -772,9 +822,9 @@ const recommendationDifferenceText = computed(() => {
   const best = bestResultRow.value;
   if (!fastTop || !best) return "";
   if (String(fastTop.algorithm_name || "") === String(best.algorithmName || "")) {
-    return "当前智能推荐第一与真实评测最优一致。";
+    return "当前平台算法推荐第一与真实评测最优一致。";
   }
-  return `当前智能推荐第一为 ${fastTop.algorithm_name}，但当前真实评测最优为 ${best.algorithmName}。前者基于历史反馈与探索项，后者基于当前真实评测综合结果。`;
+  return `当前平台算法推荐第一为 ${fastTop.algorithm_name}，但当前真实评测最优为 ${best.algorithmName}。前者基于历史反馈与探索项，后者基于当前真实评测综合结果。`;
 });
 
 const recommendText = computed(() => {
@@ -1138,12 +1188,8 @@ async function runFastSelect() {
     return ElMessage.warning(`数据集“${support.datasetName}”当前未扫描出任务“${taskLabel}”可用配对，无法进行正式推荐`);
   }
 
-  let algs = (store.algorithms || []).filter((a) => matchesTask(a, taskLabel, taskType));
-  if (!fastIncludeCustom.value) {
-    const baselineIdSet = new Set(BASELINE_IDS_BY_TASK_TYPE[taskType] || []);
-    algs = algs.filter((a) => baselineIdSet.has(a.id));
-  }
-  if (!algs.length) return ElMessage.warning("当前任务没有可用候选算法");
+  const algs = getPlatformAlgorithmsForTask(taskLabel, taskType);
+  if (!algs.length) return ElMessage.warning("当前任务下暂无可推荐的平台算法");
 
   const topK = Math.max(1, Math.min(Number(fastTopK.value) || 2, 10));
   const alpha = Math.max(0, Math.min(Number(fastAlpha.value) || 0.35, 2));
@@ -1169,7 +1215,7 @@ async function runFastSelect() {
       return {
         algorithm_id: aid,
         algorithm_name: alg?.name || aid,
-        algorithm_scope: isBaselineAlgorithmId(aid) ? "系统基线" : "自定义",
+        algorithm_scope: "平台算法",
         score: Number(x?.score ?? 0).toFixed(4),
         mean_reward: Number(x?.mean_reward ?? 0).toFixed(4),
         uncertainty: Number(x?.uncertainty ?? 0).toFixed(4),
@@ -1178,12 +1224,12 @@ async function runFastSelect() {
     });
     fastContext.value = out?.context && typeof out.context === "object" ? out.context : null;
     if (!fastRecommendations.value.length) {
-      ElMessage.warning("快速选型已执行，但当前没有返回推荐结果");
+      ElMessage.warning("平台算法推荐已执行，但当前没有返回推荐结果");
     }
   } catch (e) {
     fastRecommendations.value = [];
     fastContext.value = null;
-    ElMessage.error(`快速选型失败：${e?.message || e}`);
+    ElMessage.error(`平台算法推荐失败：${e?.message || e}`);
   } finally {
     fastLoading.value = false;
   }
@@ -1193,7 +1239,7 @@ async function createRunsByFastSelect() {
   const taskLabel = task.value || taskOptions.value?.[0] || "";
   const dsId = datasetId.value || store.datasets?.[0]?.id || "";
   if (!taskLabel || !dsId) return ElMessage.warning("请先选择任务和数据集");
-  if (!fastRecommendations.value.length) return ElMessage.warning("请先执行快速选型");
+  if (!fastRecommendations.value.length) return ElMessage.warning("请先执行平台算法推荐");
   if (fastCreateRunning.value) return;
 
   const taskType = mapTaskLabelToType(taskLabel);
@@ -1204,7 +1250,7 @@ async function createRunsByFastSelect() {
   await store.fetchRuns().catch(() => {});
   const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const batchId = `batch_fast_${taskType}_${dsId}_${ts}_${Math.random().toString(16).slice(2, 6)}`;
-  const batchName = `fast-select-${taskLabel}-${dsId}-${ts}`;
+    const batchName = `platform-recommend-${taskLabel}-${dsId}-${ts}`;
   const existing = existingRunFingerprints();
 
   fastCreateRunning.value = true;
@@ -1242,12 +1288,12 @@ async function createRunsByFastSelect() {
   }
   fastCreateRunning.value = false;
   if (failed.length) {
-    await ElMessageBox.alert(`已创建 ${created} 个推荐 Run，跳过重复 ${skipped} 个，失败 ${failed.length} 个。\n\n${failed.join("\n")}`, "快速选型创建结果", {
+    await ElMessageBox.alert(`已创建 ${created} 个平台推荐 Run，跳过重复 ${skipped} 个，失败 ${failed.length} 个。\n\n${failed.join("\n")}`, "平台推荐创建结果", {
       type: "error",
     });
     return;
   }
-  ElMessage.success(`已按快速选型结果创建 ${created} 个 Run，跳过重复 ${skipped} 个，批次 ID：${batchId}`);
+  ElMessage.success(`已按平台推荐结果创建 ${created} 个 Run，跳过重复 ${skipped} 个，批次 ID：${batchId}`);
 }
 
 async function exportRawRuns(fmt, filename) {
@@ -1323,11 +1369,11 @@ function exportConclusionMd() {
   mdLines.push(`- 数据集：${datasetId.value || "-"}`);
   mdLines.push(`- 仅已完成：${onlyDone.value ? "是" : "否"}`);
   mdLines.push(`- 推荐口径：仅纳入真实配对数据评测结果（已排除演示兜底与读取失败兜底）`);
-  mdLines.push(`- 说明：智能选型结果反映历史反馈推荐；当前真实评测最优反映本次筛选结果，两者允许不完全一致。`);
+  mdLines.push(`- 说明：平台算法推荐结果反映历史反馈推荐；当前真实评测最优反映本次筛选结果，两者允许不完全一致。`);
   mdLines.push(`- 权重：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}，耗时=${wTIME.value}`);
   mdLines.push("");
   if (fastRecommendations.value.length) {
-    mdLines.push("## 智能选型结果");
+    mdLines.push("## 平台算法推荐结果");
     for (const [i, item] of fastRecommendations.value.entries()) {
       mdLines.push(`${i + 1}. ${item.algorithm_name}（${item.algorithm_scope}，UCB=${item.score}，样本数=${item.sample_count}）`);
     }
@@ -1339,7 +1385,7 @@ function exportConclusionMd() {
     mdLines.push("");
   }
   if (recommendText.value) {
-    mdLines.push("## 智能推荐说明");
+    mdLines.push("## 平台推荐说明");
     mdLines.push(recommendText.value);
     mdLines.push("");
   }
@@ -1713,4 +1759,3 @@ function exportChartPng() {
   .export-actions { width: 100%; }
 }
 </style>
-

@@ -25,6 +25,8 @@ class ArmStat:
     cold_start_bonus: float
     reliability: float
     sample_count: int
+    direct_sample_count: int
+    shadow_sample_count: int
 
 
 def _clamp01(v: float) -> float:
@@ -159,6 +161,8 @@ def fast_select_algorithms(
     mats: dict[str, np.ndarray] = {aid: np.eye(d, dtype=np.float64) * float(cfg.lambda_reg) for aid in candidate_algorithm_ids}
     vecs: dict[str, np.ndarray] = {aid: np.zeros((d, 1), dtype=np.float64) for aid in candidate_algorithm_ids}
     cnts: dict[str, int] = {aid: 0 for aid in candidate_algorithm_ids}
+    direct_cnts: dict[str, int] = {aid: 0 for aid in candidate_algorithm_ids}
+    shadow_cnts: dict[str, int] = {aid: 0 for aid in candidate_algorithm_ids}
     sums: dict[str, float] = {aid: 0.0 for aid in candidate_algorithm_ids}
     eff_n: dict[str, float] = {aid: 0.0 for aid in candidate_algorithm_ids}
 
@@ -180,12 +184,17 @@ def fast_select_algorithms(
         x = build_run_context_vector(run).reshape(-1, 1)
         if x.shape[0] != d:
             continue
+        is_shadow = bool(run.get("_shadow_reused"))
         ts = _safe_ts(run)
         age_h = max((now_ts - ts) / 3600.0, 0.0) if now_ts > 0 and ts > 0 else 0.0
         w = 0.5 ** (age_h / half_life_h)
         mats[aid] = mats[aid] + float(w) * (x @ x.T)
         vecs[aid] = vecs[aid] + float(w * reward) * x
         cnts[aid] += 1
+        if is_shadow:
+            shadow_cnts[aid] += 1
+        else:
+            direct_cnts[aid] += 1
         sums[aid] += float(w * reward)
         eff_n[aid] += float(w)
 
@@ -222,6 +231,8 @@ def fast_select_algorithms(
                 cold_start_bonus=round(cold_bonus, 6),
                 reliability=round(reliability, 6),
                 sample_count=n,
+                direct_sample_count=direct_cnts[aid],
+                shadow_sample_count=shadow_cnts[aid],
             )
         )
 
@@ -438,6 +449,8 @@ def fast_select_algorithms_online(
                 cold_start_bonus=round(cold_bonus, 6),
                 reliability=round(reliability, 6),
                 sample_count=n,
+                direct_sample_count=n,
+                shadow_sample_count=0,
             )
         )
     out.sort(key=lambda x: x.score, reverse=True)

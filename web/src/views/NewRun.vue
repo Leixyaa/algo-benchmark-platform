@@ -228,8 +228,51 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore, toTaskLabel, toTaskType } from "../stores/app";
 
 const NEWRUN_CACHE_KEY = "newrun_form_v2";
-function isBuiltinAlgorithm(alg) {
-  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
+const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
+  "alg_dn_cnn_light",
+  "alg_dn_cnn_strong",
+  "alg_denoise_bilateral_soft",
+  "alg_denoise_bilateral_strong",
+  "alg_denoise_gaussian_light",
+  "alg_denoise_gaussian_strong",
+  "alg_denoise_median_light",
+  "alg_denoise_median_strong",
+  "alg_dehaze_dcp_fast",
+  "alg_dehaze_dcp_strong",
+  "alg_dehaze_clahe_mild",
+  "alg_dehaze_clahe_strong",
+  "alg_dehaze_gamma_mild",
+  "alg_dehaze_gamma_strong",
+  "alg_deblur_unsharp_light",
+  "alg_deblur_unsharp_strong",
+  "alg_deblur_laplacian_light",
+  "alg_deblur_laplacian_strong",
+  "alg_sr_nearest",
+  "alg_sr_linear",
+  "alg_sr_bicubic_sharp",
+  "alg_sr_lanczos_sharp",
+  "alg_lowlight_gamma_soft",
+  "alg_lowlight_gamma_strong",
+  "alg_lowlight_clahe_soft",
+  "alg_lowlight_clahe_strong",
+  "alg_video_denoise_gaussian_light",
+  "alg_video_denoise_gaussian_strong",
+  "alg_video_denoise_median_light",
+  "alg_video_denoise_median_strong",
+  "alg_video_sr_nearest",
+  "alg_video_sr_linear",
+  "alg_video_sr_bicubic_sharp",
+  "alg_video_sr_lanczos_sharp",
+]);
+function isPlatformAlgorithm(alg) {
+  return String(alg?.raw?.owner_id || "") === "system";
+}
+function isVisiblePlatformAlgorithm(alg) {
+  if (!isPlatformAlgorithm(alg)) return false;
+  if (alg?.raw?.is_active === false) return false;
+  const hasCommunitySource = String(alg?.sourceUploaderId || "").trim() || String(alg?.sourceAlgorithmId || "").trim();
+  if (hasCommunitySource) return true;
+  return !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(alg?.id || ""));
 }
 const router = useRouter();
 const store = useAppStore();
@@ -311,7 +354,7 @@ const taskTypeOptions = computed(() =>
 );
 
 const filteredAlgorithms = computed(() =>
-  store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && isBuiltinAlgorithm(a))
+  store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && isVisiblePlatformAlgorithm(a))
 );
 
 const presetsAll = computed(() => {
@@ -382,7 +425,7 @@ const userSchemeEntries = computed(() => {
   if (!alg) return [];
   const base = normalizeSchemeBaseName(alg.name);
   return store.algorithms
-    .filter((x) => !isBuiltinAlgorithm(x) && x?.task === alg.task)
+    .filter((x) => !isPlatformAlgorithm(x) && x?.task === alg.task)
     .map((x) => ({
       id: String(x.id || ""),
       name: String(x.name || ""),
