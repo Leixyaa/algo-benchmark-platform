@@ -1,4 +1,5 @@
 import { request } from "./http";
+import { downloadBinaryFile } from "./download";
 
 export const algorithmsApi = {
   async listAlgorithms({ limit = 500, scope = "manage" } = {}) {
@@ -18,5 +19,8 @@ export const algorithmsApi = {
   },
   async downloadCommunityAlgorithm(algorithmId) {
     return request(`/community/algorithms/${algorithmId}/download`, { method: "POST" });
+  },
+  async exportAlgorithm(algorithmId) {
+    return downloadBinaryFile(`/algorithms/${algorithmId}/export`, `${algorithmId}.json`);
   },
 };

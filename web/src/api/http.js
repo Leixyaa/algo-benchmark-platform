@@ -3,6 +3,19 @@
 
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
+function getAuthValue(key) {
+  return sessionStorage.getItem(key) || localStorage.getItem(key) || "";
+}
+
+function clearAuthStorage() {
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("username");
+  sessionStorage.removeItem("userRole");
+  localStorage.removeItem("token");
+  localStorage.removeItem("username");
+  localStorage.removeItem("userRole");
+}
+
 /**
  * @param {string} path 例如 "/runs"
  * @param {{method?: string, query?: Record<string, any>, body?: any}} opts
@@ -57,9 +70,8 @@ function buildUrl(path, query) {
 
 function handleUnauthorized(res) {
   if (res.status !== 401) return;
-  const hadToken = !!localStorage.getItem("token");
-  localStorage.removeItem("token");
-  localStorage.removeItem("username");
+  const hadToken = !!getAuthValue("token");
+  clearAuthStorage();
   if (hadToken && window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -68,7 +80,7 @@ function handleUnauthorized(res) {
 export async function authFetch(path, { method = "GET", query, headers = {}, body } = {}) {
   const url = buildUrl(path, query);
   const mergedHeaders = { ...headers };
-  const token = localStorage.getItem("token");
+  const token = getAuthValue("token");
   if (token) {
     mergedHeaders.Authorization = `Bearer ${token}`;
   }

@@ -13,6 +13,7 @@
         <el-menu-item index="/new-run">发起评测</el-menu-item>
         <el-menu-item index="/runs">任务中心</el-menu-item>
         <el-menu-item index="/compare">结果对比</el-menu-item>
+        <el-menu-item v-if="store.user.role === 'admin'" index="/admin">管理后台</el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -52,9 +53,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElNotification } from "element-plus";
 
 import { useAppStore } from "../stores/app";
 
@@ -72,6 +73,7 @@ const title = computed(() => {
     "/new-run": "发起评测",
     "/runs": "任务中心",
     "/compare": "结果对比",
+    "/admin": "管理后台",
   };
   return map[route.path] ?? "图像复原增强算法评测平台";
 });
@@ -82,19 +84,49 @@ async function handleLogout() {
   router.push("/login");
 }
 
-watch(
-  () => store.user.isLoggedIn,
-  async () => {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
-  }
-);
-
-onMounted(async () => {
+async function syncShellData() {
   try {
     await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
   } catch {
     // ignore
   }
+  if (!store.user.isLoggedIn) return;
+  try {
+    const notices = await store.fetchUnreadNotices();
+    for (const notice of notices || []) {
+      ElNotification({
+        title: notice?.title || "系统通知",
+        message: notice?.content || "",
+        type: notice?.kind === "warning" ? "warning" : "info",
+        duration: 5000,
+      });
+      if (notice?.notice_id) {
+        await store.markNoticeRead(notice.notice_id);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function handleWindowFocus() {
+  await syncShellData();
+}
+
+watch(
+  () => store.user.isLoggedIn,
+  async () => {
+    await syncShellData();
+  }
+);
+
+onMounted(async () => {
+  window.addEventListener("focus", handleWindowFocus);
+  await syncShellData();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", handleWindowFocus);
 });
 </script>
 

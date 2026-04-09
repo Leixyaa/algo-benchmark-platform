@@ -8,28 +8,31 @@
     <el-card class="login-card" shadow="always">
       <div class="header">
         <div class="logo">V</div>
-        <h2>图像复原增强算法评测平台</h2>
-        <p>聚焦图像复原与增强任务，统一评测流程</p>
+        <h2>&#22270;&#20687;&#22797;&#21407;&#22686;&#24378;&#31639;&#27861;&#35780;&#27979;&#24179;&#21488;</h2>
+        <p>&#32858;&#28966;&#22270;&#20687;&#22797;&#21407;&#19982;&#22686;&#24378;&#20219;&#21153;&#65292;&#32479;&#19968;&#35780;&#27979;&#27969;&#31243;</p>
       </div>
 
       <el-form :model="form" label-position="top" @keyup.enter="handleLogin" size="large">
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入用户名" prefix-icon="User" clearable />
+        <el-form-item label="&#29992;&#25143;&#21517;">
+          <el-input v-model="form.username" placeholder="&#35831;&#36755;&#20837;&#29992;&#25143;&#21517;" prefix-icon="User" clearable />
         </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+        <el-form-item label="&#23494;&#30721;">
+          <el-input v-model="form.password" type="password" placeholder="&#35831;&#36755;&#20837;&#23494;&#30721;" prefix-icon="Lock" show-password />
         </el-form-item>
 
         <div class="actions">
-          <el-button type="primary" :loading="loading" @click="handleLogin" class="submit-btn">立即登录</el-button>
+          <el-button type="primary" :loading="loading" @click="handleLogin" class="submit-btn">&#31435;&#21363;&#30331;&#24405;</el-button>
 
           <div class="divider">
-            <span>或使用其他方式</span>
+            <span>&#25110;&#20351;&#29992;&#20854;&#20182;&#26041;&#24335;</span>
           </div>
 
           <div class="links">
-            <router-link to="/register" class="reg-link">没有账号？注册新用户</router-link>
-            <el-button type="text" @click="continueAsGuest" class="guest-btn">以游客身份访问</el-button>
+            <router-link to="/register" class="reg-link">&#27809;&#26377;&#36134;&#21495;&#65311;&#27880;&#20876;&#26032;&#29992;&#25143;</router-link>
+            <div class="link-actions">
+              <router-link to="/admin-login" class="admin-link">&#31649;&#29702;&#21592;&#30331;&#24405;</router-link>
+              <el-button type="text" @click="continueAsGuest" class="guest-btn">&#20197;&#28216;&#23458;&#36523;&#20221;&#35775;&#38382;</el-button>
+            </div>
           </div>
         </div>
       </el-form>
@@ -41,7 +44,6 @@
 import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-
 import { useAppStore } from "../stores/app";
 
 const router = useRouter();
@@ -189,10 +191,22 @@ function continueAsGuest() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.link-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .reg-link {
   color: #409eff;
+  text-decoration: none;
+}
+
+.admin-link {
+  color: #1f2f57;
   text-decoration: none;
 }
 

@@ -1,132 +1,136 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="header-section">
-      <h2 class="title">算法库</h2>
+      <h2 class="title">&#31639;&#27861;&#24211;</h2>
       <div class="subtitle">
-        支持创建、发布和管理算法，后续评测时从这里选择算法，公开算法可在社区中心下载到当前账号。
+        &#25903;&#25345;&#21019;&#24314;&#12289;&#21457;&#24067;&#21644;&#31649;&#7406;&#31639;&#27861;&#65292;&#21518;&#32493;&#35780;&#27979;&#26102;&#20174;&#36825;&#37324;&#36873;&#25321;&#31639;&#27861;&#65292;&#20844;&#24320;&#31639;&#27861;&#21487;&#22312;&#31038;&#53306;&#20013;&#24515;&#19979;&#36733;&#21040;&#24403;&#21069;&#36134;&#21495;&#12290;
       </div>
     </div>
 
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" icon="Plus" class="centered-btn action-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">新增算法</el-button>
-          <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">清理用户算法</el-button>
+          <el-button type="primary" icon="Plus" class="centered-btn action-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">&#26032;&#22686;&#31639;&#27861;</el-button>
+          <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">&#28165;&#29702;&#29992;&#25143;&#31639;&#27861;</el-button>
         </div>
       </div>
 
       <div class="filter-bar">
         <div class="filter-left">
-          <el-select v-model="filterTask" placeholder="全部任务" clearable class="filter-box">
+          <el-select v-model="filterTask" placeholder="&#20840;&#37096;&#20219;&#21153;" clearable class="filter-box">
             <el-option v-for="t in taskFilterOptions" :key="t" :label="t" :value="t" />
           </el-select>
-          <el-select v-model="filterImpl" placeholder="全部实现" clearable class="filter-box">
+          <el-select v-model="filterImpl" placeholder="&#20840;&#37096;&#23454;&#29616;" clearable class="filter-box">
             <el-option v-for="x in implFilterOptions" :key="x" :label="x" :value="x" />
           </el-select>
-          <el-input v-model="filterKeyword" placeholder="搜索算法名称 / 版本 / ID" clearable class="filter-input" prefix-icon="Search" />
+          <el-input v-model="filterKeyword" placeholder="&#25628;&#32034;&#31639;&#27861;&#21517;&#31216; / &#29256;&#26412; / ID" clearable class="filter-input" prefix-icon="Search" />
         </div>
-        <el-button @click="resetFilters" icon="Close" plain class="reset-btn centered-btn action-btn">重置筛选</el-button>
+        <el-button @click="resetFilters" icon="Close" plain class="reset-btn centered-btn action-btn">&#37325;&#32622;&#31579;&#36873;</el-button>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title"><el-icon><Monitor /></el-icon> 平台内置算法（固定）</h3>
-      <el-table :data="filteredBuiltinAlgorithms" border stripe class="data-table">
-        <el-table-column prop="task" label="任务" width="120" />
-        <el-table-column prop="name" label="算法名称" min-width="200" />
-        <el-table-column prop="impl" label="实现方式" width="120" />
-        <el-table-column prop="version" label="版本" width="100" />
-        <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">查看参数</el-button>
-            <el-tag size="small" type="info" class="readonly-tag">只读</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-    <div class="section user-section">
-      <h3 class="section-title">用户算法</h3>
-      <el-table :data="pagedOwnedAlgorithms" border stripe class="data-table">
-        <el-table-column prop="task" label="任务" width="120" />
-        <el-table-column prop="name" label="算法名称" min-width="200" />
-        <el-table-column prop="impl" label="实现方式" width="120" />
-        <el-table-column prop="version" label="版本" width="100" />
-        <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column label="操作" width="140">
-          <template #default="{ row }">
-            <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
-              <el-button size="small" class="table-action-btn" :disabled="!store.user.isLoggedIn">
-                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-                </el-dropdown-menu>
+      <el-tabs v-model="activeAlgorithmTab" class="resource-tabs">
+        <el-tab-pane label="&#24179;&#21488;&#31639;&#27861;" name="builtin">
+          <el-table :data="filteredBuiltinAlgorithms" border stripe class="data-table">
+            <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
+            <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
+            <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
+            <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
+            <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
+            <el-table-column label="&#25805;&#20316;" width="150">
+              <template #default="{ row }">
+                <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
+                <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
               </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无用户算法" />
-        </template>
-      </el-table>
-      
-      <div class="pagination-row">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          :total="filteredOwnedAlgorithms.length"
-          @size-change="() => currentPage = 1"
-        />
-      </div>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="&#29992;&#25143;&#31639;&#27861;" name="owned">
+          <el-table :data="pagedOwnedAlgorithms" border stripe class="data-table">
+            <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
+            <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
+            <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
+            <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
+            <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
+            <el-table-column label="&#25805;&#20316;" width="140">
+              <template #default="{ row }">
+                <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="community">{{ row.visibility === 'public' ? '&#26356;&#26032;&#31038;&#53306;&#20449;&#24687;' : '&#19978;&#20256;&#21040;&#31038;&#53306;' }}</el-dropdown-item>
+                      <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
+                      <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="&#26242;&#26080;&#29992;&#25143;&#31639;&#27861;" />
+            </template>
+          </el-table>
+
+          <div class="pagination-row">
+            <el-pagination
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="filteredOwnedAlgorithms.length"
+              @size-change="() => currentPage = 1"
+            />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane :label="TEXT.communityAlgorithms" name="community">
+          <el-table :data="filteredDownloadedAlgorithms" border stripe class="data-table">
+            <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
+            <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
+            <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
+            <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
+            <el-table-column prop="sourceUploaderId" label="&#19978;&#20256;&#32773;ID" width="140" />
+            <el-table-column prop="createdAt" label="&#19979;&#36733;&#26102;&#38388;" width="180" />
+            <el-table-column label="&#25805;&#20316;" width="140">
+              <template #default="{ row }">
+                <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="use">{{ TEXT.use }}</el-dropdown-item>
+                      <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="&#26242;&#26080;&#31038;&#53306;&#31639;&#27861;" />
+            </template>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
-    <div class="section user-section">
-      <h3 class="section-title">社区算法</h3>
-      <el-table :data="filteredDownloadedAlgorithms" border stripe class="data-table">
-        <el-table-column prop="task" label="任务" width="120" />
-        <el-table-column prop="name" label="算法名称" min-width="200" />
-        <el-table-column prop="impl" label="实现方式" width="120" />
-        <el-table-column prop="version" label="版本" width="100" />
-        <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
-        <el-table-column prop="createdAt" label="下载时间" width="180" />
-        <el-table-column label="操作" width="140">
-          <template #default="{ row }">
-            <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
-              <el-button size="small" class="table-action-btn" :disabled="!store.user.isLoggedIn">
-                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无社区算法" />
-        </template>
-      </el-table>
-    </div>
-
-    <!-- 内置参数弹窗 -->
-    <el-dialog v-model="showParamDialog" title="内置算法参数详情" width="760px">
+    <el-dialog v-model="showParamDialog" title="&#20869;&#32622;&#31639;&#27861;&#21442;&#25968;&#35814;&#24773;" width="760px">
       <el-descriptions border :column="2" class="param-desc">
-        <el-descriptions-item label="算法名称">{{ paramDialogTitle }}</el-descriptions-item>
-        <el-descriptions-item label="算法 ID">{{ paramDialogId || "-" }}</el-descriptions-item>
-        <el-descriptions-item label="任务">{{ paramDialogTask || "-" }}</el-descriptions-item>
-        <el-descriptions-item label="实现方式">{{ paramDialogImpl || "-" }}</el-descriptions-item>
-        <el-descriptions-item label="版本">{{ paramDialogVersion || "-" }}</el-descriptions-item>
+        <el-descriptions-item label="&#31639;&#27861;&#21517;&#31216;">{{ paramDialogTitle }}</el-descriptions-item>
+        <el-descriptions-item label="&#31639;&#27861; ID">{{ paramDialogId || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="&#20219;&#21153;">{{ paramDialogTask || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="&#23454;&#29616;&#26041;&#24335;">{{ paramDialogImpl || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="&#29256;&#26412;">{{ paramDialogVersion || '-' }}</el-descriptions-item>
       </el-descriptions>
-      
-      <div class="param-section-title">默认参数（可视化）</div>
-      <div v-if="paramDialogRows.length === 0" class="no-params">该内置算法无默认参数。</div>
+
+      <div class="param-section-title">&#40664;&#35748;&#21442;&#25968;&#65288;&#21487;&#35270;&#21270;&#65289;</div>
+      <div v-if="paramDialogRows.length === 0" class="no-params">&#35813;&#20869;&#32622;&#31639;&#27861;&#26080;&#40664;&#35748;&#21442;&#25968;&#12290;</div>
       <div v-else class="param-kv-list">
         <div v-for="item in paramDialogRows" :key="`pk-${item.key}`" class="param-kv-item">
           <span class="param-kv-key">{{ item.key }}</span>
@@ -134,9 +138,9 @@
           <span class="param-kv-val">{{ item.text }}</span>
         </div>
       </div>
-      
-      <div class="param-section-title">参数说明</div>
-      <div v-if="paramDialogExplainList.length === 0" class="no-params">该算法无默认参数。</div>
+
+      <div class="param-section-title">&#21442;&#25968;&#35828;&#26126;</div>
+      <div v-if="paramDialogExplainList.length === 0" class="no-params">&#35813;&#31639;&#27861;&#26080;&#40664;&#35748;&#21442;&#25968;&#12290;</div>
       <div class="param-explain-list">
         <div v-for="item in paramDialogExplainList" :key="`pd-${item.key}`" class="explain-item">
           <span class="explain-label">{{ item.label }}</span>
@@ -145,48 +149,47 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="showParamDialog = false">关闭</el-button>
+        <el-button @click="showParamDialog = false">&#20851;&#38381;</el-button>
       </template>
     </el-dialog>
 
-    <!-- 新增/编辑算法弹窗 -->
-    <el-dialog v-model="editorVisible" :title="isEditing ? '编辑算法' : '新增算法'" width="1100px" top="5vh">
+    <el-dialog v-model="editorVisible" :title="isEditing ? '&#32534;&#36753;&#31639;&#27861;' : '&#26032;&#22686;&#31639;&#27861;'" width="1100px" top="5vh">
       <div class="algorithm-form-container">
         <div class="form-left">
           <el-form :model="isEditing ? editForm : form" label-position="top">
-            <el-form-item label="任务类别">
+            <el-form-item label="&#20219;&#21153;&#31867;&#21035;">
               <el-select v-model="(isEditing ? editForm : form).task" style="width: 100%">
-                <el-option v-for="t in ['去噪', '去模糊', '去雾', '超分辨率', '低照度增强', '视频去噪', '视频超分']" :key="t" :label="t" :value="t" />
+                <el-option v-for="t in ['&#21435;&#22122;', '&#21435;&#27169;&#31946;', '&#21435;&#38654;', '&#36229;&#20998;&#36776;&#29575;', '&#20302;&#29031;&#24230;&#22686;&#24378;', '&#35270;&#39057;&#21435;&#22122;', '&#35270;&#39057;&#36229;&#20998;']" :key="t" :label="t" :value="t" />
               </el-select>
             </el-form-item>
-            
-            <el-form-item label="预设算法">
+
+            <el-form-item label="&#39044;&#35774;&#31639;&#27861;">
               <el-select v-model="(isEditing ? editForm : form).presetKey" style="width: 100%">
                 <el-option v-for="p in (isEditing ? editPresetOptions : createPresetOptions)" :key="p.key" :label="p.name" :value="p.key" />
               </el-select>
             </el-form-item>
 
-            <el-form-item label="自定义标识">
-              <el-input v-model="(isEditing ? editForm : form).customTag" placeholder="如：实验A / 演示版" />
-              <div class="form-hint">用于区分同一预设算法的不同实验条目</div>
+            <el-form-item label="&#33258;&#23450;&#20041;&#26631;&#35782;">
+              <el-input v-model="(isEditing ? editForm : form).customTag" placeholder="&#20363;&#22914;&#65306;&#23454;&#39564;A / &#28436;&#31034;&#29256;" />
+              <div class="form-hint">&#29992;&#20110;&#21306;&#20998;&#21516;&#19968;&#39044;&#35774;&#31639;&#27861;&#19979;&#30340;&#19981;&#21516;&#23454;&#39564;&#26465;&#30446;</div>
             </el-form-item>
 
-            <el-form-item label="实现方式">
+            <el-form-item label="&#23454;&#29616;&#26041;&#24335;">
               <el-input v-model="(isEditing ? editForm : form).impl" disabled />
             </el-form-item>
 
-            <el-form-item label="版本">
-              <el-input v-model="(isEditing ? editForm : form).version" placeholder="如：v1" />
+            <el-form-item label="&#29256;&#26412;">
+              <el-input v-model="(isEditing ? editForm : form).version" placeholder="&#20363;&#22914;&#65306;v1" />
             </el-form-item>
           </el-form>
         </div>
 
         <div class="form-right">
           <div class="param-header">
-            <span class="param-title">默认参数 (JSON)</span>
+            <span class="param-title">&#40664;&#35748;&#21442;&#25968;&#65288;JSON&#65289;</span>
             <div class="param-modes">
               <el-radio-group v-model="activeParamMode" size="small">
-                <el-radio-button label="visual">可视化</el-radio-button>
+                <el-radio-button label="visual">&#21487;&#35270;&#21270;</el-radio-button>
                 <el-radio-button label="json">JSON</el-radio-button>
               </el-radio-group>
             </div>
@@ -194,35 +197,35 @@
 
           <div class="param-actions">
             <el-button-group size="small">
-              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'default')">恢复默认参数</el-button>
-              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'safe')">稳妥模式</el-button>
-              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'strong')">增强模式</el-button>
+              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'default')">&#24674;&#22797;&#40664;&#35748;&#21442;&#25968;</el-button>
+              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'safe')">&#31283;&#22949;&#27169;&#24335;</el-button>
+              <el-button @click="applyParamStyle(isEditing ? 'edit' : 'create', 'strong')">&#22686;&#24378;&#27169;&#24335;</el-button>
             </el-button-group>
           </div>
 
           <div class="param-editor">
             <div v-if="activeParamMode === 'visual'" class="visual-editor">
               <div v-for="(row, idx) in activeParamRows" :key="idx" class="param-row">
-                <el-input v-model="row.key" placeholder="参数名" :disabled="activePresetConstrained" style="flex: 1.5" />
+                <el-input v-model="row.key" placeholder="&#21442;&#25968;&#21517;" :disabled="activePresetConstrained" style="flex: 1.5" />
                 <el-select v-model="row.type" :disabled="activePresetConstrained" style="width: 100px">
-                  <el-option label="数字" value="number" />
-                  <el-option label="文本" value="string" />
-                  <el-option label="开关" value="boolean" />
+                  <el-option label="&#25968;&#23383;" value="number" />
+                  <el-option label="&#25991;&#26412;" value="string" />
+                  <el-option label="&#24320;&#20851;" value="boolean" />
                 </el-select>
-                <el-input v-if="row.type !== 'boolean'" v-model="row.value" placeholder="值" style="flex: 1" />
+                <el-input v-if="row.type !== 'boolean'" v-model="row.value" placeholder="&#20540;" style="flex: 1" />
                 <el-select v-else v-model="row.value" style="flex: 1">
-                  <el-option label="是" value="true" />
-                  <el-option label="否" value="false" />
+                  <el-option label="&#26159;" value="true" />
+                  <el-option label="&#21542;" value="false" />
                 </el-select>
                 <el-button type="danger" plain icon="Delete" circle size="small" @click="removeActiveParamRow(idx)" />
               </div>
-              <el-button v-if="!activePresetConstrained" type="dashed" icon="Plus" style="width: 100%; margin-top: 8px" @click="addActiveParamRow">添加参数</el-button>
+              <el-button v-if="!activePresetConstrained" type="dashed" icon="Plus" style="width: 100%; margin-top: 8px" @click="addActiveParamRow">&#28155;&#21152;&#21442;&#25968;</el-button>
             </div>
-            <el-input v-else v-model="activeParamsText" type="textarea" :rows="10" placeholder="请输入合法的 JSON 对象" font-family="monospace" />
+            <el-input v-else v-model="activeParamsText" type="textarea" :rows="10" placeholder="&#35831;&#36755;&#20837;&#21512;&#27861;&#30340; JSON &#23545;&#35937;" font-family="monospace" />
           </div>
 
           <div class="param-doc-panel">
-            <div class="doc-title">参数中文说明</div>
+            <div class="doc-title">&#21442;&#25968;&#20013;&#25991;&#35828;&#26126;</div>
             <div class="doc-list">
               <div v-for="item in activeExplainList" :key="item.key" class="doc-item">
                 <span class="doc-label">{{ item.label }}</span>
@@ -233,8 +236,8 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="isEditing ? closeEdit() : closeCreate()">取消</el-button>
-        <el-button type="primary" @click="isEditing ? submitEdit() : submitCreate()">{{ isEditing ? '保存修改' : '确认新增' }}</el-button>
+        <el-button @click="isEditing ? closeEdit() : closeCreate()">&#21462;&#28040;</el-button>
+        <el-button type="primary" @click="isEditing ? submitEdit() : submitCreate()">{{ isEditing ? '&#20445;&#23384;&#20462;&#25913;' : '&#30830;&#35748;&#26032;&#22686;' }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -244,20 +247,28 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
+import { useRouter } from "vue-router";
+import { algorithmsApi } from "../api/algorithms";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
+const router = useRouter();
+const TEXT = {
+  communityAlgorithms: "\u793e\u533a\u7b97\u6cd5",
+  manage: "\u7ba1\u7406",
+  use: "\u4f7f\u7528",
+};
 function isBuiltinAlgorithm(alg) {
   return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
 }
 const TASK_SORT_ORDER = {
-  去雾: 1,
-  去噪: 2,
-  去模糊: 3,
-  超分辨率: 4,
-  低照度增强: 5,
-  视频去噪: 6,
-  视频超分: 7,
+  "去雾": 1,
+  "去噪": 2,
+  "去模糊": 3,
+  "超分辨率": 4,
+  "低照度增强": 5,
+  "视频去噪": 6,
+  "视频超分": 7,
 };
 const sortedAlgorithms = computed(() => {
   const arr = Array.isArray(store.algorithms) ? [...store.algorithms] : [];
@@ -279,8 +290,10 @@ const sortedAlgorithms = computed(() => {
 const filterTask = ref("");
 const filterImpl = ref("");
 const filterKeyword = ref("");
+const activeAlgorithmTab = ref("builtin");
 const currentPage = ref(1);
 const pageSize = ref(20);
+const exportingAlgorithms = ref(new Set());
 const taskFilterOptions = computed(() => {
   return [...new Set(sortedAlgorithms.value.map((a) => String(a?.task || "").trim()).filter(Boolean))];
 });
@@ -364,12 +377,12 @@ const PRESET_BY_TASK = {
 };
 
 const PARAM_DOCS = {
-  dcp_patch: { label: "暗通道窗口", usage: "窗口越大去雾更强，但细节更容易被抹平。" },
+  dcp_patch: { label: "暗通道窗口", usage: "窗口越大去雾越强，但细节更容易被抹平。" },
   dcp_omega: { label: "去雾强度", usage: "越大去雾越明显，过高可能偏灰。" },
   dcp_t0: { label: "最小透射率", usage: "用于限制最暗区域，避免过度增强噪声。" },
   clahe_clip_limit: { label: "局部对比度上限", usage: "越大对比度越高，过高会放大噪声。" },
-  gamma: { label: "亮度伽马", usage: "小于1提亮暗部，大于1压暗画面。" },
-  lowlight_gamma: { label: "低照增强强度", usage: "用于低照图提亮，建议从0.5~0.8尝试。" },
+  gamma: { label: "亮度伽马", usage: "小于 1 提亮暗部，大于 1 压暗画面。" },
+  lowlight_gamma: { label: "低照增强强度", usage: "用于低照图片提亮，建议从 0.5 到 0.8 尝试。" },
   nlm_h: { label: "去噪强度", usage: "越大去噪越强，细节损失也更明显。" },
   nlm_hColor: { label: "色彩去噪强度", usage: "控制彩色噪声抑制，建议与去噪强度接近。" },
   nlm_templateWindowSize: { label: "模板窗口大小", usage: "匹配局部纹理用，常用奇数 7。" },
@@ -420,7 +433,7 @@ const editParamMode = ref("visual");
 const createParamRows = ref([]);
 const editParamRows = ref([]);
 const form = reactive({
-  task: "去噪",
+  task: "鍘诲櫔",
   presetKey: "",
   name: "",
   customTag: "",
@@ -431,7 +444,7 @@ const form = reactive({
 
 const editForm = reactive({
   id: "",
-  task: "去噪",
+  task: "鍘诲櫔",
   presetKey: "",
   name: "",
   customTag: "",
@@ -612,7 +625,7 @@ function switchCreateParamMode(mode) {
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("参数需为对象");
       createParamRows.value = toParamRows(obj);
     } catch (e) {
-      ElMessage({ type: "error", message: `JSON 解析失败：${e?.message || e}` });
+      ElMessage({ type: "error", message: "JSON 解析失败：" + String((e && e.message) || e) });
       return;
     }
   } else {
@@ -630,7 +643,7 @@ function switchEditParamMode(mode) {
       if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("参数需为对象");
       editParamRows.value = toParamRows(obj);
     } catch (e) {
-      ElMessage({ type: "error", message: `JSON 解析失败：${e?.message || e}` });
+      ElMessage({ type: "error", message: "JSON 解析失败：" + String((e && e.message) || e) });
       return;
     }
   } else {
@@ -684,11 +697,11 @@ function validateDefaultParamsByTask(task, presetKey, defaultParams) {
   const allowed = new Set(getAllowedParamKeysByTask(task));
   const entries = Object.entries(defaultParams || {});
   if (allowed.size === 0 && entries.length > 0) {
-    return `任务「${task}」当前不接收参数，请清空默认参数(JSON)。`;
+    return `任务“${task}”当前不接受参数，请清空默认参数(JSON)。`;
   }
   for (const [k] of entries) {
     if (!allowed.has(k)) {
-      return `参数「${k}」不属于任务「${task}」可用参数，请检查参数名。`;
+      return `参数“${k}”不属于任务“${task}”可用参数，请检查参数名。`;
     }
   }
   const presets = PRESET_BY_TASK[task] || [];
@@ -697,18 +710,18 @@ function validateDefaultParamsByTask(task, presetKey, defaultParams) {
     if (!preset) return "请选择有效的预设算法。";
     const presetKeys = new Set(Object.keys(preset.defaultParams || {}));
     for (const [k] of entries) {
-      if (!presetKeys.has(k)) return `预设算法不支持参数「${k}」，请使用该预设的参数键。`;
+      if (!presetKeys.has(k)) return `预设算法不支持参数“${k}”，请使用该预设的参数键。`;
     }
   }
   for (const [k, v] of entries) {
     const rule = PARAM_RULES[k];
     if (!rule) continue;
     if (rule.type === "number") {
-      if (typeof v !== "number" || !Number.isFinite(v)) return `参数「${k}」必须是数字。`;
-      if (rule.integer && !Number.isInteger(v)) return `参数「${k}」必须是整数。`;
-      if (rule.odd && Number.isInteger(v) && v % 2 === 0) return `参数「${k}」必须是奇数。`;
-      if (rule.min != null && v < rule.min) return `参数「${k}」不能小于 ${rule.min}。`;
-      if (rule.max != null && v > rule.max) return `参数「${k}」不能大于 ${rule.max}。`;
+      if (typeof v !== "number" || !Number.isFinite(v)) return `参数“${k}”必须是数字。`;
+      if (rule.integer && !Number.isInteger(v)) return `参数“${k}”必须是整数。`;
+      if (rule.odd && Number.isInteger(v) && v % 2 === 0) return `参数“${k}”必须是奇数。`;
+      if (rule.min != null && v < rule.min) return `参数“${k}”不能小于 ${rule.min}。`;
+      if (rule.max != null && v > rule.max) return `参数“${k}”不能大于 ${rule.max}。`;
     }
   }
   return "";
@@ -720,7 +733,7 @@ function applyParamStyle(scope, style) {
       ? "已恢复为预设默认参数"
       : style === "safe"
         ? "已应用稳妥模式参数"
-        : "已应用增强模式参数";
+         : "已应用增强模式参数";
   if (scope === "create") {
     const p = (PRESET_BY_TASK[form.task] || []).find((x) => x.key === form.presetKey);
     const base = p?.defaultParams || rowsToParamObject(createParamRows.value);
@@ -823,7 +836,7 @@ function openCreate() {
   isEditing.value = false;
   createParamMode.value = "visual";
   suppressCreatePresetSync.value = true;
-  form.task = "去噪";
+  form.task = "鍘诲櫔";
   form.presetKey = "";
   form.name = "";
   form.customTag = "";
@@ -851,7 +864,7 @@ function openEdit(a) {
   editParamMode.value = "visual";
   suppressEditPresetSync.value = true;
   editForm.id = a?.id || "";
-  editForm.task = a?.task || "去噪";
+  editForm.task = a?.task || "鍘诲櫔";
   editForm.name = a?.name || "";
   const parsed = parseAlgorithmName(editForm.task, editForm.name);
   editForm.presetKey = parsed.presetKey;
@@ -973,7 +986,7 @@ async function submitEdit() {
     const s = String(editForm.defaultParamsText || "").trim();
     defaultParams = s ? JSON.parse(s) : {};
   } catch (e) {
-    ElMessage({ type: "error", message: `默认参数不是合法 JSON：${e?.message || e}` });
+    ElMessage({ type: "error", message: "默认参数不是合法 JSON：" + String((e && e.message) || e) });
     return;
   }
   if (!defaultParams || typeof defaultParams !== "object" || Array.isArray(defaultParams)) {
@@ -992,7 +1005,7 @@ async function submitEdit() {
       (a) => String(a?.id || "") !== String(editForm.id || "") && normalizeAlgorithmName(a?.name || "") === normalizeAlgorithmName(finalName)
     );
     if (dup) {
-      ElMessage({ type: "warning", message: `算法名称重复：已存在「${dup.name}」` });
+      ElMessage({ type: "warning", message: "算法名称重复：已存在“" + String(dup.name || "") + "”" });
       return;
     }
     await store.updateAlgorithm(editForm.id, {
@@ -1002,10 +1015,10 @@ async function submitEdit() {
       version: editForm.version.trim() || "v1",
       defaultParams,
     });
-    await store.fetchAlgorithms();
-    showEdit.value = false;
+    editorVisible.value = false;
+    ElMessage({ type: "success", message: "算法已保存" });
   } catch (e) {
-    ElMessage({ type: "error", message: `保存失败：${e?.message || e}` });
+    ElMessage({ type: "error", message: "保存失败：" + String((e && e.message) || e) });
   }
 }
 
@@ -1022,7 +1035,7 @@ async function submitCreate() {
     const s = String(form.defaultParamsText || "").trim();
     defaultParams = s ? JSON.parse(s) : {};
   } catch (e) {
-    ElMessage({ type: "error", message: `默认参数不是合法 JSON：${e?.message || e}` });
+    ElMessage({ type: "error", message: "默认参数不是合法 JSON：" + String((e && e.message) || e) });
     return;
   }
   if (!defaultParams || typeof defaultParams !== "object" || Array.isArray(defaultParams)) {
@@ -1038,7 +1051,7 @@ async function submitCreate() {
     const finalName = buildAlgorithmName(form.task, form.presetKey, form.customTag, form.name);
     const dup = store.algorithms.find((a) => normalizeAlgorithmName(a?.name || "") === normalizeAlgorithmName(finalName));
     if (dup) {
-      ElMessage({ type: "warning", message: `算法名称重复：已存在「${dup.name}」` });
+      ElMessage({ type: "warning", message: "算法名称重复：已存在“" + String(dup.name || "") + "”" });
       return;
     }
     const created = await store.createAlgorithm({
@@ -1055,8 +1068,9 @@ async function submitCreate() {
     await store.updateAlgorithm(created.id, publishSettings);
     await store.fetchAlgorithms();
     showCreate.value = false;
+    ElMessage({ type: "success", message: publishSettings.visibility === "public" ? "算法已创建并发布到社区" : "算法已创建" });
   } catch (e) {
-    ElMessage({ type: "error", message: `新增失败：${e?.message || e}` });
+    ElMessage({ type: "error", message: "新增失败：" + String((e && e.message) || e) });
   }
 }
 
@@ -1088,17 +1102,80 @@ async function remove(id) {
     ElMessage({ type: "success", message: "算法已删除" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
-    ElMessage({ type: "error", message: `删除失败：${e?.message || e}` });
+    ElMessage({ type: "error", message: "删除失败：" + String((e && e.message) || e) });
   }
 }
 
 async function handleAlgorithmAction(row, command) {
+  if (command === "community") {
+    await uploadAlgorithmToCommunity(row);
+    return;
+  }
+  if (command === "export") {
+    await exportAlgorithmToLocal(row);
+    return;
+  }
+  if (command === "use") {
+    router.push("/new-run");
+    ElMessage({ type: "success", message: "已进入发起评测页面，请在任务中选择该算法使用" });
+    return;
+  }
   if (command === "edit") {
     openEdit(row);
     return;
   }
   if (command === "delete") {
     await remove(row?.id);
+  }
+}
+
+async function exportAlgorithmToLocal(row) {
+  const algorithmId = String(row?.id || "");
+  if (!algorithmId) return;
+  if (exportingAlgorithms.value.has(algorithmId)) return;
+  try {
+    const nextExporting = new Set(exportingAlgorithms.value);
+    nextExporting.add(algorithmId);
+    exportingAlgorithms.value = nextExporting;
+    ElMessage({ type: "info", message: "正在准备下载算法，请稍候..." });
+    const result = await algorithmsApi.exportAlgorithm(algorithmId);
+    ElMessage({
+      type: "success",
+      message: result?.savedWithPicker ? "算法已保存到你选择的位置" : "算法已开始下载到本地",
+    });
+  } catch (e) {
+    ElMessage({ type: "error", message: "下载到本地失败：" + String((e && e.message) || e) });
+  } finally {
+    const nextExporting = new Set(exportingAlgorithms.value);
+    nextExporting.delete(algorithmId);
+    exportingAlgorithms.value = nextExporting;
+  }
+}
+
+async function uploadAlgorithmToCommunity(row) {
+  if (!row?.id) return;
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入算法在社区中心展示的描述。",
+      row.visibility === "public" ? "更新社区信息" : "上传到社区",
+      {
+        inputType: "textarea",
+        inputValue: String(row.description || ""),
+        inputPlaceholder: "例如：适用于图像去噪任务，基于 OpenCV FastNLMeans 的实验版本。",
+        confirmButtonText: row.visibility === "public" ? "保存" : "上传",
+        cancelButtonText: "取消",
+      }
+    );
+    await store.updateAlgorithm(row.id, {
+      description: String(value || "").trim(),
+      visibility: "public",
+      allowUse: true,
+      allowDownload: true,
+    });
+    ElMessage({ type: "success", message: row.visibility === "public" ? "社区信息已更新" : "算法已上传到社区" });
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: "上传社区失败：" + String((e && e.message) || e) });
   }
 }
 
@@ -1114,7 +1191,7 @@ async function resetToBuiltins() {
     ElMessage({ type: "success", message: "已清理用户算法并恢复内置算法默认参数。" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
-    ElMessage({ type: "error", message: `清理失败：${e?.message || e}` });
+    ElMessage({ type: "error", message: "清理失败：" + String((e && e.message) || e) });
   }
 }
 </script>
@@ -1247,7 +1324,7 @@ async function resetToBuiltins() {
   justify-content: flex-end;
 }
 
-/* 参数详情弹窗 */
+/* 鍙傛暟璇︽儏寮圭獥 */
 .param-desc {
   margin-bottom: 20px;
 }
@@ -1329,7 +1406,7 @@ async function resetToBuiltins() {
   color: #606266;
 }
 
-/* 新增/编辑弹窗布局 */
+/* 鏂板/缂栬緫寮圭獥甯冨眬 */
 .algorithm-form-container {
   display: flex;
   gap: 30px;
@@ -1416,3 +1493,16 @@ async function resetToBuiltins() {
   margin-top: 4px;
 }
 </style>
+
+
+
+
+
+
+
+
+
+
+
+
+

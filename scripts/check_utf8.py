@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+
 
 SUSPICIOUS_PATTERNS = (
     "???",
     "\ufffd",
     "锛",
-    "鏁",
     "銆",
     "鈥",
+    "鍥",
+    "瑙",
+    "瀵",
+    "鐢",
 )
 
 

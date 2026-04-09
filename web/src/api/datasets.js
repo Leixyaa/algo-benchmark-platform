@@ -1,4 +1,5 @@
 import { request } from "./http";
+import { downloadBinaryFile } from "./download";
 
 export const datasetsApi = {
   async listDatasets({ limit = 200, scope = "manage" } = {}) {
@@ -27,5 +28,8 @@ export const datasetsApi = {
   },
   async downloadCommunityDataset(datasetId) {
     return request(`/community/datasets/${datasetId}/download`, { method: "POST" });
+  },
+  async exportDataset(datasetId) {
+    return downloadBinaryFile(`/datasets/${datasetId}/export`, `${datasetId}.zip`);
   },
 };

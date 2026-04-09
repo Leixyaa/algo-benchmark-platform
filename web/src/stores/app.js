@@ -15,6 +15,36 @@ const LS_KEY = "abp_state_v1";
 const LEGACY_LS_KEY = LS_KEY;
 const GUEST_SCOPE = "__guest__";
 
+function currentAuthUsername() {
+  return sessionStorage.getItem("username") || localStorage.getItem("username") || "";
+}
+
+function currentAuthToken() {
+  return sessionStorage.getItem("token") || localStorage.getItem("token") || "";
+}
+
+function currentAuthRole() {
+  return sessionStorage.getItem("userRole") || localStorage.getItem("userRole") || "user";
+}
+
+function setAuthSession({ username = "", token = "", role = "user" } = {}) {
+  localStorage.removeItem("token");
+  localStorage.removeItem("username");
+  localStorage.removeItem("userRole");
+  if (token) sessionStorage.setItem("token", token);
+  else sessionStorage.removeItem("token");
+  if (username) sessionStorage.setItem("username", username);
+  else sessionStorage.removeItem("username");
+  if (role) sessionStorage.setItem("userRole", role);
+  else sessionStorage.removeItem("userRole");
+}
+
+function clearAuthSession() {
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("username");
+  sessionStorage.removeItem("userRole");
+}
+
 function _scopeName(username) {
   return String(username || "").trim() || GUEST_SCOPE;
 }
@@ -76,14 +106,6 @@ function repairLoadedState(state) {
   if (Array.isArray(next.datasets)) {
     next.datasets = next.datasets.map((d) => {
       if (!d || typeof d !== "object") return d;
-      const isDemo = d.id === "ds_demo" || (typeof d.name === "string" && d.name.startsWith("Demo-"));
-      if (isDemo) {
-        const needsFix = hasBadText(d.name) || hasBadText(d.type) || hasBadText(d.size);
-        if (!needsFix) return d;
-        changed = true;
-        return { ...d, name: "Demo-样例数据集", type: "图像", size: "10 张" };
-      }
-
       const name2 = normalizeBadString(d.name, "（名称乱码，请编辑）");
       const type2 = normalizeBadString(d.type, "（类型乱码，请编辑）");
       const size2 = normalizeBadString(d.size, "（大小乱码，请编辑）");
@@ -143,9 +165,9 @@ function repairLoadedState(state) {
 
 function loadState(username) {
   try {
-    const key = _scopedKey(username ?? localStorage.getItem("username"));
+    const key = _scopedKey(username ?? currentAuthUsername());
     let raw = localStorage.getItem(key);
-    if (!raw && _scopeName(username ?? localStorage.getItem("username")) === GUEST_SCOPE) {
+    if (!raw && _scopeName(username ?? currentAuthUsername()) === GUEST_SCOPE) {
       raw = localStorage.getItem(LEGACY_LS_KEY);
     }
     if (!raw) return null;
@@ -162,7 +184,7 @@ function loadState(username) {
 
 function saveState(partial, username) {
   try {
-    const key = _scopedKey(username ?? localStorage.getItem("username"));
+    const key = _scopedKey(username ?? currentAuthUsername());
     const prev = loadState(username) || {};
     const next = { ...prev, ...partial, _savedAt: Date.now() };
     localStorage.setItem(key, JSON.stringify(next));
@@ -367,13 +389,15 @@ function mapDatasetOut(x) {
     name: x.name,
     type: x.type,
     size: x.size,
+    description: x.description || "",
+    downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     allowUse: Boolean(x.allow_use),
     allowDownload: Boolean(x.allow_download),
     createdAt: formatTs(x.created_at),
     uploaderId: String(x.owner_id || ""),
-    sourceUploaderId: String(x?.meta?.downloaded_from_owner_id || ""),
-    sourceDatasetId: String(x?.meta?.downloaded_from_dataset_id || ""),
+    sourceUploaderId: String(x.source_owner_id || x?.meta?.downloaded_from_owner_id || ""),
+    sourceDatasetId: String(x.source_dataset_id || x?.meta?.downloaded_from_dataset_id || ""),
     raw: x,
   };
 }
@@ -385,6 +409,8 @@ function mapAlgorithmOut(x) {
     name: x.name,
     impl: x.impl,
     version: x.version,
+    description: x.description || "",
+    downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     allowUse: Boolean(x.allow_use),
     allowDownload: Boolean(x.allow_download),
@@ -409,17 +435,19 @@ const _pollTimers = new Map();
 
 export const useAppStore = defineStore("app", {
   state: () => {
-    const loaded = loadState(localStorage.getItem("username"));
-    return {
-      // 用户状态
-      user: {
-        username: localStorage.getItem("username") || "",
-        token: localStorage.getItem("token") || "",
-        isLoggedIn: !!localStorage.getItem("token"),
-      },
-      // 数据资产
-      datasets: (loaded?.datasets?.length ? loaded.datasets : []),
-      algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
+    const loaded = loadState(currentAuthUsername());
+      return {
+        // 用户状态
+        user: {
+          username: currentAuthUsername(),
+          token: currentAuthToken(),
+          role: currentAuthRole(),
+          isLoggedIn: !!currentAuthToken(),
+        },
+        notices: [],
+        // 数据资产
+        datasets: (loaded?.datasets?.length ? loaded.datasets : []),
+        algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
       presets: loaded?.presets || [],
       runs: loaded?.runs || [],
       // 全局控制
@@ -439,23 +467,24 @@ export const useAppStore = defineStore("app", {
         this.runs = [];
         this.user.username = res.username;
         this.user.token = res.access_token;
+        this.user.role = res.role || "user";
         this.user.isLoggedIn = true;
-        localStorage.setItem("token", res.access_token);
-        localStorage.setItem("username", res.username);
+        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "user" });
         const loaded = loadState(res.username) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
-        await Promise.all([
-          this.fetchDatasets(),
-          this.fetchAlgorithms(),
-        ]);
-        return true;
-      } catch (e) {
-        throw e;
-      }
-    },
+          await Promise.all([
+            this.fetchDatasets(),
+            this.fetchAlgorithms(),
+          ]);
+          await this.fetchUnreadNotices();
+          return true;
+        } catch (e) {
+          throw e;
+        }
+      },
     async register(username, password) {
       try {
         await http.post("/register", { username, password });
@@ -464,19 +493,64 @@ export const useAppStore = defineStore("app", {
         throw e;
       }
     },
+    async loginAdmin(username, password) {
+      try {
+        const res = await http.post("/admin/login", { username, password });
+        this.stopPollingAll();
+        this.datasets = [];
+        this.algorithms = [];
+        this.presets = [];
+        this.runs = [];
+        this.user.username = res.username;
+        this.user.token = res.access_token;
+        this.user.role = res.role || "admin";
+        this.user.isLoggedIn = true;
+        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "admin" });
+        const loaded = loadState(res.username) || {};
+        this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
+        this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.presets = loaded?.presets || [];
+        this.runs = loaded?.runs || [];
+          await Promise.all([
+            this.fetchDatasets(),
+            this.fetchAlgorithms(),
+          ]);
+          await this.fetchUnreadNotices();
+          return true;
+        } catch (e) {
+          throw e;
+        }
+      },
     logout() {
       this.stopPollingAll();
       this.user.username = "";
       this.user.token = "";
-      this.user.isLoggedIn = false;
-      localStorage.removeItem("token");
-      localStorage.removeItem("username");
-      const loaded = loadState(GUEST_SCOPE) || {};
-      this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
-      this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
-      this.presets = loaded?.presets || [];
-      this.runs = loaded?.runs || [];
-    },
+        this.user.role = "user";
+        this.user.isLoggedIn = false;
+        this.notices = [];
+        clearAuthSession();
+        const loaded = loadState(GUEST_SCOPE) || {};
+        this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
+        this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.presets = loaded?.presets || [];
+        this.runs = loaded?.runs || [];
+      },
+
+      async fetchUnreadNotices() {
+        if (!this.user.isLoggedIn) {
+          this.notices = [];
+          return [];
+        }
+        const items = await http.get("/me/notices", { unread_only: true });
+        this.notices = Array.isArray(items) ? items : [];
+        return this.notices;
+      },
+
+      async markNoticeRead(noticeId) {
+        if (!noticeId) return;
+        await http.post(`/me/notices/${noticeId}/read`);
+        this.notices = (this.notices || []).filter((item) => String(item?.notice_id || "") !== String(noticeId));
+      },
 
     // ====================== Catalog：数据集/算法（后端持久化） ======================
     async fetchDatasets(limit = 200) {
@@ -525,6 +599,7 @@ export const useAppStore = defineStore("app", {
         name: payload?.name,
         type: payload?.type,
         size: payload?.size,
+        description: payload?.description,
         visibility: payload?.visibility,
         allow_use: payload?.allowUse,
         allow_download: payload?.allowDownload,
@@ -542,6 +617,7 @@ export const useAppStore = defineStore("app", {
         name: patch?.name,
         type: patch?.type,
         size: patch?.size,
+        description: patch?.description,
         visibility: patch?.visibility,
         allow_use: patch?.allowUse,
         allow_download: patch?.allowDownload,
@@ -598,6 +674,7 @@ export const useAppStore = defineStore("app", {
         name: payload?.name,
         impl: payload?.impl,
         version: payload?.version,
+        description: payload?.description,
         default_params: payload?.defaultParams ?? {},
         visibility: payload?.visibility,
         allow_use: payload?.allowUse,
@@ -654,6 +731,7 @@ export const useAppStore = defineStore("app", {
         name: patch?.name,
         impl: patch?.impl,
         version: patch?.version,
+        description: patch?.description,
         default_params: patch?.defaultParams,
         param_presets: patch?.paramPresets,
         visibility: patch?.visibility,

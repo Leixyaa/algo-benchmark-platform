@@ -40,6 +40,7 @@ class DatasetCreate(BaseModel):
     name: str
     type: str = "图像"
     size: str = "-"
+    description: str = ""
     visibility: str = "private"
     allow_use: bool = False
     allow_download: bool = False
@@ -49,6 +50,7 @@ class DatasetPatch(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     size: Optional[str] = None
+    description: Optional[str] = None
     visibility: Optional[str] = None
     allow_use: Optional[bool] = None
     allow_download: Optional[bool] = None
@@ -63,7 +65,11 @@ class DatasetOut(BaseModel):
     name: str
     type: str
     size: str
+    description: str = ""
+    download_count: int = 0
     owner_id: Optional[str] = "system"
+    source_owner_id: Optional[str] = None
+    source_dataset_id: Optional[str] = None
     created_at: float
     meta: Dict[str, Any] = Field(default_factory=dict)
     visibility: str = "private"
@@ -82,6 +88,7 @@ class AlgorithmCreate(BaseModel):
     name: str
     impl: str = "OpenCV"
     version: str = "v1"
+    description: str = ""
     default_params: Dict[str, Any] = Field(default_factory=dict)
     param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     visibility: str = "private"
@@ -94,6 +101,7 @@ class AlgorithmPatch(BaseModel):
     name: Optional[str] = None
     impl: Optional[str] = None
     version: Optional[str] = None
+    description: Optional[str] = None
     default_params: Optional[Dict[str, Any]] = None
     param_presets: Optional[Dict[str, Dict[str, Any]]] = None
     visibility: Optional[str] = None
@@ -107,6 +115,8 @@ class AlgorithmOut(BaseModel):
     name: str
     impl: str
     version: str
+    description: str = ""
+    download_count: int = 0
     owner_id: Optional[str] = "system"
     source_owner_id: Optional[str] = None
     source_algorithm_id: Optional[str] = None
@@ -116,6 +126,57 @@ class AlgorithmOut(BaseModel):
     visibility: str = "private"
     allow_use: bool = False
     allow_download: bool = False
+
+
+class ResourceCommentCreate(BaseModel):
+    content: str
+
+
+class ResourceCommentOut(BaseModel):
+    comment_id: str
+    resource_type: str
+    resource_id: str
+    author_id: str
+    content: str
+    created_at: float
+
+
+class NoticeOut(BaseModel):
+    notice_id: str
+    username: str
+    kind: str
+    title: str
+    content: str
+    created_at: float
+    read: bool = False
+
+
+class ReportCreate(BaseModel):
+    target_type: str
+    target_id: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    reason: str
+
+
+class ReportOut(BaseModel):
+    report_id: str
+    target_type: str
+    target_id: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    reporter_id: str
+    reason: str
+    status: str = "pending"
+    resolution: str = ""
+    created_at: float
+    resolved_at: Optional[float] = None
+    resolved_by: Optional[str] = None
+
+
+class ReportResolve(BaseModel):
+    status: str = "resolved"
+    resolution: str = ""
 
 
 class PresetCreate(BaseModel):
@@ -191,6 +252,7 @@ class UserCreate(BaseModel):
 
 class UserOut(BaseModel):
     username: str
+    role: str = "user"
     created_at: float
 
 
@@ -198,3 +260,4 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     username: str
+    role: str = "user"

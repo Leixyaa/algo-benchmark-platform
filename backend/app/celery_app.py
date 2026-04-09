@@ -19,6 +19,6 @@ celery_app.conf.update(
     enable_utc=False,
 )
 
-# ? 关键：让 worker 启动时加载任务模块，否则 runs.execute 在 worker 里不注册
-# 你启动命令是：python -m celery -A app.celery_app.celery_app worker ...
+# 关键：让 worker 启动时加载任务模块，否则 runs.execute 在 worker 里不会注册。
+# 启动命令示例：python -m celery -A app.celery_app.celery_app worker ...
 celery_app.conf.imports = ("app.tasks",)

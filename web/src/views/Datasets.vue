@@ -20,7 +20,7 @@
         <div class="selector-left">
           <span class="label">当前选择：</span>
           <el-select v-model="selectedDatasetId" placeholder="请选择数据集" class="select-box" filterable>
-            <el-option v-for="d in visibleDatasets" :key="d.id" :label="`${d.name} (${d.id})`" :value="d.id" />
+            <el-option v-for="d in ownedDatasets" :key="d.id" :label="`${d.name} (${d.id})`" :value="d.id" />
           </el-select>
           <el-checkbox v-model="overwriteOnImport" label="导入时覆盖原有目录内容" class="checkbox compact-checkbox" />
         </div>
@@ -37,80 +37,82 @@
     </div>
 
     <div class="section-block">
-      <h3 class="section-title">用户数据集</h3>
-      <el-table :data="ownedDatasets" border stripe class="data-table">
-        <el-table-column prop="name" label="名称" min-width="180" />
-        <el-table-column prop="type" label="类型" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="size" label="规模" width="190">
-          <template #default="{ row }">
-            <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column label="操作" width="140">
-          <template #default="{ row }">
-            <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
-              <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
-                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
-                  <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
-                  <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-                </el-dropdown-menu>
+      <el-tabs v-model="activeDatasetTab" class="resource-tabs">
+        <el-tab-pane label="用户数据集" name="owned">
+          <el-table :data="ownedDatasets" border stripe class="data-table">
+            <el-table-column prop="name" label="名称" min-width="180" />
+            <el-table-column prop="type" label="类型" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
               </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无用户数据集" />
-        </template>
-      </el-table>
-    </div>
+            </el-table-column>
+            <el-table-column prop="size" label="规模" width="190">
+              <template #default="{ row }">
+                <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="createdAt" label="创建时间" width="180" />
+            <el-table-column label="操作" width="140">
+              <template #default="{ row }">
+                <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id) || exportingDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
+                      <el-dropdown-item command="community">{{ row.visibility === "public" ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
+                      <el-dropdown-item command="export">下载到本地</el-dropdown-item>
+                      <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
+                      <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="暂无用户数据集" />
+            </template>
+          </el-table>
+        </el-tab-pane>
 
-    <div class="section-block">
-      <h3 class="section-title">社区数据集</h3>
-      <el-table :data="downloadedDatasets" border stripe class="data-table">
-        <el-table-column prop="name" label="名称" min-width="180" />
-        <el-table-column prop="type" label="类型" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="size" label="规模" width="190">
-          <template #default="{ row }">
-            <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
-        <el-table-column prop="createdAt" label="下载时间" width="180" />
-        <el-table-column label="操作" width="140">
-          <template #default="{ row }">
-            <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
-              <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
-                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
-                  <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
-                  <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
-                </el-dropdown-menu>
+        <el-tab-pane label="社区数据集" name="community">
+          <el-table :data="downloadedDatasets" border stripe class="data-table">
+            <el-table-column prop="name" label="名称" min-width="180" />
+            <el-table-column prop="type" label="类型" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
               </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无社区数据集" />
-        </template>
-      </el-table>
+            </el-table-column>
+            <el-table-column prop="size" label="规模" width="190">
+              <template #default="{ row }">
+                <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
+            <el-table-column prop="createdAt" label="下载时间" width="180" />
+            <el-table-column label="操作" width="140">
+              <template #default="{ row }">
+                <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id) || exportingDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="export">下载到本地</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <el-empty description="暂无社区数据集" />
+            </template>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <el-dialog v-model="showCreate" title="新建数据集" width="460px">
@@ -141,16 +143,20 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
+import { authFetch } from "../api/http";
+import { datasetsApi } from "../api/datasets";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
 
 const showCreate = ref(false);
+const activeDatasetTab = ref("owned");
 const selectedDatasetId = ref("");
 const overwriteOnImport = ref(true);
 const importTargetId = ref("");
 const fileInputRef = ref(null);
 const scanningDatasets = ref(new Set());
+const exportingDatasets = ref(new Set());
 
 const form = reactive({
   name: "",
@@ -164,7 +170,22 @@ const visibleDatasets = computed(() =>
 
 const ownedDatasets = computed(() => visibleDatasets.value.filter((d) => !String(d?.sourceUploaderId || "").trim()));
 const downloadedDatasets = computed(() => visibleDatasets.value.filter((d) => String(d?.sourceUploaderId || "").trim()));
-const selectedDatasetExists = computed(() => visibleDatasets.value.some((d) => d.id === selectedDatasetId.value));
+const selectedDatasetExists = computed(() => ownedDatasets.value.some((d) => d.id === selectedDatasetId.value));
+
+function getDatasetById(id) {
+  return visibleDatasets.value.find((item) => item.id === id) || null;
+}
+
+function isDatasetEmpty(dataset) {
+  if (!dataset) return true;
+  const sizeText = String(dataset.size || "").trim();
+  if (/^0\s*(张|段)?$/u.test(sizeText)) return true;
+  const meta = dataset.raw?.meta && typeof dataset.raw.meta === "object" ? dataset.raw.meta : {};
+  const countsByDir = meta.counts_by_dir && typeof meta.counts_by_dir === "object" ? meta.counts_by_dir : {};
+  const hasPositiveCount = Object.values(countsByDir).some((value) => Number(value || 0) > 0);
+  if (Object.keys(countsByDir).length) return !hasPositiveCount;
+  return false;
+}
 
 onMounted(async () => {
   try {
@@ -175,7 +196,7 @@ onMounted(async () => {
 });
 
 watch(
-  visibleDatasets,
+  ownedDatasets,
   (datasets) => {
     const exists = (datasets || []).some((d) => d.id === selectedDatasetId.value);
     if (!exists) selectedDatasetId.value = "";
@@ -195,27 +216,6 @@ function openCreate() {
 
 function closeCreate() {
   showCreate.value = false;
-}
-
-async function askDatasetPublishSettings() {
-  try {
-    await ElMessageBox.confirm(
-      "是否将这个新建数据集发布到社区？发布后其他用户可以浏览和下载。",
-      "发布设置",
-      {
-        type: "info",
-        confirmButtonText: "发布",
-        cancelButtonText: "仅自己可见",
-        distinguishCancelAndClose: true,
-      }
-    );
-  } catch (action) {
-    if (action === "cancel" || action === "close") {
-      return { visibility: "private", allowUse: false, allowDownload: false };
-    }
-    throw action;
-  }
-  return { visibility: "public", allowUse: true, allowDownload: true };
 }
 
 function showDatasetLayoutGuide() {
@@ -251,12 +251,10 @@ async function submitCreate() {
       ElMessage({ type: "error", message: "创建成功但未返回数据集 ID" });
       return;
     }
-    const publishSettings = await askDatasetPublishSettings();
-    await store.updateDataset(finalId, publishSettings);
     await scanOne(finalId, { silentStart: true });
     selectedDatasetId.value = finalId;
     showCreate.value = false;
-    ElMessage({ type: "success", message: "数据集创建并扫描完成" });
+    ElMessage({ type: "success", message: "数据集已创建并扫描完成，默认保存在用户数据集中" });
   } catch (e) {
     ElMessage({ type: "error", message: `创建失败：${e?.message || e}` });
   }
@@ -296,12 +294,25 @@ async function remove(id) {
 }
 
 async function handleDatasetAction(id, command) {
+  const owned = ownedDatasets.value.some((item) => item.id === id);
+  if (!owned && ["id", "community", "scan", "zip"].includes(command)) {
+    ElMessage({ type: "warning", message: "社区数据集不能修改，请先下载后在用户数据集中管理" });
+    return;
+  }
   if (command === "id") {
     await editDatasetId(id);
     return;
   }
+  if (command === "community") {
+    await uploadDatasetToCommunity(id);
+    return;
+  }
   if (command === "scan") {
     await scanOne(id);
+    return;
+  }
+  if (command === "export") {
+    await exportDatasetToLocal(id);
     return;
   }
   if (command === "zip") {
@@ -310,6 +321,69 @@ async function handleDatasetAction(id, command) {
   }
   if (command === "delete") {
     await remove(id);
+  }
+}
+
+async function exportDatasetToLocal(id) {
+  if (!id) return;
+  if (exportingDatasets.value.has(id)) return;
+  const current = getDatasetById(id);
+  if (isDatasetEmpty(current)) {
+    ElMessage({ type: "warning", message: "空数据集不能下载到本地，请先导入 ZIP 或补充有效文件" });
+    return;
+  }
+  try {
+    const nextExporting = new Set(exportingDatasets.value);
+    nextExporting.add(id);
+    exportingDatasets.value = nextExporting;
+    ElMessage({ type: "info", message: "正在准备下载数据集，请稍候..." });
+    const result = await datasetsApi.exportDataset(id);
+    ElMessage({
+      type: "success",
+      message: result?.savedWithPicker ? "数据集已保存到你选择的位置" : "数据集已开始下载到本地",
+    });
+  } catch (e) {
+    ElMessage({ type: "error", message: `下载到本地失败：${e?.message || e}` });
+  } finally {
+    const nextExporting = new Set(exportingDatasets.value);
+    nextExporting.delete(id);
+    exportingDatasets.value = nextExporting;
+  }
+}
+
+async function uploadDatasetToCommunity(id) {
+  const current = ownedDatasets.value.find((item) => item.id === id);
+  if (!current) {
+    ElMessage({ type: "warning", message: "未找到当前数据集" });
+    return;
+  }
+  if (isDatasetEmpty(current)) {
+    ElMessage({ type: "warning", message: "空数据集不能上传到社区，请先导入 ZIP 或补充有效文件" });
+    return;
+  }
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入数据集在社区中心展示的描述",
+      current.visibility === "public" ? "更新社区信息" : "上传到社区",
+      {
+        inputType: "textarea",
+        inputValue: String(current.description || ""),
+        inputPlaceholder: "例如：适用于图像去雾任务，包含 gt 与 hazy 配对样本。",
+        confirmButtonText: current.visibility === "public" ? "保存" : "上传",
+        cancelButtonText: "取消",
+      }
+    );
+    await store.updateDataset(id, {
+      description: String(value || "").trim(),
+      visibility: "public",
+      allowUse: true,
+      allowDownload: true,
+    });
+    ElMessage({ type: "success", message: current.visibility === "public" ? "社区信息已更新" : "数据集已上传到社区" });
+  } catch (action) {
+    if (action !== "cancel" && action !== "close") {
+      ElMessage({ type: "error", message: `上传社区失败：${action?.message || action}` });
+    }
   }
 }
 
@@ -377,15 +451,11 @@ function ensureFileInput() {
       ElMessage({ type: "info", message: "正在导入 ZIP，请稍候..." });
       const fd = new FormData();
       fd.append("file", file);
-      const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
-      const token = localStorage.getItem("token");
-      const headers = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const res = await fetch(
-        `${API_BASE}/datasets/${encodeURIComponent(dsId)}/import_zip_file?overwrite=${overwriteOnImport.value ? "true" : "false"}`,
+      const res = await authFetch(
+        `/datasets/${encodeURIComponent(dsId)}/import_zip_file`,
         {
           method: "POST",
-          headers,
+          query: { overwrite: overwriteOnImport.value ? "true" : "false" },
           body: fd,
         }
       );
@@ -482,7 +552,7 @@ function guessTypeFromDatasetId(datasetId) {
 }
 
 function getCurrentDatasetType(datasetId, fallback = "") {
-  const current = visibleDatasets.value.find((item) => item.id === datasetId);
+  const current = ownedDatasets.value.find((item) => item.id === datasetId);
   return String(current?.type || fallback || "");
 }
 

@@ -10,9 +10,12 @@ import re
 import base64
 import zipfile
 import shutil
+import os
+import tempfile
 
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,6 +36,12 @@ from .schemas import (
     AlgorithmCreate,
     AlgorithmOut,
     AlgorithmPatch,
+    ResourceCommentCreate,
+    ResourceCommentOut,
+    NoticeOut,
+    ReportCreate,
+    ReportOut,
+    ReportResolve,
     PresetCreate,
     PresetOut,
     PresetPatch,
@@ -91,18 +100,55 @@ app = FastAPI(title="图像复原增强算法评测平台 API", version="0.1.0")
 
 # --- 用户系统 (User System) ---
 
+_ADMIN_USERNAME = os.getenv("ABP_ADMIN_USERNAME", "admin").strip() or "admin"
+_ADMIN_PASSWORD = os.getenv("ABP_ADMIN_PASSWORD", "Admin@123456")
+
+
+def _normalize_user_role(user: Optional[dict]) -> str:
+    role = str((user or {}).get("role") or "user").strip().lower()
+    return "admin" if role == "admin" else "user"
+
+
+def _ensure_admin_account(r) -> dict:
+    current = load_user(r, _ADMIN_USERNAME)
+    if current:
+        changed = False
+        if _normalize_user_role(current) != "admin":
+            current["role"] = "admin"
+            changed = True
+        if "created_at" not in current:
+            current["created_at"] = time.time()
+            changed = True
+        if changed:
+            save_user(r, _ADMIN_USERNAME, current)
+        return current
+
+    admin_user = {
+        "username": _ADMIN_USERNAME,
+        "hashed_password": get_password_hash(_ADMIN_PASSWORD),
+        "role": "admin",
+        "created_at": time.time(),
+    }
+    save_user(r, _ADMIN_USERNAME, admin_user)
+    return admin_user
+
+
 @app.post("/register", response_model=UserOut)
 def register(payload: UserCreate):
     r = make_redis()
+    _ensure_admin_account(r)
     username = payload.username.strip()
     if not username:
         err.api_error(400, err.E_HTTP, "username_required")
+    if username.lower() == _ADMIN_USERNAME.lower():
+        err.api_error(403, err.E_HTTP, "admin_username_reserved")
     if load_user(r, username):
         err.api_error(409, err.E_HTTP, "user_already_exists")
     
     user_data = {
         "username": username,
         "hashed_password": get_password_hash(payload.password),
+        "role": "user",
         "created_at": time.time(),
     }
     save_user(r, username, user_data)
@@ -113,9 +159,12 @@ def register(payload: UserCreate):
 @app.post("/login", response_model=Token)
 def login(payload: UserCreate):
     r = make_redis()
+    _ensure_admin_account(r)
     user = load_user(r, payload.username)
     if not user or not verify_password(payload.password, user["hashed_password"]):
         err.api_error(401, err.E_HTTP, "invalid_credentials")
+    if _normalize_user_role(user) == "admin":
+        err.api_error(403, err.E_HTTP, "admin_use_admin_login")
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -124,13 +173,60 @@ def login(payload: UserCreate):
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "username": user["username"]
+        "username": user["username"],
+        "role": _normalize_user_role(user),
+    }
+
+
+@app.post("/admin/login", response_model=Token)
+def admin_login(payload: UserCreate):
+    r = make_redis()
+    _ensure_admin_account(r)
+    user = load_user(r, payload.username)
+    if not user or not verify_password(payload.password, user["hashed_password"]):
+        err.api_error(401, err.E_HTTP, "invalid_credentials")
+    if _normalize_user_role(user) != "admin":
+        err.api_error(403, err.E_HTTP, "admin_only_login")
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user["username"],
+        "role": "admin",
     }
 
 
 @app.get("/me", response_model=UserOut)
 def get_me(current_user: dict = Depends(get_current_user)):
-    return UserOut(**current_user)
+    return UserOut(**{**current_user, "role": _normalize_user_role(current_user)})
+
+
+@app.get("/me/notices", response_model=list[NoticeOut])
+def get_my_notices(
+    unread_only: bool = Query(True),
+    current_user: dict = Depends(get_current_user),
+):
+    r = make_redis()
+    username = _username_of(current_user)
+    items = _list_notices(r, username, unread_only=unread_only)
+    return [NoticeOut(**item) for item in items]
+
+
+@app.post("/me/notices/{notice_id}/read")
+def mark_notice_read(notice_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    username = _username_of(current_user)
+    cur = _load_notice(r, username, notice_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "notice_not_found", notice_id=notice_id)
+    cur["read"] = True
+    _save_notice(r, username, cur)
+    return {"ok": True}
+
 
 def _sanitize_run_for_api(run: dict) -> dict:
     out = dict(run)
@@ -511,14 +607,24 @@ def _ensure_catalog_defaults(r):
     
     # 1. 默认数据集
     demo_ds_id = "ds_demo"
+    demo_ds_dir = _dataset_storage_root() / "system" / demo_ds_id
+    demo_type = "图像"
+    demo_size = "0 张"
+    demo_meta = {}
+    if demo_ds_dir.exists():
+        demo_type, demo_size, demo_meta = _scan_dataset_dir_on_disk(demo_ds_dir)
+        demo_meta = dict(demo_meta or {})
+        demo_meta["inferred_type"] = demo_type
+
     demo_ds = {
         "dataset_id": demo_ds_id,
         "name": "Demo-样例数据集",
-        "type": "图像",
-        "size": "10 张",
+        "type": demo_type,
+        "size": demo_size,
         "owner_id": "system",
         "created_at": created,
-        "meta": {},
+        "storage_path": str(demo_ds_dir),
+        "meta": demo_meta,
     }
     cur_ds = load_dataset(r, demo_ds_id)
     if not cur_ds:
@@ -531,10 +637,20 @@ def _ensure_catalog_defaults(r):
             if not v or "?" in v or "\ufffd" in v:
                 cur_ds[k] = demo_ds[k]
                 need_patch = True
+        cur_ds["owner_id"] = "system"
+        cur_ds["storage_path"] = str(demo_ds_dir)
+        if demo_size and cur_ds.get("size") != demo_size:
+            cur_ds["size"] = demo_size
+            need_patch = True
+        if demo_type and cur_ds.get("type") != demo_type:
+            cur_ds["type"] = demo_type
+            need_patch = True
+        if not isinstance(cur_ds.get("meta"), dict):
+            cur_ds["meta"] = {}
+        if demo_meta:
+            cur_ds["meta"] = {**cur_ds["meta"], **demo_meta}
+            need_patch = True
         if need_patch:
-            if not isinstance(cur_ds.get("meta"), dict):
-                cur_ds["meta"] = {}
-            cur_ds["owner_id"] = "system"
             save_dataset(r, demo_ds_id, cur_ds)
 
     # 2. 默认算法
@@ -801,6 +917,298 @@ def _username_of(current_user: Optional[dict]) -> str:
     return str(current_user.get("username") or "").strip()
 
 
+def _comment_key(resource_type: str, resource_id: str, comment_id: str) -> str:
+    return f"comment:{resource_type}:{resource_id}:{comment_id}"
+
+
+def _list_resource_comments(r, resource_type: str, resource_id: str) -> list[dict]:
+    items: list[dict] = []
+    pattern = _comment_key(resource_type, resource_id, "*")
+    for key in r.scan_iter(match=pattern, count=500):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda item: float(item.get("created_at") or 0))
+    return items
+
+
+def _save_resource_comment(r, resource_type: str, resource_id: str, data: dict) -> None:
+    comment_id = str(data.get("comment_id") or "").strip()
+    if not comment_id:
+        raise ValueError("comment_id_required")
+    r.set(_comment_key(resource_type, resource_id, comment_id), json.dumps(data, ensure_ascii=False))
+
+
+def _load_resource_comment(r, resource_type: str, resource_id: str, comment_id: str) -> Optional[dict]:
+    raw = r.get(_comment_key(resource_type, resource_id, comment_id))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _delete_resource_comment(r, resource_type: str, resource_id: str, comment_id: str) -> None:
+    r.delete(_comment_key(resource_type, resource_id, comment_id))
+
+
+def _notice_key(username: str, notice_id: str) -> str:
+    return f"notice:{username}:{notice_id}"
+
+
+def _report_key(report_id: str) -> str:
+    return f"report:{report_id}"
+
+
+def _save_notice(r, username: str, data: dict) -> None:
+    notice_id = str(data.get("notice_id") or "").strip()
+    owner = str(username or "").strip()
+    if not notice_id or not owner:
+        raise ValueError("notice_key_required")
+    r.set(_notice_key(owner, notice_id), json.dumps(data, ensure_ascii=False))
+
+
+def _load_notice(r, username: str, notice_id: str) -> Optional[dict]:
+    raw = r.get(_notice_key(username, notice_id))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
+    owner = str(username or "").strip()
+    if not owner:
+        return []
+    items: list[dict] = []
+    for key in r.scan_iter(match=_notice_key(owner, "*"), count=500):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                continue
+            if unread_only and bool(data.get("read")):
+                continue
+            items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return items
+
+
+def _create_notice(r, username: str, title: str, content: str, *, kind: str = "info") -> dict:
+    owner = str(username or "").strip()
+    if not owner:
+        raise ValueError("notice_username_required")
+    data = {
+        "notice_id": f"notice_{uuid.uuid4().hex[:12]}",
+        "username": owner,
+        "kind": str(kind or "info").strip() or "info",
+        "title": str(title or "").strip() or "系统通知",
+        "content": str(content or "").strip(),
+        "created_at": time.time(),
+        "read": False,
+    }
+    _save_notice(r, owner, data)
+    return data
+
+
+def _save_report(r, report_id: str, data: dict) -> None:
+    r.set(_report_key(report_id), json.dumps(data, ensure_ascii=False))
+
+
+def _load_report(r, report_id: str) -> Optional[dict]:
+    raw = r.get(_report_key(report_id))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _list_reports(r) -> list[dict]:
+    items: list[dict] = []
+    for key in r.scan_iter(match="report:*", count=500):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("report_id"):
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return items
+
+
+def _delete_report(r, report_id: str) -> None:
+    r.delete(_report_key(report_id))
+
+
+def _delete_dataset_record_with_related_state(r, dataset: dict, *, delete_disk: bool) -> bool:
+    dataset_id = str((dataset or {}).get("dataset_id") or "").strip()
+    if not dataset_id:
+        return False
+    dataset_dir = _dataset_dir_from_record(dataset)
+    delete_dataset(r, dataset_id)
+    r.delete(_get_dataset_cache_key(dataset_id))
+    r.delete(_get_dataset_version_key(dataset_id))
+    r.delete(_get_dataset_fs_hash_key(dataset_id))
+
+    owner_id = str((dataset or {}).get("owner_id") or "").strip()
+    if owner_id:
+        for preset in list_presets(r, limit=5000, owner_id=owner_id) or []:
+            if str(preset.get("dataset_id") or "") == dataset_id:
+                delete_preset(r, str(preset.get("preset_id") or ""))
+
+    if not delete_disk:
+        return False
+
+    try:
+        storage_root = _dataset_storage_root().resolve()
+        target_dir = dataset_dir.resolve()
+        if storage_root == target_dir or storage_root not in [target_dir, *target_dir.parents]:
+            return False
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=False)
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _delete_algorithm_record_with_related_state(r, algorithm: dict) -> None:
+    algorithm_id = str((algorithm or {}).get("algorithm_id") or "").strip()
+    if not algorithm_id:
+        return
+    delete_algorithm(r, algorithm_id)
+    owner_id = str((algorithm or {}).get("owner_id") or "").strip()
+    if owner_id:
+        for preset in list_presets(r, limit=5000, owner_id=owner_id) or []:
+            if str(preset.get("algorithm_id") or "") == algorithm_id:
+                delete_preset(r, str(preset.get("preset_id") or ""))
+
+
+class _StreamingZipBuffer:
+    def __init__(self):
+        self._chunks: list[bytes] = []
+        self._position = 0
+
+    def write(self, data):
+        if not data:
+            return 0
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        elif isinstance(data, bytearray):
+            data = bytes(data)
+        self._chunks.append(data)
+        self._position += len(data)
+        return len(data)
+
+    def tell(self):
+        return self._position
+
+    def flush(self):
+        return None
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def pop_chunks(self) -> bytes:
+        if not self._chunks:
+            return b""
+        data = b"".join(self._chunks)
+        self._chunks.clear()
+        return data
+
+
+def _stream_zipped_directory(source_dir: Path, chunk_size: int = 1024 * 1024):
+    buffer = _StreamingZipBuffer()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for path in sorted(source_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            arcname = str(path.relative_to(source_dir))
+            with zf.open(arcname, "w") as target, path.open("rb") as source:
+                while True:
+                    chunk = source.read(chunk_size)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+                    ready = buffer.pop_chunks()
+                    if ready:
+                        yield ready
+            ready = buffer.pop_chunks()
+            if ready:
+                yield ready
+    ready = buffer.pop_chunks()
+    if ready:
+        yield ready
+
+
+def _dataset_has_files(dataset_dir: Path) -> bool:
+    if not dataset_dir.exists() or not dataset_dir.is_dir():
+        return False
+    for path in dataset_dir.rglob("*"):
+        if path.is_file():
+            return True
+    return False
+
+
+def _list_all_dataset_records(r) -> list[dict]:
+    items: list[dict] = []
+    for key in r.scan_iter(match="dataset:*", count=1000):
+        if ":version:" in key or ":fs_hash:" in key or ":scan:" in key:
+            continue
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("dataset_id"):
+                items.append(data)
+        except Exception:
+            continue
+    return items
+
+
+def _list_all_algorithm_records(r) -> list[dict]:
+    items: list[dict] = []
+    for key in r.scan_iter(match="algorithm:*", count=1000):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("algorithm_id"):
+                items.append(data)
+        except Exception:
+            continue
+    return items
+
+
 def _assert_resource_access(resource: dict, current_user: Optional[dict], *, allow_system: bool = True) -> None:
     owner_id = str((resource or {}).get("owner_id") or "system").strip() or "system"
     username = _username_of(current_user)
@@ -812,6 +1220,36 @@ def _assert_resource_access(resource: dict, current_user: Optional[dict], *, all
         err.api_error(401, err.E_HTTP, "authentication_required")
     if owner_id != username:
         err.api_error(403, err.E_HTTP, "forbidden_access")
+
+
+def _assert_community_resource_visible(resource: dict, resource_type: str, resource_id: str) -> None:
+    owner_id = str((resource or {}).get("owner_id") or "system").strip() or "system"
+    if owner_id == "system":
+        return
+    if str((resource or {}).get("visibility") or "private").lower() == "public":
+        return
+    err.api_error(403, err.E_HTTP, f"{resource_type}_not_public", **{f"{resource_type}_id": resource_id})
+
+
+def _require_admin(current_user: dict) -> None:
+    if _normalize_user_role(current_user) != "admin":
+        err.api_error(403, err.E_HTTP, "admin_required")
+
+
+def _list_all_comments(r) -> list[dict]:
+    items: list[dict] = []
+    for key in r.scan_iter(match="comment:*:*:*", count=1000):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("comment_id"):
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
+    return items
 
 
 def _assert_pinned_user(current_user: dict) -> None:
@@ -858,6 +1296,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "name": _validate_text_encoding(payload.name, "dataset.name"),
             "type": _validate_text_encoding(payload.type, "dataset.type"),
             "size": _validate_text_encoding(payload.size, "dataset.size"),
+            "description": _validate_text_encoding(payload.description, "dataset.description"),
             "visibility": visibility,
             "allow_use": allow_use,
             "allow_download": allow_download,
@@ -870,6 +1309,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "name": _validate_text_encoding(payload.name, "dataset.name"),
             "type": _validate_text_encoding(payload.type, "dataset.type"),
             "size": _validate_text_encoding(payload.size, "dataset.size"),
+            "description": _validate_text_encoding(payload.description, "dataset.description"),
             "storage_path": str(_make_managed_dataset_dir(owner_id, dataset_id)),
             "owner_id": owner_id,
             "created_at": created,
@@ -877,6 +1317,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "visibility": visibility,
             "allow_use": allow_use,
             "allow_download": allow_download,
+            "download_count": 0,
         }
     
     save_dataset(r, dataset_id, data)
@@ -899,8 +1340,12 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch, current_user: dict = D
         cur["type"] = _validate_text_encoding(payload.type, "dataset.type")
     if payload.size is not None:
         cur["size"] = _validate_text_encoding(payload.size, "dataset.size")
+    if payload.description is not None:
+        cur["description"] = _validate_text_encoding(payload.description, "dataset.description")
     if payload.visibility is not None:
         cur["visibility"] = _normalize_visibility(payload.visibility)
+        if str(cur.get("visibility", "private")) == "public" and not _dataset_has_files(_dataset_dir_from_record(cur)):
+            err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
     is_public = str(cur.get("visibility", "private")) == "public"
     cur["allow_use"] = is_public
     cur["allow_download"] = is_public
@@ -1005,6 +1450,25 @@ def remove_dataset(dataset_id: str, delete_disk: bool = Query(False), current_us
     return {"ok": True, "dataset_id": dataset_id, "deleted_disk": deleted_disk}
 
 
+@app.get("/datasets/{dataset_id}/export")
+def export_dataset(dataset_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    _assert_resource_access(cur, current_user, allow_system=False)
+    dataset_dir = _dataset_dir_from_record(cur)
+    if not _dataset_has_files(dataset_dir):
+        err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
+    filename = f"{dataset_id}.zip"
+    return StreamingResponse(
+        _stream_zipped_directory(dataset_dir),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/community/datasets/{dataset_id}/download", response_model=DatasetOut)
 def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
@@ -1033,6 +1497,8 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
 
     target_dataset_id = _make_unique_dataset_id(r, dataset_id, target_owner)
     source_dir = _resolve_dataset_dir(source_owner, dataset_id)
+    if not _dataset_has_files(source_dir):
+        err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
     target_dir = _dataset_storage_root() / target_owner / target_dataset_id
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     if target_dir.exists():
@@ -1045,11 +1511,15 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
     copied = dict(source)
     copied["dataset_id"] = target_dataset_id
     copied["owner_id"] = target_owner
+    copied["source_owner_id"] = source_owner
+    copied["source_dataset_id"] = dataset_id
     copied["created_at"] = time.time()
     copied["storage_path"] = str(target_dir)
     copied["visibility"] = "private"
     copied["allow_use"] = False
     copied["allow_download"] = False
+    source["download_count"] = int(source.get("download_count") or 0) + 1
+    save_dataset(r, dataset_id, source)
     copied["meta"] = {
         **(copied.get("meta") if isinstance(copied.get("meta"), dict) else {}),
         "downloaded_from_dataset_id": dataset_id,
@@ -1058,6 +1528,57 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
     }
     save_dataset(r, target_dataset_id, copied)
     return DatasetOut(**copied)
+
+
+@app.get("/community/datasets/{dataset_id}/comments", response_model=list[ResourceCommentOut])
+def list_dataset_comments(dataset_id: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    ds = load_dataset(r, dataset_id)
+    if not ds:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    _assert_community_resource_visible(ds, "dataset", dataset_id)
+    return [ResourceCommentOut(**item) for item in _list_resource_comments(r, "dataset", dataset_id)]
+
+
+@app.post("/community/datasets/{dataset_id}/comments", response_model=ResourceCommentOut)
+def create_dataset_comment(dataset_id: str, payload: ResourceCommentCreate, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    ds = load_dataset(r, dataset_id)
+    if not ds:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    _assert_community_resource_visible(ds, "dataset", dataset_id)
+    content = _validate_text_encoding(payload.content or "", "comment.content").strip()
+    if not content:
+        err.api_error(400, err.E_HTTP, "comment_content_required")
+    data = {
+        "comment_id": f"cmt_{uuid.uuid4().hex[:12]}",
+        "resource_type": "dataset",
+        "resource_id": dataset_id,
+        "author_id": _username_of(current_user),
+        "content": content,
+        "created_at": time.time(),
+    }
+    _save_resource_comment(r, "dataset", dataset_id, data)
+    return ResourceCommentOut(**data)
+
+
+@app.delete("/community/datasets/{dataset_id}/comments/{comment_id}")
+def delete_dataset_comment(dataset_id: str, comment_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    ds = load_dataset(r, dataset_id)
+    if not ds:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    _assert_community_resource_visible(ds, "dataset", dataset_id)
+    comment = _load_resource_comment(r, "dataset", dataset_id, comment_id)
+    if not comment:
+        err.api_error(404, err.E_HTTP, "comment_not_found", dataset_id=dataset_id, comment_id=comment_id)
+    if str(comment.get("author_id") or "") != _username_of(current_user):
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    _delete_resource_comment(r, "dataset", dataset_id, comment_id)
+    return {"ok": True}
 
 
 def _get_dataset_version_key(dataset_id: str) -> str:
@@ -1131,7 +1652,7 @@ def _scan_dataset_dir_on_disk(ds_dir: Path) -> tuple[str, str, dict]:
                 gt_dir = alt_gt_dir
                 break
         else:
-            return "鍥惧儚", "0 寮?", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
+            return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
 
     input_dir_by_task = {
         "dehaze": "hazy",
@@ -1285,6 +1806,8 @@ def scan_dataset(
     meta["type_mismatch"] = bool(current_type and current_type != t)
     cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
+    cur["source_owner_id"] = str(cur.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "") or None
+    cur["source_dataset_id"] = str(cur.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "") or None
     save_dataset(r, dataset_id, cur)
     return DatasetOut(**cur)
 
@@ -1329,7 +1852,8 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
 
     cur["storage_path"] = str(ds_dir)
     t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
-    meta = dict(meta or {})
+    existing_meta = cur.get("meta") if isinstance(cur.get("meta"), dict) else {}
+    meta = {**existing_meta, **dict(meta or {})}
     meta["inferred_type"] = t
     current_type = str(cur.get("type") or "").strip()
     if not current_type:
@@ -1338,6 +1862,8 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     meta["type_mismatch"] = bool(current_type and current_type != t)
     cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
+    cur["source_owner_id"] = str(cur.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "") or None
+    cur["source_dataset_id"] = str(cur.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "") or None
     save_dataset(r, dataset_id, cur)
     
     # 增加数据集版本号，使缓存失效
@@ -1394,7 +1920,8 @@ def import_dataset_zip_file(
 
     cur["storage_path"] = str(ds_dir)
     t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
-    meta = dict(meta or {})
+    existing_meta = cur.get("meta") if isinstance(cur.get("meta"), dict) else {}
+    meta = {**existing_meta, **dict(meta or {})}
     meta["inferred_type"] = t
     current_type = str(cur.get("type") or "").strip()
     if not current_type:
@@ -1469,6 +1996,7 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
             "name": _validate_text_encoding(payload.name, "algorithm.name"),
             "impl": _validate_text_encoding(payload.impl, "algorithm.impl"),
             "version": _validate_text_encoding(payload.version, "algorithm.version"),
+            "description": _validate_text_encoding(payload.description, "algorithm.description"),
             "default_params": payload.default_params or {},
             "param_presets": payload.param_presets or {},
             "visibility": visibility,
@@ -1486,6 +2014,7 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
             "name": _validate_text_encoding(payload.name, "algorithm.name"),
             "impl": _validate_text_encoding(payload.impl, "algorithm.impl"),
             "version": _validate_text_encoding(payload.version, "algorithm.version"),
+            "description": _validate_text_encoding(payload.description, "algorithm.description"),
             "owner_id": owner_id,
             "created_at": created,
             "default_params": payload.default_params or {},
@@ -1493,6 +2022,7 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
             "visibility": visibility,
             "allow_use": allow_use,
             "allow_download": allow_download,
+            "download_count": 0,
         }
     
     save_algorithm(r, algorithm_id, data)
@@ -1520,6 +2050,8 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: di
         cur["impl"] = _validate_text_encoding(payload.impl, "algorithm.impl")
     if payload.version is not None:
         cur["version"] = _validate_text_encoding(payload.version, "algorithm.version")
+    if payload.description is not None:
+        cur["description"] = _validate_text_encoding(payload.description, "algorithm.description")
     if payload.default_params is not None:
         cur["default_params"] = payload.default_params
     if payload.param_presets is not None:
@@ -1547,6 +2079,36 @@ def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
         
     delete_algorithm(r, algorithm_id)
     return {"ok": True, "algorithm_id": algorithm_id}
+
+
+@app.get("/algorithms/{algorithm_id}/export")
+def export_algorithm(algorithm_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    _assert_resource_access(cur, current_user, allow_system=False)
+    payload = {
+        "algorithm_id": cur.get("algorithm_id"),
+        "task": cur.get("task"),
+        "name": cur.get("name"),
+        "impl": cur.get("impl"),
+        "version": cur.get("version"),
+        "description": cur.get("description") or "",
+        "default_params": cur.get("default_params") or {},
+        "param_presets": cur.get("param_presets") or {},
+        "owner_id": cur.get("owner_id"),
+        "source_owner_id": cur.get("source_owner_id"),
+        "source_algorithm_id": cur.get("source_algorithm_id"),
+        "created_at": cur.get("created_at"),
+    }
+    filename = f"{algorithm_id}.json"
+    return StreamingResponse(
+        io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/community/algorithms/{algorithm_id}/download", response_model=AlgorithmOut)
@@ -1585,10 +2147,346 @@ def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = D
     copied["visibility"] = "private"
     copied["allow_use"] = False
     copied["allow_download"] = False
+    source["download_count"] = int(source.get("download_count") or 0) + 1
+    save_algorithm(r, algorithm_id, source)
     copied["source_algorithm_id"] = algorithm_id
     copied["source_owner_id"] = source_owner
     save_algorithm(r, target_algorithm_id, copied)
     return AlgorithmOut(**copied)
+
+
+@app.get("/community/algorithms/{algorithm_id}/comments", response_model=list[ResourceCommentOut])
+def list_algorithm_comments(algorithm_id: str, current_user: Optional[dict] = Depends(get_current_user_optional)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    alg = load_algorithm(r, algorithm_id)
+    if not alg:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    _assert_community_resource_visible(alg, "algorithm", algorithm_id)
+    return [ResourceCommentOut(**item) for item in _list_resource_comments(r, "algorithm", algorithm_id)]
+
+
+@app.post("/community/algorithms/{algorithm_id}/comments", response_model=ResourceCommentOut)
+def create_algorithm_comment(algorithm_id: str, payload: ResourceCommentCreate, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    alg = load_algorithm(r, algorithm_id)
+    if not alg:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    _assert_community_resource_visible(alg, "algorithm", algorithm_id)
+    content = _validate_text_encoding(payload.content or "", "comment.content").strip()
+    if not content:
+        err.api_error(400, err.E_HTTP, "comment_content_required")
+    data = {
+        "comment_id": f"cmt_{uuid.uuid4().hex[:12]}",
+        "resource_type": "algorithm",
+        "resource_id": algorithm_id,
+        "author_id": _username_of(current_user),
+        "content": content,
+        "created_at": time.time(),
+    }
+    _save_resource_comment(r, "algorithm", algorithm_id, data)
+    return ResourceCommentOut(**data)
+
+
+@app.delete("/community/algorithms/{algorithm_id}/comments/{comment_id}")
+def delete_algorithm_comment(algorithm_id: str, comment_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    alg = load_algorithm(r, algorithm_id)
+    if not alg:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    _assert_community_resource_visible(alg, "algorithm", algorithm_id)
+    comment = _load_resource_comment(r, "algorithm", algorithm_id, comment_id)
+    if not comment:
+        err.api_error(404, err.E_HTTP, "comment_not_found", algorithm_id=algorithm_id, comment_id=comment_id)
+    if str(comment.get("author_id") or "") != _username_of(current_user):
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    _delete_resource_comment(r, "algorithm", algorithm_id, comment_id)
+    return {"ok": True}
+
+
+@app.post("/community/reports", response_model=ReportOut)
+def create_report(payload: ReportCreate, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    target_type = str(payload.target_type or "").strip().lower()
+    target_id = str(payload.target_id or "").strip()
+    resource_type = str(payload.resource_type or "").strip().lower() or None
+    resource_id = str(payload.resource_id or "").strip() or None
+    reason = _validate_text_encoding(payload.reason or "", "report.reason").strip()
+    if target_type not in {"algorithm", "dataset", "comment"}:
+        err.api_error(400, err.E_HTTP, "invalid_target_type")
+    if not target_id:
+        err.api_error(400, err.E_HTTP, "target_id_required")
+    if not reason:
+        err.api_error(400, err.E_HTTP, "report_reason_required")
+
+    if target_type == "algorithm":
+        alg = load_algorithm(r, target_id)
+        if not alg:
+            err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=target_id)
+        _assert_community_resource_visible(alg, "algorithm", target_id)
+    elif target_type == "dataset":
+        ds = load_dataset(r, target_id)
+        if not ds:
+            err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=target_id)
+        _assert_community_resource_visible(ds, "dataset", target_id)
+    else:
+        if resource_type not in {"algorithm", "dataset"} or not resource_id:
+            err.api_error(400, err.E_HTTP, "comment_resource_required")
+        resource = load_algorithm(r, resource_id) if resource_type == "algorithm" else load_dataset(r, resource_id)
+        if not resource:
+            err.api_error(404, err.E_HTTP, "resource_not_found", resource_type=resource_type, resource_id=resource_id)
+        _assert_community_resource_visible(resource, resource_type, resource_id)
+        comment = _load_resource_comment(r, resource_type, resource_id, target_id)
+        if not comment:
+            err.api_error(404, err.E_HTTP, "comment_not_found", resource_type=resource_type, resource_id=resource_id, comment_id=target_id)
+        reporter_id = _username_of(current_user)
+        if str(comment.get("author_id") or "") == reporter_id:
+            err.api_error(400, err.E_HTTP, "cannot_report_own_comment")
+
+    reporter_id = _username_of(current_user)
+    for item in _list_reports(r):
+        if str(item.get("status") or "pending") != "pending":
+            continue
+        if str(item.get("reporter_id") or "") != reporter_id:
+            continue
+        if str(item.get("target_type") or "") != target_type:
+            continue
+        if str(item.get("target_id") or "") != target_id:
+            continue
+        if str(item.get("resource_type") or "") != str(resource_type or ""):
+            continue
+        if str(item.get("resource_id") or "") != str(resource_id or ""):
+            continue
+        err.api_error(409, err.E_HTTP, "report_already_exists")
+
+    data = {
+        "report_id": f"rpt_{uuid.uuid4().hex[:12]}",
+        "target_type": target_type,
+        "target_id": target_id,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "reporter_id": reporter_id,
+        "reason": reason,
+        "status": "pending",
+        "resolution": "",
+        "created_at": time.time(),
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+    _save_report(r, data["report_id"], data)
+    return ReportOut(**data)
+
+
+@app.get("/admin/community/algorithms", response_model=list[AlgorithmOut])
+def admin_list_community_algorithms(current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    items = list_algorithms(r, limit=5000, owner_id=None, include_public=True) or []
+    out = []
+    for item in items:
+      owner_id = str(item.get("owner_id") or "system")
+      visibility = str(item.get("visibility") or "private").lower()
+      if owner_id == "system":
+          continue
+      if visibility != "public":
+          continue
+      out.append(AlgorithmOut(**item))
+    return out
+
+
+@app.get("/admin/community/algorithms/{algorithm_id}")
+def admin_get_community_algorithm_detail(algorithm_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    return AlgorithmOut(**cur).model_dump()
+
+
+@app.get("/admin/community/datasets", response_model=list[DatasetOut])
+def admin_list_community_datasets(current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    items = list_datasets(r, limit=5000, owner_id=None, include_public=True) or []
+    out = []
+    for item in items:
+      owner_id = str(item.get("owner_id") or "system")
+      visibility = str(item.get("visibility") or "private").lower()
+      if owner_id == "system":
+          continue
+      if visibility != "public":
+          continue
+      out.append(DatasetOut(**item))
+    return out
+
+
+@app.get("/admin/community/datasets/{dataset_id}")
+def admin_get_community_dataset_detail(dataset_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    return {
+        **DatasetOut(**cur).model_dump(),
+        "storage_path": str(_dataset_dir_from_record(cur)),
+    }
+
+
+@app.get("/admin/comments", response_model=list[ResourceCommentOut])
+def admin_list_comments(current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    return [ResourceCommentOut(**item) for item in _list_all_comments(r)]
+
+
+@app.post("/admin/community/algorithms/{algorithm_id}/takedown", response_model=AlgorithmOut)
+def admin_takedown_algorithm(algorithm_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
+        err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
+    if str(cur.get("owner_id") or "system") == "system":
+        err.api_error(403, err.E_HTTP, "cannot_takedown_system_algorithm", algorithm_id=algorithm_id)
+    source_owner = str(cur.get("owner_id") or "").strip()
+    source_name = str(cur.get("name") or algorithm_id).strip() or algorithm_id
+    cur["visibility"] = "private"
+    cur["allow_use"] = False
+    cur["allow_download"] = False
+    save_algorithm(r, algorithm_id, cur)
+    for item in _list_all_algorithm_records(r):
+        if str(item.get("owner_id") or "").strip() in {"", "system", source_owner}:
+            continue
+        if str(item.get("source_algorithm_id") or "") != algorithm_id:
+            continue
+        if str(item.get("source_owner_id") or "") != source_owner:
+            continue
+        affected_user = str(item.get("owner_id") or "").strip()
+        _delete_algorithm_record_with_related_state(r, item)
+        if affected_user:
+            _create_notice(
+                r,
+                affected_user,
+                "社区算法已下架",
+                f"你下载的社区算法“{source_name}”已被管理员下架，副本已从你的算法库中移除。",
+                kind="warning",
+            )
+    return AlgorithmOut(**cur)
+
+
+@app.post("/admin/community/datasets/{dataset_id}/takedown", response_model=DatasetOut)
+def admin_takedown_dataset(dataset_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_dataset(r, dataset_id)
+    if not cur:
+        err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
+    if str(cur.get("owner_id") or "system") == "system":
+        err.api_error(403, err.E_HTTP, "cannot_takedown_system_dataset", dataset_id=dataset_id)
+    source_owner = str(cur.get("owner_id") or "").strip()
+    source_name = str(cur.get("name") or dataset_id).strip() or dataset_id
+    cur["visibility"] = "private"
+    cur["allow_use"] = False
+    cur["allow_download"] = False
+    save_dataset(r, dataset_id, cur)
+    for item in _list_all_dataset_records(r):
+        item_owner = str(item.get("owner_id") or "").strip()
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        if item_owner in {"", "system", source_owner}:
+            continue
+        if str(meta.get("downloaded_from_dataset_id") or "") != dataset_id:
+            continue
+        if str(meta.get("downloaded_from_owner_id") or "") != source_owner:
+            continue
+        deleted_disk = _delete_dataset_record_with_related_state(r, item, delete_disk=True)
+        if item_owner:
+            suffix = "，对应磁盘文件也已清理。" if deleted_disk else "。"
+            _create_notice(
+                r,
+                item_owner,
+                "社区数据集已下架",
+                f"你下载的社区数据集“{source_name}”已被管理员下架，副本已从你的数据集库中移除{suffix}",
+                kind="warning",
+            )
+    return DatasetOut(**cur)
+
+
+@app.delete("/admin/comments/{resource_type}/{resource_id}/{comment_id}")
+def admin_delete_comment(resource_type: str, resource_id: str, comment_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    resource_type = str(resource_type or "").strip().lower()
+    if resource_type not in {"algorithm", "dataset"}:
+        err.api_error(400, err.E_HTTP, "invalid_resource_type")
+    r = make_redis()
+    comment = _load_resource_comment(r, resource_type, resource_id, comment_id)
+    if not comment:
+        err.api_error(404, err.E_HTTP, "comment_not_found", resource_type=resource_type, resource_id=resource_id, comment_id=comment_id)
+    _delete_resource_comment(r, resource_type, resource_id, comment_id)
+    return {"ok": True}
+
+
+@app.get("/admin/reports", response_model=list[ReportOut])
+def admin_list_reports(current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    return [ReportOut(**item) for item in _list_reports(r)]
+
+
+@app.post("/admin/reports/{report_id}/resolve", response_model=ReportOut)
+def admin_resolve_report(report_id: str, payload: ReportResolve, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    r = make_redis()
+    cur = _load_report(r, report_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "report_not_found", report_id=report_id)
+    status = str(payload.status or "resolved").strip().lower()
+    if status not in {"resolved", "rejected"}:
+        err.api_error(400, err.E_HTTP, "invalid_report_status")
+    cur["status"] = status
+    cur["resolution"] = _validate_text_encoding(payload.resolution or "", "report.resolution").strip()
+    cur["resolved_at"] = time.time()
+    cur["resolved_by"] = _username_of(current_user)
+    _save_report(r, report_id, cur)
+    reporter_id = str(cur.get("reporter_id") or "").strip()
+    if reporter_id:
+        content = "你提交的举报已由管理员处理。"
+        if status == "rejected":
+            content = "你提交的举报已由管理员驳回。"
+        if cur["resolution"]:
+            content = f"{content} 处理结果：{cur['resolution']}"
+        _create_notice(r, reporter_id, "举报已处理", content, kind="info")
+    return ReportOut(**cur)
+
+
+@app.post("/admin/reports/clear")
+def admin_clear_reports(
+    status: str = Query("handled"),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    wanted = str(status or "handled").strip().lower()
+    if wanted not in {"handled", "all"}:
+        err.api_error(400, err.E_HTTP, "invalid_clear_scope")
+    r = make_redis()
+    deleted = 0
+    for item in _list_reports(r):
+        item_status = str(item.get("status") or "pending").strip().lower()
+        if wanted == "handled" and item_status == "pending":
+            continue
+        _delete_report(r, str(item.get("report_id") or ""))
+        deleted += 1
+    return {"ok": True, "deleted": deleted, "status": wanted}
 
 
 @app.post("/algorithms/reset_user")
