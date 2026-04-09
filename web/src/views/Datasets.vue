@@ -1,94 +1,132 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="header-section">
       <h2 class="title">数据集管理</h2>
       <div class="subtitle">
-        支持手动创建、磁盘快速登记、ZIP 导入与扫描。目录建议包含 gt/ 与输入目录（hazy/noisy/blur/lr/dark），视频任务使用 noisy/lr 与 gt 同文件名配对。
+        支持创建、上传和扫描数据集，推荐通过 ZIP 导入并统一纳入平台管理。
       </div>
     </div>
 
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" class="centered-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">新建数据集</el-button>
-          <el-button class="centered-btn" @click="quickAddFromDisk" :disabled="!store.user.isLoggedIn">按ID登记磁盘目录</el-button>
-          <el-button class="centered-btn" @click="chooseZipForNew" :disabled="!store.user.isLoggedIn">导入 ZIP</el-button>
+          <el-button type="primary" class="centered-btn action-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">新建数据集</el-button>
+          <el-button class="centered-btn action-btn" @click="chooseZipForNew" :disabled="!store.user.isLoggedIn">导入 ZIP</el-button>
         </div>
-        <el-button @click="showDatasetLayoutGuide" class="guide-btn centered-btn">目录规范说明</el-button>
+        <el-button @click="showDatasetLayoutGuide" class="guide-btn centered-btn action-btn">目录规范说明</el-button>
       </div>
 
       <div class="selector-row">
         <div class="selector-left">
           <span class="label">当前选择：</span>
           <el-select v-model="selectedDatasetId" placeholder="请选择数据集" class="select-box" filterable>
-            <el-option v-for="d in store.datasets" :key="d.id" :label="`${d.name}（${d.id}）`" :value="d.id" />
+            <el-option v-for="d in visibleDatasets" :key="d.id" :label="`${d.name} (${d.id})`" :value="d.id" />
           </el-select>
-          <el-checkbox v-model="overwriteOnImport" label="导入时覆盖原数据" class="checkbox" />
+          <el-checkbox v-model="overwriteOnImport" label="导入时覆盖原有目录内容" class="checkbox compact-checkbox" />
         </div>
         <el-button
           type="success"
+          class="scan-btn centered-btn action-btn"
           :loading="selectedDatasetExists && scanningDatasets.has(selectedDatasetId)"
-          @click="scanCurrent"
-          class="scan-btn centered-btn"
           :disabled="!store.user.isLoggedIn || !selectedDatasetExists"
+          @click="scanCurrent"
         >
-          {{ scanningDatasets.has(selectedDatasetId) ? '扫描中...' : '扫描当前数据集' }}
+          {{ scanningDatasets.has(selectedDatasetId) ? "扫描中..." : "扫描当前数据集" }}
         </el-button>
       </div>
     </div>
 
-    <el-table :data="store.datasets" border style="width: 100%" class="data-table" stripe>
-      <el-table-column prop="name" label="名称" min-width="180" />
-      <el-table-column prop="type" label="类型" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type }}</el-tag>
+    <div class="section-block">
+      <h3 class="section-title">用户数据集</h3>
+      <el-table :data="ownedDatasets" border stripe class="data-table">
+        <el-table-column prop="name" label="名称" min-width="180" />
+        <el-table-column prop="type" label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="size" label="规模" width="190">
+          <template #default="{ row }">
+            <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="createdAt" label="创建时间" width="180" />
+        <el-table-column label="操作" width="140">
+          <template #default="{ row }">
+            <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
+              <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
+                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
+                  <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
+                  <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无用户数据集" />
         </template>
-      </el-table-column>
-      <el-table-column prop="size" label="规模" width="150" />
-      <el-table-column prop="createdAt" label="创建时间" width="180" />
-      <el-table-column label="操作" width="120">
-        <template #default="{ row }">
-          <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
-            <el-button size="small" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
-              管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="scan" icon="Refresh" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
-                  扫描统计
-                </el-dropdown-item>
-                <el-dropdown-item command="zip" icon="Upload" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
-                  导入 ZIP
-                </el-dropdown-item>
-                <el-dropdown-item command="delete" divided icon="Delete" type="danger" :disabled="scanningDatasets.has(row.id) || !store.user.isLoggedIn">
-                  删除
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty description="暂无数据集，请先创建或导入" />
-      </template>
-    </el-table>
+      </el-table>
+    </div>
 
-    <el-dialog v-model="showCreate" title="新建数据集" width="460px" border-radius="12px">
+    <div class="section-block">
+      <h3 class="section-title">社区数据集</h3>
+      <el-table :data="downloadedDatasets" border stripe class="data-table">
+        <el-table-column prop="name" label="名称" min-width="180" />
+        <el-table-column prop="type" label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="size" label="规模" width="190">
+          <template #default="{ row }">
+            <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="createdAt" label="下载时间" width="180" />
+        <el-table-column label="操作" width="140">
+          <template #default="{ row }">
+            <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
+              <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
+                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
+                  <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
+                  <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无社区数据集" />
+        </template>
+      </el-table>
+    </div>
+
+    <el-dialog v-model="showCreate" title="新建数据集" width="460px">
       <el-form :model="form" label-position="top">
-        <el-form-item label="数据集 ID">
-          <el-input v-model="form.id" placeholder="如 ds_gopro_deblur_test（可选）" />
-        </el-form-item>
         <el-form-item label="数据集名称">
-          <el-input v-model="form.name" placeholder="如 RESIDE Indoor 测试集" />
+          <el-input v-model="form.name" placeholder="例如：RESIDE Indoor 测试集" />
         </el-form-item>
         <el-form-item label="数据类型">
           <el-select v-model="form.type" style="width: 100%">
             <el-option label="图像" value="图像" />
             <el-option label="视频" value="视频" />
+            <el-option label="图像/视频" value="图像/视频" />
           </el-select>
         </el-form-item>
         <el-form-item label="规模描述">
-          <el-input v-model="form.size" placeholder="如 500 张 / 30 段视频" />
+          <el-input v-model="form.size" placeholder="例如：500 张 / 30 段" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -101,9 +139,9 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useAppStore } from "../stores/app";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
+import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
 
@@ -112,41 +150,43 @@ const selectedDatasetId = ref("");
 const overwriteOnImport = ref(true);
 const importTargetId = ref("");
 const fileInputRef = ref(null);
+const scanningDatasets = ref(new Set());
+
 const form = reactive({
-  id: "",
   name: "",
   type: "图像",
   size: "",
 });
 
-const selectedDatasetExists = computed(() =>
-  (store.datasets || []).some((d) => d.id === selectedDatasetId.value)
+const visibleDatasets = computed(() =>
+  (store.datasets || []).filter((d) => String(d?.raw?.owner_id || "") === String(store.user?.username || ""))
 );
+
+const ownedDatasets = computed(() => visibleDatasets.value.filter((d) => !String(d?.sourceUploaderId || "").trim()));
+const downloadedDatasets = computed(() => visibleDatasets.value.filter((d) => String(d?.sourceUploaderId || "").trim()));
+const selectedDatasetExists = computed(() => visibleDatasets.value.some((d) => d.id === selectedDatasetId.value));
 
 onMounted(async () => {
   try {
     await store.fetchDatasets();
-    if (!selectedDatasetId.value && store.datasets?.length) {
-      selectedDatasetId.value = store.datasets[0].id;
-    }
   } catch {
     // ignore
   }
 });
 
 watch(
-  () => store.datasets,
+  visibleDatasets,
   (datasets) => {
     const exists = (datasets || []).some((d) => d.id === selectedDatasetId.value);
-    if (!exists) {
-      selectedDatasetId.value = "";
+    if (!exists) selectedDatasetId.value = "";
+    if (!selectedDatasetId.value && (datasets || []).length) {
+      selectedDatasetId.value = datasets[0].id;
     }
   },
-  { deep: true }
+  { deep: true, immediate: true }
 );
 
 function openCreate() {
-  form.id = "";
   form.name = "";
   form.type = "图像";
   form.size = "";
@@ -157,19 +197,38 @@ function closeCreate() {
   showCreate.value = false;
 }
 
+async function askDatasetPublishSettings() {
+  try {
+    await ElMessageBox.confirm(
+      "是否将这个新建数据集发布到社区？发布后其他用户可以浏览和下载。",
+      "发布设置",
+      {
+        type: "info",
+        confirmButtonText: "发布",
+        cancelButtonText: "仅自己可见",
+        distinguishCancelAndClose: true,
+      }
+    );
+  } catch (action) {
+    if (action === "cancel" || action === "close") {
+      return { visibility: "private", allowUse: false, allowDownload: false };
+    }
+    throw action;
+  }
+  return { visibility: "public", allowUse: true, allowDownload: true };
+}
+
 function showDatasetLayoutGuide() {
   ElMessageBox.alert(
     [
-      "1) 图像/视频任务目录都可复用：gt + noisy/lr 等输入目录。",
-      "2) 视频去噪与视频超分不是靠目录名区分，而是靠创建Run时选择任务类型（video_denoise / video_sr）。",
-      "3) 视频任务要求：输入目录与 gt 目录中的视频文件必须同文件名配对。",
-      "4) 上线Web后不能直接扫描访问用户本机磁盘，只能扫描服务器上的目录。",
-      "5) 若要导入本机数据，请使用“导入ZIP”上传到服务器后再扫描。"
+      "1) 推荐目录包含 gt 与任务输入目录，如 hazy/noisy/blur/lr/dark。",
+      "2) 视频任务依靠创建 Run 时选择 video_denoise 或 video_sr 区分。",
+      "3) 视频任务要求输入目录与 gt 目录中的视频文件同名配对。",
+      "4) 推荐统一通过 ZIP 上传数据集，由平台自动管理存储目录。",
+      "5) 本机数据若不能直接访问，请先使用 ZIP 导入。",
     ].join("\n"),
     "目录与上线说明",
-    {
-      confirmButtonText: "我知道了",
-    }
+    { confirmButtonText: "我知道了" }
   );
 }
 
@@ -178,195 +237,69 @@ async function submitCreate() {
     ElMessage({ type: "warning", message: "请填写数据集名称" });
     return;
   }
-  const wantedId = form.id.trim() || "";
-  const wantedName = form.name.trim();
-  let wantedType = String(form.type || "图像");
-  let keepSelectedTypeAfterScan = false;
-  const hintedType = guessTypeFromDatasetId(wantedId);
-  if (hintedType && hintedType !== wantedType) {
-    try {
-      await ElMessageBox.confirm(
-        `检测到数据集ID更像“${hintedType}”类型，但你当前选择的是“${wantedType}”。是否继续按当前类型创建？`,
-        "创建前确认",
-        {
-          type: "warning",
-          confirmButtonText: `继续按${wantedType}创建`,
-          cancelButtonText: `转换为${hintedType}后创建`,
-          distinguishCancelAndClose: true,
-        }
-      );
-      keepSelectedTypeAfterScan = true;
-    } catch (action) {
-      if (action === "cancel") {
-        wantedType = hintedType;
-        form.type = hintedType;
-        ElMessage({ type: "info", message: `已切换为${hintedType}类型并继续创建` });
-      } else {
-        return;
-      }
-    }
-  }
-  let created = false;
-  let createdDsId = "";
   try {
-    const res = await store.createDataset({
-      id: wantedId || undefined,
-      name: wantedName,
-      type: wantedType,
+    const created = await store.createDataset({
+      name: form.name.trim(),
+      type: String(form.type || "图像"),
       size: form.size.trim() || "-",
+      visibility: "private",
+      allowUse: false,
+      allowDownload: false,
     });
-    created = true;
-    createdDsId = res?.id || wantedId;
-  } catch (e) {
-    const code = getApiErrorCode(e);
-    if (code !== "E_DATASET_ID_EXISTS") {
-      ElMessage({ type: "error", message: `创建数据集失败：${e?.message || e}` });
+    const finalId = created?.id || "";
+    if (!finalId) {
+      ElMessage({ type: "error", message: "创建成功但未返回数据集 ID" });
       return;
     }
-    // 数据集已存在，检查是否属于当前用户
-    try {
-      const datasets = await store.fetchDatasets();
-      const existingDataset = datasets.find(ds => ds.id === wantedId);
-      if (!existingDataset) {
-        ElMessage({ type: "error", message: "数据集不存在或不属于当前用户，请重新创建" });
-        return;
-      }
-      // 继续执行，因为数据集存在且属于当前用户
-      createdDsId = wantedId;
-    } catch (e) {
-      ElMessage({ type: "error", message: `获取数据集列表失败：${e?.message || e}` });
-      return;
-    }
-  }
-  const finalId = createdDsId;
-  if (!finalId) {
-    showCreate.value = false;
-    return;
-  }
-  try {
-    const beforeType = created ? wantedType : getCurrentDatasetType(finalId, wantedType);
-    const scanned = await store.scanDataset(finalId);
-    await store.fetchDatasets();
+    const publishSettings = await askDatasetPublishSettings();
+    await store.updateDataset(finalId, publishSettings);
+    await scanOne(finalId, { silentStart: true });
     selectedDatasetId.value = finalId;
-    if (keepSelectedTypeAfterScan && beforeType) {
-      const nowType = getCurrentDatasetType(finalId, scanned?.type || "");
-      if (nowType !== beforeType) {
-        await store.updateDataset(finalId, { type: beforeType });
-        await store.fetchDatasets();
-      }
-      ElMessage({ type: "info", message: `已按你的选择保持“${beforeType}”类型` });
-    } else {
-      await maybeSyncTypeByIdHint(finalId, scanned, beforeType);
-    }
-    ElMessage({
-      type: "success",
-      message: created ? "数据集创建并扫描完成" : "数据集已存在，已完成重新扫描",
-    });
     showCreate.value = false;
+    ElMessage({ type: "success", message: "数据集创建并扫描完成" });
   } catch (e) {
-    ElMessage({ type: "error", message: `扫描失败：${e?.message || e}` });
+    ElMessage({ type: "error", message: `创建失败：${e?.message || e}` });
   }
-}
-
-async function quickAddFromDisk() {
-  const id = prompt("请输入数据集ID（对应 backend/data/<id> 目录）");
-  const datasetId = String(id || "").trim();
-  if (!datasetId) return;
-
-  const name = prompt("请输入数据集名称", datasetId);
-  const datasetName = String(name || "").trim() || datasetId;
-  let datasetType = "图像";
-  let keepSelectedTypeAfterScan = false;
-  const hintedType = guessTypeFromDatasetId(datasetId);
-  if (hintedType && hintedType !== datasetType) {
-    try {
-      await ElMessageBox.confirm(
-        `检测到数据集ID更像“${hintedType}”类型。是否继续按“${datasetType}”登记？`,
-        "登记前确认",
-        {
-          type: "warning",
-          confirmButtonText: `继续按${datasetType}登记`,
-          cancelButtonText: `转换为${hintedType}后登记`,
-          distinguishCancelAndClose: true,
-        }
-      );
-      keepSelectedTypeAfterScan = true;
-    } catch (action) {
-      if (action === "cancel") {
-        datasetType = hintedType;
-        ElMessage({ type: "info", message: `已切换为${hintedType}类型并继续登记` });
-      } else {
-        return;
-      }
-    }
-  }
-
-  let created = false;
-  try {
-    await store.createDataset({ id: datasetId, name: datasetName, type: datasetType, size: "-" });
-    created = true;
-  } catch (e) {
-    const code = getApiErrorCode(e);
-    if (code !== "E_DATASET_ID_EXISTS") {
-      ElMessage({ type: "error", message: `快速登记失败：${e?.message || e}` });
-      return;
-    }
-  }
-  try {
-    const beforeType = created ? datasetType : getCurrentDatasetType(datasetId, datasetType);
-    const scanned = await store.scanDataset(datasetId);
-    await store.fetchDatasets();
-    selectedDatasetId.value = datasetId;
-    if (keepSelectedTypeAfterScan && beforeType) {
-      const nowType = getCurrentDatasetType(datasetId, scanned?.type || "");
-      if (nowType !== beforeType) {
-        await store.updateDataset(datasetId, { type: beforeType });
-        await store.fetchDatasets();
-      }
-      ElMessage({ type: "info", message: `已按你的选择保持“${beforeType}”类型` });
-    } else {
-      await maybeSyncTypeByIdHint(datasetId, scanned, beforeType);
-    }
-    ElMessage({
-      type: "success",
-      message: created ? "数据集创建并扫描完成" : "数据集已存在，已完成重新扫描",
-    });
-  } catch (e) {
-    ElMessage({ type: "error", message: `扫描失败：${e?.message || e}` });
-  }
-}
-
-function getApiErrorCode(e) {
-  return String(
-    e?.detail?.error_code ||
-      e?.data?.detail?.error_code ||
-      e?.data?.error_code ||
-      e?.error_code ||
-      ""
-  );
 }
 
 async function remove(id) {
+  let deleteDisk = false;
   try {
-    await ElMessageBox.confirm("确认删除该数据集吗？", "删除确认", {
-      type: "warning",
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-    });
-  } catch {
-    return;
+    await ElMessageBox.confirm(
+      "确认删除该数据集吗？\n选择“删除并删除磁盘”会同时移除当前账号下该数据集的磁盘目录。",
+      "删除确认",
+      {
+        type: "warning",
+        confirmButtonText: "删除并删除磁盘",
+        cancelButtonText: "仅删除记录",
+        distinguishCancelAndClose: true,
+      }
+    );
+    deleteDisk = true;
+  } catch (action) {
+    if (action === "cancel") {
+      deleteDisk = false;
+    } else {
+      return;
+    }
   }
+
   try {
-    await store.removeDataset(id);
+    await store.removeDataset(id, { deleteDisk });
     if (selectedDatasetId.value === id) {
       selectedDatasetId.value = "";
     }
+    ElMessage({ type: "success", message: deleteDisk ? "数据集和磁盘目录已删除" : "数据集记录已删除" });
   } catch (e) {
     ElMessage({ type: "error", message: `删除失败：${e?.message || e}` });
   }
 }
 
 async function handleDatasetAction(id, command) {
+  if (command === "id") {
+    await editDatasetId(id);
+    return;
+  }
   if (command === "scan") {
     await scanOne(id);
     return;
@@ -380,7 +313,40 @@ async function handleDatasetAction(id, command) {
   }
 }
 
-function _ensureFileInput() {
+async function editDatasetId(id) {
+  const current = visibleDatasets.value.find((item) => item.id === id);
+  if (!current) {
+    ElMessage({ type: "warning", message: "未找到当前数据集" });
+    return;
+  }
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `当前数据集 ID：${current.id}`,
+      "查看/修改ID（测试开发）",
+      {
+        inputValue: current.id,
+        confirmButtonText: "保存",
+        cancelButtonText: "取消",
+        inputPattern: /^[A-Za-z0-9._-]+$/,
+        inputErrorMessage: "ID 仅支持字母、数字、点、下划线和短横线",
+      }
+    );
+    const nextId = String(value || "").trim();
+    if (!nextId || nextId === current.id) {
+      ElMessage({ type: "info", message: "数据集ID未修改" });
+      return;
+    }
+    const updated = await store.changeDatasetId(current.id, nextId);
+    selectedDatasetId.value = updated?.id || nextId;
+    ElMessage({ type: "success", message: "数据集ID已更新" });
+  } catch (action) {
+    if (action !== "cancel" && action !== "close") {
+      ElMessage({ type: "error", message: `修改ID失败：${action?.message || action}` });
+    }
+  }
+}
+
+function ensureFileInput() {
   if (fileInputRef.value) return;
   const input = document.createElement("input");
   input.type = "file";
@@ -395,7 +361,7 @@ function _ensureFileInput() {
 
     try {
       await ElMessageBox.confirm(
-        `将导入 ZIP 到数据集 ${dsId}，${overwriteOnImport.value ? "会覆盖同名文件" : "不会覆盖同名文件"}，是否继续？`,
+        `将向数据集 ${dsId} 导入 ZIP，${overwriteOnImport.value ? "会覆盖目录中的现有内容" : "不会先清空目录"}，是否继续？`,
         "导入确认",
         {
           type: "warning",
@@ -411,43 +377,26 @@ function _ensureFileInput() {
       ElMessage({ type: "info", message: "正在导入 ZIP，请稍候..." });
       const fd = new FormData();
       fd.append("file", file);
-      // 使用 request 函数来导入 ZIP 文件，这样会自动传递认证令牌
-      const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+      const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
       const token = localStorage.getItem("token");
-      const headers = {}
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-      const res = await fetch(`${API_BASE}/datasets/${encodeURIComponent(dsId)}/import_zip_file?overwrite=${overwriteOnImport.value ? "true" : "false"}`, {
-        method: "POST",
-        headers,
-        body: fd,
-      });
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(
+        `${API_BASE}/datasets/${encodeURIComponent(dsId)}/import_zip_file?overwrite=${overwriteOnImport.value ? "true" : "false"}`,
+        {
+          method: "POST",
+          headers,
+          body: fd,
+        }
+      );
       const ct = (res.headers.get("content-type") || "").toLowerCase();
       const out = ct.includes("application/json") ? await res.json() : await res.text();
       if (!res.ok) {
         throw new Error(typeof out === "string" ? out : JSON.stringify(out));
       }
-      const ds = out && typeof out === "object" ? out : null;
-      if (ds?.dataset_id) {
-        await store.fetchDatasets();
-      }
-      const meta =
-        (ds?.raw?.meta && typeof ds.raw.meta === "object" ? ds.raw.meta : null) ||
-        (ds?.meta && typeof ds.meta === "object" ? ds.meta : {});
-      const pairs = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
-      const counts = meta?.counts_by_dir && typeof meta.counts_by_dir === "object" ? meta.counts_by_dir : {};
-      const pairTotal = Object.values(pairs).reduce((sum, v) => sum + Number(v || 0), 0);
-      const gtCount = Number(counts.gt || 0);
-      if (pairTotal <= 0) {
-        ElMessage({
-          type: "warning",
-          message: `ZIP 已导入，但可用配对为 0（gt: ${gtCount}）。请检查压缩包内是否同时包含 gt 与输入目录（hazy/noisy/blur/lr/dark）且同名。`,
-        });
-      } else {
-        ElMessage({ type: "success", message: `ZIP 导入成功：${ds?.size || "-"}，可用配对 ${pairTotal}（gt: ${gtCount}）` });
-      }
-      await scanOne(dsId);
+      await store.fetchDatasets();
+      await scanOne(dsId, { silentStart: true });
+      ElMessage({ type: "success", message: "ZIP 导入成功" });
     } catch (e) {
       ElMessage({ type: "error", message: `ZIP 导入失败：${e?.message || e}` });
     }
@@ -458,7 +407,7 @@ function _ensureFileInput() {
 
 function chooseZipFor(id) {
   importTargetId.value = id;
-  _ensureFileInput();
+  ensureFileInput();
   fileInputRef.value.click();
 }
 
@@ -470,59 +419,70 @@ function chooseZipForNew() {
   chooseZipFor(selectedDatasetId.value);
 }
 
-// 扫描状态管理
-const scanningDatasets = ref(new Set());
-
-async function scanOne(id) {
+async function scanOne(id, { silentStart = false } = {}) {
+  if (!id) return null;
+  if (scanningDatasets.value.has(id)) return null;
   try {
-    // 添加到扫描中集合
-    scanningDatasets.value.add(id);
-    ElMessage({ type: "info", message: `正在扫描数据集 ${id}...` });
-    
+    const nextScanning = new Set(scanningDatasets.value);
+    nextScanning.add(id);
+    scanningDatasets.value = nextScanning;
+    if (!silentStart) {
+      ElMessage({ type: "info", message: `正在扫描数据集 ${id}...` });
+    }
     const beforeType = getCurrentDatasetType(id, "");
     let ds = await store.scanDataset(id);
     ds = (await maybeSyncTypeByIdHint(id, ds, beforeType)) || ds;
-    const meta = ds?.raw?.meta && typeof ds.raw.meta === "object" ? ds.raw.meta : {};
-    const pairs = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
-    const denoise = Number(pairs.video_denoise ?? 0);
-    const vsr = Number(pairs.video_sr ?? 0);
-    const dehaze = Number(pairs.dehaze ?? 0);
-    const imgDenoise = Number(pairs.denoise ?? 0);
-    const deblur = Number(pairs.deblur ?? 0);
-    const sr = Number(pairs.sr ?? 0);
-    const lowlight = Number(pairs.lowlight ?? 0);
-    const imagePairTotal = Object.entries(pairs).reduce((sum, [k, v]) => {
-      if (String(k).startsWith("video_")) return sum;
-      return sum + Number(v || 0);
-    }, 0);
+    store.fetchDatasets().catch(() => {});
     const dtype = String(ds?.type || "");
     const tip = `${dtype || "-"}｜${ds?.size || "-"}`;
-    let extra = "";
-    if (dtype === "图像") {
-      extra = `图像总配对 ${imagePairTotal}（去雾 ${dehaze}，去噪 ${imgDenoise}，去模糊 ${deblur}，超分 ${sr}，低照度 ${lowlight}）`;
-    } else if (dtype === "视频") {
-      extra = `视频去噪 ${denoise}，视频超分 ${vsr}`;
-    } else {
-      extra = `图像总配对 ${imagePairTotal}（去雾 ${dehaze}，去噪 ${imgDenoise}，去模糊 ${deblur}，超分 ${sr}，低照度 ${lowlight}），视频去噪 ${denoise}，视频超分 ${vsr}`;
-    }
-    ElMessage({ type: "success", message: `扫描完成：${tip}（${extra}）` });
+    const taskTip = formatScanTaskSummary(ds?.raw?.meta);
+    ElMessage({ type: "success", message: taskTip ? `扫描完成：${tip}｜${taskTip}` : `扫描完成：${tip}` });
+    return ds;
   } catch (e) {
     ElMessage({ type: "error", message: `扫描失败：${e?.message || e}` });
+    return null;
   } finally {
-    // 从扫描中集合移除
-    scanningDatasets.value.delete(id);
+    const nextScanning = new Set(scanningDatasets.value);
+    nextScanning.delete(id);
+    scanningDatasets.value = nextScanning;
   }
 }
 
+async function scanCurrent() {
+  if (!selectedDatasetId.value) {
+    ElMessage({ type: "warning", message: "请先选择一个数据集" });
+    return;
+  }
+  await scanOne(selectedDatasetId.value);
+}
+
+function formatScanTaskSummary(meta) {
+  const pairs = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
+  const labels = {
+    dehaze: "去雾图片",
+    denoise: "去噪图片",
+    deblur: "去模糊图片",
+    sr: "超分图片",
+    lowlight: "低照度图片",
+    video_denoise: "视频去噪",
+    video_sr: "视频超分",
+  };
+  const unitOf = (key) => (String(key).startsWith("video_") ? "段" : "张");
+  const items = Object.entries(pairs)
+    .filter(([, count]) => Number(count || 0) > 0)
+    .map(([key, count]) => `${labels[key] || key} ${count}${unitOf(key)}`);
+  return items.join("，");
+}
+
 function guessTypeFromDatasetId(datasetId) {
-  const s = String(datasetId || "").toLowerCase();
-  if (/(video|vid|视频)/.test(s)) return "视频";
-  if (/(image|img|图像|图片)/.test(s)) return "图像";
+  const value = String(datasetId || "").toLowerCase();
+  if (/(video|vid|视频)/.test(value)) return "视频";
+  if (/(image|img|图像|图片)/.test(value)) return "图像";
   return "";
 }
 
 function getCurrentDatasetType(datasetId, fallback = "") {
-  const current = store.datasets.find((d) => d.id === datasetId);
+  const current = visibleDatasets.value.find((item) => item.id === datasetId);
   return String(current?.type || fallback || "");
 }
 
@@ -566,15 +526,6 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   });
   return rescanned;
 }
-
-async function scanCurrent() {
-  if (!selectedDatasetId.value) {
-    ElMessage({ type: "warning", message: "请先选择一个数据集" });
-    return;
-  }
-  await scanOne(selectedDatasetId.value);
-}
-
 </script>
 
 <style scoped>
@@ -594,54 +545,31 @@ async function scanCurrent() {
 }
 
 .subtitle {
-  color: #6a7ca9;
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 800px;
-}
-
-.centered-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.centered-btn > span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
+  color: #5b6b8b;
+  line-height: 1.7;
 }
 
 .action-bar {
-  background: #f8faff;
-  padding: 24px;
-  border-radius: 16px;
-  border: 1px solid #e6eeff;
   margin-bottom: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 18px;
+  background: #f8fbff;
+  border: 1px solid #dce7ff;
+  border-radius: 16px;
 }
 
 .toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
 .toolbar-left {
   display: flex;
   gap: 12px;
-  flex: 1;
   flex-wrap: wrap;
-}
-
-.guide-btn {
-  margin-left: auto;
 }
 
 .selector-row {
@@ -650,53 +578,128 @@ async function scanCurrent() {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding-top: 20px;
-  border-top: 1px dashed #dce7ff;
 }
 
 .selector-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
   flex-wrap: wrap;
 }
 
-.scan-btn {
-  margin-left: auto;
-}
-
 .label {
-  font-size: 14px;
-  color: #1f2f57;
+  color: #334466;
   font-weight: 600;
 }
 
 .select-box {
-  width: 300px;
-  max-width: 100%;
+  width: 320px;
 }
 
-.checkbox {
-  margin-right: 8px;
+.section-block {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  margin: 0 0 12px;
+  color: #1f2f57;
 }
 
 .data-table {
+  width: 100%;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.data-table :deep(.el-table__body-wrapper) {
-  overflow-x: auto;
+.centered-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-:deep(.el-table__header) {
-  background-color: #f5f7fa;
+.action-btn {
+  min-width: 132px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 12px;
 }
 
-:deep(.el-table__header th) {
-  font-weight: 700;
+.guide-btn,
+.scan-btn {
+  white-space: nowrap;
+}
+
+.scan-btn {
+  min-width: 148px;
+}
+
+.compact-checkbox {
+  min-height: 42px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.checkbox {
+  margin-left: 4px;
+}
+
+.size-cell {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-action-btn {
+  min-width: 84px;
+  justify-content: center;
+}
+
+.page :deep(.scan-result-box) {
+  width: min(680px, calc(100vw - 32px));
+  border-radius: 18px;
+}
+
+.page :deep(.scan-result-dialog) {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.page :deep(.scan-result-row) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.7;
+  color: #334466;
+  word-break: break-word;
+}
+
+.page :deep(.scan-result-label) {
+  min-width: 72px;
   color: #1f2f57;
+  font-weight: 700;
+}
+
+.data-table :deep(.el-table__cell) {
+  height: 68px;
+}
+
+.data-table :deep(.cell) {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+
+  .select-box {
+    width: 100%;
+    min-width: 220px;
+  }
 }
 </style>

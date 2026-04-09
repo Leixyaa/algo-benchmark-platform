@@ -1,8 +1,8 @@
 import { request } from "./http";
 
 export const algorithmsApi = {
-  async listAlgorithms({ limit = 500 } = {}) {
-    return request("/algorithms", { method: "GET", query: { limit } });
+  async listAlgorithms({ limit = 500, scope = "manage" } = {}) {
+    return request("/algorithms", { method: "GET", query: { limit, scope } });
   },
   async createAlgorithm(payload) {
     return request("/algorithms", { method: "POST", body: payload });
@@ -15,5 +15,8 @@ export const algorithmsApi = {
   },
   async resetUserAlgorithms() {
     return request("/algorithms/reset_user", { method: "POST" });
+  },
+  async downloadCommunityAlgorithm(algorithmId) {
+    return request(`/community/algorithms/${algorithmId}/download`, { method: "POST" });
   },
 };

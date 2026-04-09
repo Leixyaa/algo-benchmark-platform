@@ -220,7 +220,7 @@ import { authFetch } from "../api/http";
 import * as XLSX from "xlsx";
 
 const store = useAppStore();
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
 const task = ref("");
 const datasetId = ref("");
@@ -1713,5 +1713,4 @@ function exportChartPng() {
   .export-actions { width: 100%; }
 }
 </style>
-
 

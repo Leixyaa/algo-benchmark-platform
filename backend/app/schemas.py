@@ -37,16 +37,25 @@ class RunOut(BaseModel):
     error_detail: Optional[Dict[str, Any]] = None
 
 class DatasetCreate(BaseModel):
-    dataset_id: Optional[str] = None
     name: str
     type: str = "图像"
     size: str = "-"
+    visibility: str = "private"
+    allow_use: bool = False
+    allow_download: bool = False
 
 
 class DatasetPatch(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     size: Optional[str] = None
+    visibility: Optional[str] = None
+    allow_use: Optional[bool] = None
+    allow_download: Optional[bool] = None
+
+
+class DatasetIdChange(BaseModel):
+    new_dataset_id: str
 
 
 class DatasetOut(BaseModel):
@@ -57,6 +66,9 @@ class DatasetOut(BaseModel):
     owner_id: Optional[str] = "system"
     created_at: float
     meta: Dict[str, Any] = Field(default_factory=dict)
+    visibility: str = "private"
+    allow_use: bool = False
+    allow_download: bool = False
 
 
 class DatasetImportZip(BaseModel):
@@ -66,13 +78,15 @@ class DatasetImportZip(BaseModel):
 
 
 class AlgorithmCreate(BaseModel):
-    algorithm_id: Optional[str] = None
     task: str
     name: str
     impl: str = "OpenCV"
     version: str = "v1"
     default_params: Dict[str, Any] = Field(default_factory=dict)
     param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    visibility: str = "private"
+    allow_use: bool = False
+    allow_download: bool = False
 
 
 class AlgorithmPatch(BaseModel):
@@ -82,6 +96,9 @@ class AlgorithmPatch(BaseModel):
     version: Optional[str] = None
     default_params: Optional[Dict[str, Any]] = None
     param_presets: Optional[Dict[str, Dict[str, Any]]] = None
+    visibility: Optional[str] = None
+    allow_use: Optional[bool] = None
+    allow_download: Optional[bool] = None
 
 
 class AlgorithmOut(BaseModel):
@@ -91,9 +108,14 @@ class AlgorithmOut(BaseModel):
     impl: str
     version: str
     owner_id: Optional[str] = "system"
+    source_owner_id: Optional[str] = None
+    source_algorithm_id: Optional[str] = None
     created_at: float
     default_params: Dict[str, Any] = Field(default_factory=dict)
     param_presets: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    visibility: str = "private"
+    allow_use: bool = False
+    allow_download: bool = False
 
 
 class PresetCreate(BaseModel):

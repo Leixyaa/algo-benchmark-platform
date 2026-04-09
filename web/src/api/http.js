@@ -1,7 +1,7 @@
 // web/src/api/http.js
 // 通用 HTTP 请求封装：自动拼 query，JSON 请求与错误透传
 
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
 /**
  * @param {string} path 例如 "/runs"

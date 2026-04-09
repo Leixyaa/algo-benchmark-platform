@@ -1,6 +1,8 @@
 param(
   [switch]$SkipRedis,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [ValidateRange(1, 16)]
+  [int]$WorkerCount = 2
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,12 +69,14 @@ if (-not $SkipRedis) {
 Start-ServiceWindow `
   -Title "ABP - Backend API" `
   -WorkingDir $backendDir `
-  -CommandText '.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000'
+  -CommandText '.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001'
 
-Start-ServiceWindow `
-  -Title "ABP - Worker" `
-  -WorkingDir $backendDir `
-  -CommandText '.\.venv\Scripts\python.exe -m celery -A app.celery_app:celery_app worker -P solo -l info'
+for ($i = 1; $i -le $WorkerCount; $i++) {
+  Start-ServiceWindow `
+    -Title "ABP - Worker $i" `
+    -WorkingDir $backendDir `
+    -CommandText ".\.venv\Scripts\python.exe -m celery -A app.celery_app:celery_app worker -P solo -l info -n worker$i@%COMPUTERNAME%"
+}
 
 Start-ServiceWindow `
   -Title "ABP - Web" `
@@ -82,5 +86,6 @@ Start-ServiceWindow `
 Write-Host ""
 Write-Host "Started services:"
 Write-Host "  Redis:   127.0.0.1:6379"
-Write-Host "  Backend: http://127.0.0.1:8000/docs"
+Write-Host "  Backend: http://127.0.0.1:8001/docs"
+Write-Host "  Workers: $WorkerCount"
 Write-Host "  Web:     http://localhost:5173/"

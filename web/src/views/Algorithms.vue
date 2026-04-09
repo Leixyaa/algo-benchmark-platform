@@ -3,15 +3,15 @@
     <div class="header-section">
       <h2 class="title">算法库</h2>
       <div class="subtitle">
-        管理平台内置/接入的算法条目，后续评测时从这里选择算法。
+        支持创建、发布和管理算法，后续评测时从这里选择算法，公开算法可在社区中心下载到当前账号。
       </div>
     </div>
 
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" icon="Plus" @click="openCreate" :disabled="!store.user.isLoggedIn">新增算法</el-button>
-          <el-button icon="RefreshLeft" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">清理自定义算法</el-button>
+          <el-button type="primary" icon="Plus" class="centered-btn action-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">新增算法</el-button>
+          <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">清理用户算法</el-button>
         </div>
       </div>
 
@@ -25,7 +25,7 @@
           </el-select>
           <el-input v-model="filterKeyword" placeholder="搜索算法名称 / 版本 / ID" clearable class="filter-input" prefix-icon="Search" />
         </div>
-        <el-button @click="resetFilters" icon="Close" plain class="reset-btn">重置筛选</el-button>
+        <el-button @click="resetFilters" icon="Close" plain class="reset-btn centered-btn action-btn">重置筛选</el-button>
       </div>
     </div>
 
@@ -45,23 +45,31 @@
         </el-table-column>
       </el-table>
     </div>
-
     <div class="section user-section">
-      <h3 class="section-title"><el-icon><User /></el-icon> 用户新建算法</h3>
-      <el-table :data="pagedUserAlgorithms" border stripe class="data-table">
+      <h3 class="section-title">用户算法</h3>
+      <el-table :data="pagedOwnedAlgorithms" border stripe class="data-table">
         <el-table-column prop="task" label="任务" width="120" />
         <el-table-column prop="name" label="算法名称" min-width="200" />
         <el-table-column prop="impl" label="实现方式" width="120" />
         <el-table-column prop="version" label="版本" width="100" />
         <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="140">
           <template #default="{ row }">
-            <el-button size="small" icon="Edit" @click="openEdit(row)" :disabled="!store.user.isLoggedIn">编辑</el-button>
-            <el-button size="small" type="danger" icon="Delete" @click="remove(row.id)" :disabled="!store.user.isLoggedIn">删除</el-button>
+            <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
+              <el-button size="small" class="table-action-btn" :disabled="!store.user.isLoggedIn">
+                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无自定义算法" />
+          <el-empty description="暂无用户算法" />
         </template>
       </el-table>
       
@@ -71,10 +79,40 @@
           v-model:page-size="pageSize"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="filteredUserAlgorithms.length"
+          :total="filteredOwnedAlgorithms.length"
           @size-change="() => currentPage = 1"
         />
       </div>
+    </div>
+
+    <div class="section user-section">
+      <h3 class="section-title">社区算法</h3>
+      <el-table :data="filteredDownloadedAlgorithms" border stripe class="data-table">
+        <el-table-column prop="task" label="任务" width="120" />
+        <el-table-column prop="name" label="算法名称" min-width="200" />
+        <el-table-column prop="impl" label="实现方式" width="120" />
+        <el-table-column prop="version" label="版本" width="100" />
+        <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="createdAt" label="下载时间" width="180" />
+        <el-table-column label="操作" width="140">
+          <template #default="{ row }">
+            <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
+              <el-button size="small" class="table-action-btn" :disabled="!store.user.isLoggedIn">
+                管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无社区算法" />
+        </template>
+      </el-table>
     </div>
 
     <!-- 内置参数弹窗 -->
@@ -205,6 +243,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { ArrowDown } from "@element-plus/icons-vue";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
@@ -260,15 +299,17 @@ const filteredAlgorithms = computed(() => {
 });
 const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isBuiltinAlgorithm(a)));
 const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isBuiltinAlgorithm(a)));
+const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => !String(a?.sourceUploaderId || "").trim()));
+const filteredDownloadedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => String(a?.sourceUploaderId || "").trim()));
 const pageCount = computed(() => {
-  const n = Math.ceil(filteredUserAlgorithms.value.length / Number(pageSize.value || 20));
+  const n = Math.ceil(filteredOwnedAlgorithms.value.length / Number(pageSize.value || 20));
   return n > 0 ? n : 1;
 });
-const pagedUserAlgorithms = computed(() => {
+const pagedOwnedAlgorithms = computed(() => {
   const page = Math.min(Math.max(1, Number(currentPage.value || 1)), pageCount.value);
   const size = Math.max(1, Number(pageSize.value || 20));
   const start = (page - 1) * size;
-  return filteredUserAlgorithms.value.slice(start, start + size);
+  return filteredOwnedAlgorithms.value.slice(start, start + size);
 });
 
 function resetFilters() {
@@ -836,6 +877,27 @@ function closeEdit() {
   showEdit.value = false;
 }
 
+async function askAlgorithmPublishSettings() {
+  try {
+    await ElMessageBox.confirm(
+      "是否将这个新建算法发布到社区？发布后其他用户可以浏览和下载。",
+      "发布设置",
+      {
+        type: "info",
+        confirmButtonText: "发布",
+        cancelButtonText: "仅自己可见",
+        distinguishCancelAndClose: true,
+      }
+    );
+  } catch (action) {
+    if (action === "cancel" || action === "close") {
+      return { visibility: "private", allowUse: false, allowDownload: false };
+    }
+    throw action;
+  }
+  return { visibility: "public", allowUse: true, allowDownload: true };
+}
+
 watch(
   () => form.task,
   () => {
@@ -852,7 +914,7 @@ watch(
 watch([filterTask, filterImpl, filterKeyword, pageSize], () => {
   currentPage.value = 1;
 });
-watch([filteredUserAlgorithms, pageCount], () => {
+watch([filteredOwnedAlgorithms, pageCount], () => {
   if (currentPage.value > pageCount.value) currentPage.value = pageCount.value;
 });
 
@@ -979,13 +1041,19 @@ async function submitCreate() {
       ElMessage({ type: "warning", message: `算法名称重复：已存在「${dup.name}」` });
       return;
     }
-    await store.createAlgorithm({
+    const created = await store.createAlgorithm({
       task: form.task,
       name: finalName,
       impl: "OpenCV",
       version: form.version.trim() || "v1",
       defaultParams,
+      visibility: "private",
+      allowUse: false,
+      allowDownload: false,
     });
+    const publishSettings = await askAlgorithmPublishSettings();
+    await store.updateAlgorithm(created.id, publishSettings);
+    await store.fetchAlgorithms();
     showCreate.value = false;
   } catch (e) {
     ElMessage({ type: "error", message: `新增失败：${e?.message || e}` });
@@ -1011,16 +1079,26 @@ function viewBuiltinParams(a) {
 
 async function remove(id) {
   try {
-    await ElMessageBox.confirm("确定删除该算法条目吗？", "删除确认", {
+    await ElMessageBox.confirm("确认删除该算法吗？", "删除确认", {
       type: "warning",
       confirmButtonText: "删除",
       cancelButtonText: "取消",
     });
     await store.removeAlgorithm(id);
-    ElMessage({ type: "success", message: "删除成功" });
+    ElMessage({ type: "success", message: "算法已删除" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
     ElMessage({ type: "error", message: `删除失败：${e?.message || e}` });
+  }
+}
+
+async function handleAlgorithmAction(row, command) {
+  if (command === "edit") {
+    openEdit(row);
+    return;
+  }
+  if (command === "delete") {
+    await remove(row?.id);
   }
 }
 
@@ -1062,6 +1140,19 @@ async function resetToBuiltins() {
   font-size: 14px;
   line-height: 1.6;
   max-width: 800px;
+}
+
+.centered-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-btn {
+  min-width: 132px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 12px;
 }
 
 .action-bar {
@@ -1143,6 +1234,11 @@ async function resetToBuiltins() {
 
 .readonly-tag {
   margin-left: 8px;
+}
+
+.table-action-btn {
+  min-width: 84px;
+  justify-content: center;
 }
 
 .pagination-row {

@@ -1,13 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import Layout from "../views/Layout.vue";
+import Layout from "../views/LayoutBrand2.vue";
+import Community from "../views/Community.vue";
 import Datasets from "../views/Datasets.vue";
 import Algorithms from "../views/Algorithms.vue";
 import NewRun from "../views/NewRun.vue";
 import Compare from "../views/Compare.vue";
 import Runs from "../views/Runs.vue";
-import Login from "../views/Login.vue";
-import Register from "../views/Register.vue";
+import Login from "../views/LoginBrand.vue";
+import Register from "../views/RegisterBrand.vue";
 
 const routes = [
   { path: "/login", component: Login },
@@ -15,8 +16,9 @@ const routes = [
   {
     path: "/",
     component: Layout,
-    redirect: "/datasets",
+    redirect: "/community",
     children: [
+      { path: "community", component: Community },
       { path: "datasets", component: Datasets },
       { path: "algorithms", component: Algorithms },
       { path: "new-run", component: NewRun },

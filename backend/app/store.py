@@ -35,11 +35,12 @@ def list_runs(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = None) 
             data = json.loads(s)
             if isinstance(data, dict) and "run_id" in data:
                 oid = data.get("owner_id", "system")
+                visibility = str(data.get("visibility", "private") or "private").lower()
                 if owner_id:
-                    if oid != "system" and oid != owner_id:
+                    if oid != "system" and oid != owner_id and visibility != "public":
                         continue
                 else:
-                    if oid != "system":
+                    if oid != "system" and visibility != "public":
                         continue
                 runs.append(data)
         except Exception:
@@ -71,7 +72,7 @@ def delete_dataset(r: redis.Redis, dataset_id: str) -> None:
     r.delete(dataset_key(dataset_id))
 
 
-def list_datasets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = None) -> list[Dict[str, Any]]:
+def list_datasets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = None, include_public: bool = False) -> list[Dict[str, Any]]:
     keys = r.keys("dataset:*")
     items = []
     for k in keys:
@@ -85,13 +86,14 @@ def list_datasets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = No
             data = json.loads(s)
             if isinstance(data, dict) and "dataset_id" in data:
                 oid = data.get("owner_id", "system")
+                visibility = str(data.get("visibility", "private") or "private").lower()
                 # 如果指定了 owner_id，则只显示自己的 + system 的
                 if owner_id:
-                    if oid != "system" and oid != owner_id:
+                    if oid != "system" and oid != owner_id and not (include_public and visibility == "public"):
                         continue
                 else:
                     # 如果没指定（游客），只显示 system 的
-                    if oid != "system":
+                    if oid != "system" and not (include_public and visibility == "public"):
                         continue
                 items.append(data)
         except Exception:
@@ -115,7 +117,7 @@ def delete_algorithm(r: redis.Redis, algorithm_id: str) -> None:
     r.delete(algorithm_key(algorithm_id))
 
 
-def list_algorithms(r: redis.Redis, limit: int = 500, owner_id: Optional[str] = None) -> list[Dict[str, Any]]:
+def list_algorithms(r: redis.Redis, limit: int = 500, owner_id: Optional[str] = None, include_public: bool = False) -> list[Dict[str, Any]]:
     keys = r.keys("algorithm:*")
     items = []
     for k in keys:
@@ -126,11 +128,12 @@ def list_algorithms(r: redis.Redis, limit: int = 500, owner_id: Optional[str] = 
             data = json.loads(s)
             if isinstance(data, dict) and "algorithm_id" in data:
                 oid = data.get("owner_id", "system")
+                visibility = str(data.get("visibility", "private") or "private").lower()
                 if owner_id:
-                    if oid != "system" and oid != owner_id:
+                    if oid != "system" and oid != owner_id and not (include_public and visibility == "public"):
                         continue
                 else:
-                    if oid != "system":
+                    if oid != "system" and not (include_public and visibility == "public"):
                         continue
                 items.append(data)
         except Exception:

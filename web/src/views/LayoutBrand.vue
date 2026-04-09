@@ -4,8 +4,8 @@
       <div class="brand">
         <div class="brandIcon">V</div>
         <div>
-          <div class="brandTitle">图像算法评测平台</div>
-          <div class="brandSub">Image Benchmark Studio</div>
+          <div class="brandTitle">图像复原增强算法评测平台</div>
+          <div class="brandSub">Image Restoration Benchmark Studio</div>
         </div>
       </div>
 
@@ -23,7 +23,7 @@
       <el-header class="topbar">
         <div class="headerLeft">
           <div class="topTitle">{{ title }}</div>
-          <div class="topSub">图像与视频增强 · 评测 · 对比 · 导出</div>
+          <div class="topSub">聚焦图像复原与增强任务，支持评测、对比与导出</div>
         </div>
 
         <div class="headerRight">
@@ -57,8 +57,9 @@
 <script setup>
 import { computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useAppStore } from "../stores/app";
 import { ElMessage } from "element-plus";
+
+import { useAppStore } from "../stores/app";
 
 const route = useRoute();
 const router = useRouter();
@@ -75,7 +76,7 @@ const title = computed(() => {
     "/runs": "任务中心",
     "/compare": "结果对比",
   };
-  return map[route.path] ?? "算法评测平台";
+  return map[route.path] ?? "图像复原增强算法评测平台";
 });
 
 async function handleLogout() {
@@ -109,7 +110,6 @@ onMounted(async () => {
 .sidebar {
   border-right: 1px solid #dbe6ff;
   background: #ffffff;
-  box-shadow: none;
 }
 
 .brand {
@@ -120,46 +120,37 @@ onMounted(async () => {
 }
 
 .brandIcon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: #ffffff;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
   background: #2f6bff;
-  box-shadow: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 700;
+  font-size: 22px;
 }
 
 .brandTitle {
-  font-size: 16px;
-  font-weight: 700;
   color: #1f2f57;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .brandSub {
+  color: #7b8db5;
   font-size: 12px;
-  color: #6a7ca9;
+  margin-top: 4px;
 }
 
 .menu {
   border-right: none;
-  background: transparent;
-}
-
-:deep(.el-menu-item) {
-  margin: 6px 10px;
-  border-radius: 10px;
-}
-
-:deep(.el-menu-item.is-active) {
-  color: #2153d3;
-  font-weight: 700;
-  background: rgba(47, 107, 255, 0.1);
 }
 
 .mainWrap {
-  overflow: hidden;
+  background: #f5f7fb;
 }
 
 .topbar {
@@ -168,59 +159,53 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  border-bottom: 1px solid #dce7ff;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom: 1px solid #dbe6ff;
 }
 
-.headerRight {
+.headerLeft {
   display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background 0.2s;
-}
-
-.user-info:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.username {
-  font-size: 14px;
-  color: #1d3263;
-  font-weight: 500;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .topTitle {
-  font-size: 18px;
+  color: #1f2f57;
+  font-size: 22px;
   font-weight: 700;
-  color: #1d3263;
 }
 
 .topSub {
-  margin-top: 3px;
-  font-size: 12px;
-  color: #7083ad;
+  color: #7586aa;
+  font-size: 13px;
+}
+
+.user-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.username {
+  color: #31456f;
+  font-weight: 600;
+}
+
+.guest-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .main {
-  padding: 0;
+  padding: 18px;
 }
 
 .contentCard {
-  height: calc(100vh - 72px);
-  overflow: auto;
-  border-radius: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
+  min-height: calc(100vh - 108px);
+  background: #ffffff;
+  border: 1px solid #e3ebfb;
+  border-radius: 18px;
+  padding: 18px;
 }
 </style>

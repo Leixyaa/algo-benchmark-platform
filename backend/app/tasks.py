@@ -22,6 +22,7 @@ from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 from .vision.dehaze_dcp import dehaze_dcp
 from .vision.niqe_simple import niqe_score
+from .vision.dataset_access import count_paired_images, count_paired_videos, find_paired_images, find_paired_videos
 
 
 class RunCanceled(Exception):
@@ -510,19 +511,21 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             }
             input_dirname = input_dir_by_task.get(task_type, "hazy")
             is_video_task = task_type.startswith("video_")
+            dataset = load_dataset(r, dataset_id) or {}
+            owner_id = str(dataset.get("owner_id") or run.get("owner_id") or "system")
+            storage_path = str(dataset.get("storage_path") or "").strip() or None
             # 获取数据集所有者
             owner_id = run.get("owner_id", "system")
+            owner_id = str(dataset.get("owner_id") or owner_id or "system")
             if is_video_task:
-                pairs = find_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
+                pairs = find_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5, storage_path=storage_path)
             else:
-                pairs = find_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5)
+                pairs = find_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5, storage_path=storage_path)
             try:
-                from .vision.dataset_io import count_paired_images, count_paired_videos
-
                 if is_video_task:
-                    total_pairs = count_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+                    total_pairs = count_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
                 else:
-                    total_pairs = count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt")
+                    total_pairs = count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
             except Exception:
                 total_pairs = None
             record = run.get("record") if isinstance(run.get("record"), dict) else {}

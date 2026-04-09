@@ -49,7 +49,7 @@ export function toTaskType(taskLabel) {
 function hasBadText(v) {
   if (typeof v !== "string") return false;
   if (v.includes("\uFFFD")) return true;
-  if (/\?{3,}/.test(v)) return true;
+  if (/[?？]{2,}/.test(v)) return true;
   return false;
 }
 
@@ -57,6 +57,14 @@ function normalizeBadString(v, fallback) {
   if (typeof v !== "string") return v;
   if (hasBadText(v)) return fallback;
   return v;
+}
+
+function normalizeTaskLabel(v) {
+  if (typeof v !== "string") return v;
+  const normalized = TASK_LABEL_BY_TYPE[v] || v;
+  if (Object.prototype.hasOwnProperty.call(TASK_TYPE_BY_LABEL, normalized)) return normalized;
+  if (hasBadText(normalized)) return "待确认";
+  return normalized;
 }
 
 function repairLoadedState(state) {
@@ -105,7 +113,7 @@ function repairLoadedState(state) {
         return { ...a, task: "去雾", name: "DCP暗通道先验(真实)" };
       }
 
-      const task2 = normalizeBadString(a.task, "（任务乱码，请编辑）");
+      const task2 = normalizeTaskLabel(a.task);
       const name2 = normalizeBadString(a.name, "（算法名乱码，请编辑）");
       const impl2 = normalizeBadString(a.impl, "（实现方式乱码）");
       const ver2 = normalizeBadString(a.version, "（版本乱码）");
@@ -353,6 +361,43 @@ function ensureBaselineAlgorithms(algs) {
   return list;
 }
 
+function mapDatasetOut(x) {
+  return {
+    id: x.dataset_id,
+    name: x.name,
+    type: x.type,
+    size: x.size,
+    visibility: x.visibility || "private",
+    allowUse: Boolean(x.allow_use),
+    allowDownload: Boolean(x.allow_download),
+    createdAt: formatTs(x.created_at),
+    uploaderId: String(x.owner_id || ""),
+    sourceUploaderId: String(x?.meta?.downloaded_from_owner_id || ""),
+    sourceDatasetId: String(x?.meta?.downloaded_from_dataset_id || ""),
+    raw: x,
+  };
+}
+
+function mapAlgorithmOut(x) {
+  return {
+    id: x.algorithm_id,
+    task: normalizeTaskLabel(x.task),
+    name: x.name,
+    impl: x.impl,
+    version: x.version,
+    visibility: x.visibility || "private",
+    allowUse: Boolean(x.allow_use),
+    allowDownload: Boolean(x.allow_download),
+    createdAt: formatTs(x.created_at),
+    defaultParams: x.default_params ?? {},
+    paramPresets: x.param_presets ?? {},
+    uploaderId: String(x.owner_id || ""),
+    sourceUploaderId: String(x.source_owner_id || ""),
+    sourceAlgorithmId: String(x.source_algorithm_id || ""),
+    raw: x,
+  };
+}
+
 function isTerminal(statusCN) {
   return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
@@ -387,6 +432,11 @@ export const useAppStore = defineStore("app", {
     async login(username, password) {
       try {
         const res = await http.post("/login", { username, password });
+        this.stopPollingAll();
+        this.datasets = [];
+        this.algorithms = [];
+        this.presets = [];
+        this.runs = [];
         this.user.username = res.username;
         this.user.token = res.access_token;
         this.user.isLoggedIn = true;
@@ -397,6 +447,10 @@ export const useAppStore = defineStore("app", {
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
+        await Promise.all([
+          this.fetchDatasets(),
+          this.fetchAlgorithms(),
+        ]);
         return true;
       } catch (e) {
         throw e;
@@ -427,14 +481,13 @@ export const useAppStore = defineStore("app", {
     // ====================== Catalog：数据集/算法（后端持久化） ======================
     async fetchDatasets(limit = 200) {
       const list = await datasetsApi.listDatasets({ limit });
-      const mapped = (list ?? []).map((x) => ({
-        id: x.dataset_id,
-        name: x.name,
-        type: x.type,
-        size: x.size,
-        createdAt: formatTs(x.created_at),
-        raw: x,
-      }));
+      const currentUsername = String(this.user?.username || "");
+      const mapped = (list ?? [])
+        .filter((x) => {
+          if (!currentUsername) return false;
+          return String(x?.owner_id || "") === currentUsername;
+        })
+        .map((x) => mapDatasetOut(x));
       this.datasets = mapped;
       saveState({ datasets: this.datasets });
       return this.datasets;
@@ -442,17 +495,7 @@ export const useAppStore = defineStore("app", {
 
     async fetchAlgorithms(limit = 500) {
       const list = await algorithmsApi.listAlgorithms({ limit });
-      const mapped = (list ?? []).map((x) => ({
-        id: x.algorithm_id,
-        task: x.task,
-        name: x.name,
-        impl: x.impl,
-        version: x.version,
-        createdAt: formatTs(x.created_at),
-        defaultParams: x.default_params ?? {},
-        paramPresets: x.param_presets ?? {},
-        raw: x,
-      }));
+      const mapped = (list ?? []).map((x) => mapAlgorithmOut(x));
       this.algorithms = ensureBaselineAlgorithms(mapped);
       saveState({ algorithms: this.algorithms });
       return this.algorithms;
@@ -479,19 +522,14 @@ export const useAppStore = defineStore("app", {
 
     async createDataset(payload) {
       const out = await datasetsApi.createDataset({
-        dataset_id: payload?.id,
         name: payload?.name,
         type: payload?.type,
         size: payload?.size,
+        visibility: payload?.visibility,
+        allow_use: payload?.allowUse,
+        allow_download: payload?.allowDownload,
       });
-      const ds = {
-        id: out.dataset_id,
-        name: out.name,
-        type: out.type,
-        size: out.size,
-        createdAt: formatTs(out.created_at),
-        raw: out,
-      };
+      const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === ds.id);
       if (idx === -1) this.datasets.unshift(ds);
       else this.datasets[idx] = { ...this.datasets[idx], ...ds };
@@ -500,23 +538,32 @@ export const useAppStore = defineStore("app", {
     },
 
     async updateDataset(id, patch) {
-      const out = await datasetsApi.patchDataset(id, patch);
-      const ds = {
-        id: out.dataset_id,
-        name: out.name,
-        type: out.type,
-        size: out.size,
-        createdAt: formatTs(out.created_at),
-        raw: out,
-      };
+      const out = await datasetsApi.patchDataset(id, {
+        name: patch?.name,
+        type: patch?.type,
+        size: patch?.size,
+        visibility: patch?.visibility,
+        allow_use: patch?.allowUse,
+        allow_download: patch?.allowDownload,
+      });
+      const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === id);
       if (idx >= 0) this.datasets[idx] = { ...this.datasets[idx], ...ds };
       saveState({ datasets: this.datasets });
       return ds;
     },
 
-    async removeDataset(id) {
-      await datasetsApi.deleteDataset(id);
+    async changeDatasetId(id, newDatasetId) {
+      const out = await datasetsApi.changeDatasetId(id, newDatasetId);
+      const ds = mapDatasetOut(out);
+      this.datasets = (this.datasets || []).filter((d) => d.id !== id && d.id !== ds.id);
+      this.datasets.unshift(ds);
+      saveState({ datasets: this.datasets });
+      return ds;
+    },
+
+    async removeDataset(id, options) {
+      await datasetsApi.deleteDataset(id, options);
       const idx = this.datasets.findIndex((d) => d.id === id);
       if (idx >= 0) this.datasets.splice(idx, 1);
       saveState({ datasets: this.datasets });
@@ -524,14 +571,7 @@ export const useAppStore = defineStore("app", {
 
     async scanDataset(id) {
       const out = await datasetsApi.scanDataset(id);
-      const ds = {
-        id: out.dataset_id,
-        name: out.name,
-        type: out.type,
-        size: out.size,
-        createdAt: formatTs(out.created_at),
-        raw: out,
-      };
+      const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === id);
       if (idx >= 0) this.datasets[idx] = { ...this.datasets[idx], ...ds };
       saveState({ datasets: this.datasets });
@@ -544,14 +584,7 @@ export const useAppStore = defineStore("app", {
         data_b64: dataB64,
         overwrite: Boolean(overwrite),
       });
-      const ds = {
-        id: out.dataset_id,
-        name: out.name,
-        type: out.type,
-        size: out.size,
-        createdAt: formatTs(out.created_at),
-        raw: out,
-      };
+      const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === id);
       if (idx === -1) this.datasets.unshift(ds);
       else this.datasets[idx] = { ...this.datasets[idx], ...ds };
@@ -561,24 +594,16 @@ export const useAppStore = defineStore("app", {
 
     async createAlgorithm(payload) {
       const out = await algorithmsApi.createAlgorithm({
-        algorithm_id: payload?.id,
         task: payload?.task,
         name: payload?.name,
         impl: payload?.impl,
         version: payload?.version,
         default_params: payload?.defaultParams ?? {},
+        visibility: payload?.visibility,
+        allow_use: payload?.allowUse,
+        allow_download: payload?.allowDownload,
       });
-      const alg = {
-        id: out.algorithm_id,
-        task: out.task,
-        name: out.name,
-        impl: out.impl,
-        version: out.version,
-        createdAt: formatTs(out.created_at),
-        defaultParams: out.default_params ?? {},
-        paramPresets: out.param_presets ?? {},
-        raw: out,
-      };
+      const alg = mapAlgorithmOut(out);
       const idx = this.algorithms.findIndex((a) => a.id === alg.id);
       if (idx === -1) this.algorithms.unshift(alg);
       else this.algorithms[idx] = { ...this.algorithms[idx], ...alg };
@@ -631,18 +656,11 @@ export const useAppStore = defineStore("app", {
         version: patch?.version,
         default_params: patch?.defaultParams,
         param_presets: patch?.paramPresets,
+        visibility: patch?.visibility,
+        allow_use: patch?.allowUse,
+        allow_download: patch?.allowDownload,
       });
-      const alg = {
-        id: out.algorithm_id,
-        task: out.task,
-        name: out.name,
-        impl: out.impl,
-        version: out.version,
-        createdAt: formatTs(out.created_at),
-        defaultParams: out.default_params ?? {},
-        paramPresets: out.param_presets ?? {},
-        raw: out,
-      };
+      const alg = mapAlgorithmOut(out);
       const idx = this.algorithms.findIndex((a) => a.id === id);
       if (idx >= 0) this.algorithms[idx] = { ...this.algorithms[idx], ...alg };
       this.algorithms = ensureBaselineAlgorithms(this.algorithms);
