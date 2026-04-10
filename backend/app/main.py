@@ -8,6 +8,7 @@ import csv
 import json
 import re
 import base64
+import hashlib
 import zipfile
 import shutil
 import os
@@ -48,6 +49,14 @@ from .schemas import (
     FastSelectRequest,
     FastSelectResponse,
     FastSelectItem,
+    MetricCreate,
+    MetricPatch,
+    MetricReview,
+    MetricOut,
+    AlgorithmSubmissionCreate,
+    AlgorithmSubmissionReview,
+    AlgorithmSubmissionPublish,
+    AlgorithmSubmissionOut,
     UserCreate,
     UserOut,
     Token,
@@ -71,6 +80,14 @@ from .store import (
     list_presets,
     save_user,
     load_user,
+    save_metric,
+    load_metric,
+    delete_metric,
+    list_metrics,
+    save_algorithm_submission,
+    load_algorithm_submission,
+    delete_algorithm_submission,
+    list_algorithm_submissions,
 )
 from .auth import (
     get_current_user,
@@ -91,6 +108,7 @@ from .selector import (
     FastSelectConfig,
 )
 from . import errors as err
+from .metric_runtime import validate_python_metric_code
 from .vision.dataset_access import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos, resolve_dataset_dir
 
 import cv2
@@ -285,6 +303,10 @@ TASK_LABEL_BY_TYPE = {
 }
 TASK_TYPE_BY_LABEL = {v: k for k, v in TASK_LABEL_BY_TYPE.items()}
 UNKNOWN_ALGORITHM_TASK_LABEL = "\u5f85\u786e\u8ba4"
+VALID_METRIC_DIRECTIONS = {"higher_better", "lower_better"}
+VALID_METRIC_IMPLEMENTATION_TYPES = {"builtin", "python", "formula"}
+VALID_METRIC_STATUSES = {"pending", "approved", "rejected"}
+VALID_ALGORITHM_SUBMISSION_STATUSES = {"pending", "approved", "rejected"}
 
 BUILTIN_ALGORITHM_IDS = {
     "alg_dn_cnn",
@@ -368,6 +390,12 @@ def _dataset_storage_root() -> Path:
     return root
 
 
+def _algorithm_submission_storage_root() -> Path:
+    root = _dataset_storage_root() / "_algorithm_submissions"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _resolve_dataset_dir(owner_id: str, dataset_id: str) -> Path:
     return resolve_dataset_dir(_dataset_storage_root(), str(owner_id or "system"), dataset_id)
 
@@ -446,6 +474,10 @@ def _make_platform_algorithm_id(r, source_id: str) -> str:
     while load_algorithm(r, f"{base}_{idx}"):
         idx += 1
     return f"{base}_{idx}"
+
+
+def _algorithm_submission_dir(owner_id: str, submission_id: str) -> Path:
+    return _algorithm_submission_storage_root() / str(owner_id or "system") / submission_id
 
 
 @app.get("/health")
@@ -604,6 +636,335 @@ def _builtin_algorithm_catalog():
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.0}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.5}})
     return items
 
+
+def _builtin_metric_catalog():
+    task_types = sorted(TASK_LABEL_BY_TYPE.keys())
+    created = time.time()
+    return [
+        {
+            "metric_id": "metric_psnr",
+            "metric_key": "PSNR",
+            "name": "PSNR",
+            "display_name": "PSNR",
+            "description": "峰值信噪比，用于衡量复原结果与 GT 图像的整体像素误差。",
+            "task_types": task_types,
+            "direction": "higher_better",
+            "requires_reference": True,
+            "implementation_type": "builtin",
+            "formula_text": "",
+            "code_text": "",
+            "owner_id": "system",
+            "status": "approved",
+            "runtime_ready": True,
+            "review_note": "平台内置指标，已接入运行链路。",
+            "reviewed_by": "system",
+            "reviewed_at": created,
+            "created_at": created,
+        },
+        {
+            "metric_id": "metric_ssim",
+            "metric_key": "SSIM",
+            "name": "SSIM",
+            "display_name": "SSIM",
+            "description": "结构相似性指标，用于衡量复原结果与 GT 在结构层面的相似程度。",
+            "task_types": task_types,
+            "direction": "higher_better",
+            "requires_reference": True,
+            "implementation_type": "builtin",
+            "formula_text": "",
+            "code_text": "",
+            "owner_id": "system",
+            "status": "approved",
+            "runtime_ready": True,
+            "review_note": "平台内置指标，已接入运行链路。",
+            "reviewed_by": "system",
+            "reviewed_at": created,
+            "created_at": created,
+        },
+        {
+            "metric_id": "metric_niqe",
+            "metric_key": "NIQE",
+            "name": "NIQE",
+            "display_name": "NIQE",
+            "description": "自然图像质量评价指标，无需 GT，数值越低通常代表质量越好。",
+            "task_types": task_types,
+            "direction": "lower_better",
+            "requires_reference": False,
+            "implementation_type": "builtin",
+            "formula_text": "",
+            "code_text": "",
+            "owner_id": "system",
+            "status": "approved",
+            "runtime_ready": True,
+            "review_note": "平台内置指标，已接入运行链路。",
+            "reviewed_by": "system",
+            "reviewed_at": created,
+            "created_at": created,
+        },
+    ]
+
+
+def _normalize_metric_key(value: str | None) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "").strip()).strip("_").upper()
+
+
+def _make_metric_key(name: str, fallback_prefix: str = "USER_METRIC") -> str:
+    key = _normalize_metric_key(name)
+    if key:
+        return key
+    return f"{fallback_prefix}_{uuid.uuid4().hex[:8].upper()}"
+
+
+def _metric_key_exists(r, metric_key: str, exclude_id: str | None = None) -> bool:
+    wanted = _normalize_metric_key(metric_key)
+    if not wanted:
+        return False
+    for item in list_metrics(r, limit=5000) or []:
+        metric_id = str(item.get("metric_id") or "")
+        if exclude_id and metric_id == exclude_id:
+            continue
+        if _normalize_metric_key(item.get("metric_key") or "") == wanted:
+            return True
+    return False
+
+
+def _assert_unique_metric_key(r, metric_key: str, exclude_id: str | None = None) -> str:
+    normalized = _normalize_metric_key(metric_key)
+    if not normalized:
+        err.api_error(400, err.E_HTTP, "metric_key_required")
+    if _metric_key_exists(r, normalized, exclude_id=exclude_id):
+        err.api_error(409, err.E_HTTP, "metric_key_exists", metric_key=normalized)
+    return normalized
+
+
+def _resolve_metric_key_for_create(r, metric_key: str | None, name: str | None) -> str:
+    requested = str(metric_key or "").strip()
+    if requested:
+        normalized = _normalize_metric_key(requested)
+        if normalized:
+            return _assert_unique_metric_key(r, normalized)
+    fallback = _make_metric_key(name or requested or "USER_METRIC")
+    return _assert_unique_metric_key(r, fallback)
+
+
+def _resolve_metric_key_for_patch(r, metric_id: str, metric_key: str | None, name: str | None) -> str:
+    requested = str(metric_key or "").strip()
+    if requested:
+        normalized = _normalize_metric_key(requested)
+        if normalized:
+            return _assert_unique_metric_key(r, normalized, exclude_id=metric_id)
+    fallback = _make_metric_key(name or requested or "USER_METRIC")
+    return _assert_unique_metric_key(r, fallback, exclude_id=metric_id)
+
+
+def _normalize_metric_task_types(task_types: list[str] | None) -> list[str]:
+    items = []
+    for item in (task_types or []):
+        raw = str(item or "").strip()
+        task_type = TASK_TYPE_BY_LABEL.get(raw, raw).strip().lower()
+        if task_type in TASK_LABEL_BY_TYPE and task_type not in items:
+            items.append(task_type)
+    return items
+
+
+def _normalize_metric_direction(direction: str | None) -> str:
+    value = str(direction or "").strip().lower()
+    if value not in VALID_METRIC_DIRECTIONS:
+        err.api_error(400, err.E_HTTP, "metric_direction_invalid", allowed=sorted(VALID_METRIC_DIRECTIONS))
+    return value
+
+
+def _normalize_metric_implementation_type(implementation_type: str | None) -> str:
+    value = str(implementation_type or "").strip().lower()
+    if value not in VALID_METRIC_IMPLEMENTATION_TYPES:
+        err.api_error(400, err.E_HTTP, "metric_implementation_type_invalid", allowed=sorted(VALID_METRIC_IMPLEMENTATION_TYPES))
+    return value
+
+
+def _normalize_metric_status(status: str | None) -> str:
+    value = str(status or "").strip().lower()
+    if value not in VALID_METRIC_STATUSES:
+        err.api_error(400, err.E_HTTP, "metric_status_invalid", allowed=sorted(VALID_METRIC_STATUSES))
+    return value
+
+
+def _normalize_algorithm_submission_status(status: str | None) -> str:
+    value = str(status or "").strip().lower()
+    if value not in VALID_ALGORITHM_SUBMISSION_STATUSES:
+        err.api_error(400, err.E_HTTP, "algorithm_submission_status_invalid", allowed=sorted(VALID_ALGORITHM_SUBMISSION_STATUSES))
+    return value
+
+
+def _list_all_algorithm_submissions(r) -> list[dict]:
+    return list_algorithm_submissions(r, limit=5000) or []
+
+
+def _algorithm_submission_to_out(item: dict) -> dict:
+    data = dict(item or {})
+    task_type = str(data.get("task_type") or "").strip().lower()
+    data["task_label"] = TASK_LABEL_BY_TYPE.get(task_type, "")
+    return AlgorithmSubmissionOut(**data).model_dump()
+
+
+def _decode_algorithm_submission_archive(data_b64: str) -> bytes:
+    raw = str(data_b64 or "").strip()
+    if not raw:
+        err.api_error(400, err.E_HTTP, "algorithm_archive_required")
+    try:
+        payload = base64.b64decode(raw.encode("utf-8"), validate=True)
+    except Exception:
+        err.api_error(400, err.E_HTTP, "algorithm_archive_invalid_base64")
+    if not payload:
+        err.api_error(400, err.E_HTTP, "algorithm_archive_empty")
+    if len(payload) > 20 * 1024 * 1024:
+        err.api_error(400, err.E_HTTP, "algorithm_archive_too_large", max_bytes=20 * 1024 * 1024)
+    return payload
+
+
+def _store_algorithm_submission_archive(owner_id: str, submission_id: str, archive_filename: str, payload: bytes) -> tuple[str, int, str]:
+    safe_name = Path(str(archive_filename or "").strip() or "algorithm_package.zip").name
+    target_dir = _algorithm_submission_dir(owner_id, submission_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / safe_name
+    with open(target_path, "wb") as f:
+        f.write(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    return str(target_path), len(payload), digest
+
+
+def _promote_algorithm_submission_to_platform(r, submission: dict) -> str:
+    existing_id = str(submission.get("platform_algorithm_id") or "").strip()
+    if existing_id and load_algorithm(r, existing_id):
+        return existing_id
+    submission_id = str(submission.get("submission_id") or "").strip()
+    source_owner = str(submission.get("owner_id") or "").strip() or "system"
+    task_type = str(submission.get("task_type") or "").strip().lower()
+    task_label = TASK_LABEL_BY_TYPE.get(task_type, "")
+    base_name = str(submission.get("name") or submission_id or "待接入算法").strip() or "待接入算法"
+    platform_id = _make_platform_algorithm_id(r, f"submission_{submission_id}")
+    description_parts = [str(submission.get("description") or "").strip()]
+    dependency_text = str(submission.get("dependency_text") or "").strip()
+    entry_text = str(submission.get("entry_text") or "").strip()
+    if dependency_text:
+        description_parts.append(f"依赖说明：{dependency_text}")
+    if entry_text:
+        description_parts.append(f"入口说明：{entry_text}")
+    description_parts.append("该算法由用户代码包提交并经管理员审核存档，当前仍处于受控接入阶段，尚未进入自动执行链路。")
+    data = {
+        "algorithm_id": platform_id,
+        "task": task_label,
+        "name": _make_unique_algorithm_name(r, base_name),
+        "impl": "UserPackage",
+        "version": str(submission.get("version") or "v1").strip() or "v1",
+        "description": " ".join([x for x in description_parts if x]),
+        "owner_id": "system",
+        "created_at": time.time(),
+        "default_params": {},
+        "param_presets": {},
+        "visibility": "private",
+        "allow_use": False,
+        "allow_download": False,
+        "is_active": False,
+        "runtime_ready": False,
+        "source_submission_id": submission_id,
+        "source_owner_id": source_owner,
+        "archive_filename": str(submission.get("archive_filename") or ""),
+        "archive_sha256": str(submission.get("archive_sha256") or ""),
+    }
+    save_algorithm(r, platform_id, data)
+    return platform_id
+
+
+def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: str, community_description: str = "") -> str:
+    submission_id = str(submission.get("submission_id") or "").strip()
+    if not submission_id:
+        err.api_error(400, err.E_HTTP, "submission_id_required")
+    existing_id = str(submission.get("community_algorithm_id") or "").strip()
+    description = _validate_text_encoding(community_description or "", "algorithm_submission.community_description").strip()
+    base_description = description or str(submission.get("description") or "").strip()
+    dependency_text = str(submission.get("dependency_text") or "").strip()
+    entry_text = str(submission.get("entry_text") or "").strip()
+    detail_parts = [base_description]
+    if dependency_text:
+        detail_parts.append(f"依赖说明：{dependency_text}")
+    if entry_text:
+        detail_parts.append(f"入口说明：{entry_text}")
+    detail_parts.append("该算法来自用户已审核通过的代码包接入申请，社区页仅展示资料与说明，后续执行仍走平台受控接入流程。")
+    final_description = " ".join([x for x in detail_parts if x])
+
+    if existing_id:
+        existing = load_algorithm(r, existing_id)
+        if existing and str(existing.get("owner_id") or "") == owner_id:
+            existing["task"] = TASK_LABEL_BY_TYPE.get(str(submission.get("task_type") or "").strip().lower(), existing.get("task"))
+            existing["name"] = str(submission.get("name") or existing.get("name") or existing_id).strip() or existing_id
+            existing["impl"] = "UserPackage"
+            existing["version"] = str(submission.get("version") or existing.get("version") or "v1").strip() or "v1"
+            existing["description"] = final_description
+            existing["visibility"] = "public"
+            existing["allow_use"] = True
+            existing["allow_download"] = True
+            existing["source_submission_id"] = submission_id
+            save_algorithm(r, existing_id, existing)
+            return existing_id
+
+    algorithm_id = _make_unique_algorithm_id(r, f"submission_{submission_id}", owner_id)
+    name = _make_unique_algorithm_name(r, str(submission.get("name") or submission_id).strip() or submission_id)
+    task_type = str(submission.get("task_type") or "").strip().lower()
+    data = {
+        "algorithm_id": algorithm_id,
+        "task": TASK_LABEL_BY_TYPE.get(task_type, ""),
+        "name": name,
+        "impl": "UserPackage",
+        "version": str(submission.get("version") or "v1").strip() or "v1",
+        "description": final_description,
+        "owner_id": owner_id,
+        "created_at": time.time(),
+        "default_params": {},
+        "param_presets": {},
+        "visibility": "public",
+        "allow_use": True,
+        "allow_download": True,
+        "download_count": 0,
+        "source_submission_id": submission_id,
+    }
+    save_algorithm(r, algorithm_id, data)
+    return algorithm_id
+
+
+def _list_all_metric_records(r) -> list[dict]:
+    return list_metrics(r, limit=5000) or []
+
+
+def _assert_metric_manage_access(metric: dict, current_user: dict) -> None:
+    owner_id = str((metric or {}).get("owner_id") or "").strip() or "system"
+    username = _username_of(current_user)
+    is_admin = _normalize_user_role(current_user) == "admin"
+    if owner_id == username:
+        return
+    if owner_id == "system" and is_admin:
+        return
+    if is_admin:
+        return
+    err.api_error(403, err.E_HTTP, "forbidden_access")
+
+
+def _list_runnable_metrics(r, task_type: str | None = None) -> list[dict]:
+    task_filter = str(task_type or "").strip().lower()
+    items = []
+    for item in _list_all_metric_records(r):
+        if str(item.get("status") or "").lower() != "approved":
+            continue
+        if not bool(item.get("runtime_ready")):
+            continue
+        if str(item.get("implementation_type") or "").lower() not in {"builtin", "python"}:
+            continue
+        task_types = _normalize_metric_task_types(item.get("task_types") if isinstance(item.get("task_types"), list) else [])
+        if task_filter and task_types and task_filter not in task_types:
+            continue
+        items.append(item)
+    items.sort(key=lambda x: (str(x.get("owner_id") or "") != "system", str(x.get("display_name") or x.get("name") or x.get("metric_key") or "")))
+    return items
+
 def _ensure_catalog_defaults(r):
     """
     确保 Redis 中包含默认的数据集和算法。
@@ -684,6 +1045,37 @@ def _ensure_catalog_defaults(r):
             need_patch = True
         if need_patch:
             save_algorithm(r, x["algorithm_id"], cur)
+
+    # 3. 默认指标
+    for item in _builtin_metric_catalog():
+        cur = load_metric(r, item["metric_id"])
+        if not cur:
+            save_metric(r, item["metric_id"], item)
+            continue
+        need_patch = False
+        for key in (
+            "metric_key",
+            "name",
+            "display_name",
+            "description",
+            "direction",
+            "requires_reference",
+            "implementation_type",
+            "owner_id",
+            "status",
+            "runtime_ready",
+        ):
+            if cur.get(key) != item.get(key):
+                cur[key] = item.get(key)
+                need_patch = True
+        if not isinstance(cur.get("task_types"), list) or not cur.get("task_types"):
+            cur["task_types"] = item["task_types"]
+            need_patch = True
+        if not isinstance(cur.get("created_at"), (int, float)):
+            cur["created_at"] = item["created_at"]
+            need_patch = True
+        if need_patch:
+            save_metric(r, item["metric_id"], cur)
 
     _pin_dataset_and_algorithm_owners(r)
     _CATALOG_INITIALIZED = True
@@ -2213,6 +2605,327 @@ def export_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
     )
 
 
+@app.get("/algorithm-submissions", response_model=list[AlgorithmSubmissionOut])
+def list_algorithm_submissions_for_current_user(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    username = _username_of(current_user)
+    items = [
+        _algorithm_submission_to_out(item)
+        for item in _list_all_algorithm_submissions(r)
+        if str(item.get("owner_id") or "") == username
+    ]
+    return items
+
+
+@app.post("/algorithm-submissions", response_model=AlgorithmSubmissionOut)
+def create_algorithm_submission(payload: AlgorithmSubmissionCreate, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    task_label = _normalize_algorithm_task_label(payload.task_type, field="algorithm_submission.task_type")
+    task_type = TASK_TYPE_BY_LABEL.get(task_label, "").strip().lower()
+    name = _validate_text_encoding(payload.name or "", "algorithm_submission.name").strip()
+    if not name:
+        err.api_error(400, err.E_HTTP, "algorithm_submission_name_required")
+    archive_filename = Path(str(payload.archive_filename or "").strip() or "").name
+    if not archive_filename:
+        err.api_error(400, err.E_HTTP, "algorithm_archive_filename_required")
+    archive_bytes = _decode_algorithm_submission_archive(payload.archive_b64)
+    submission_id = f"algsub_{uuid.uuid4().hex[:12]}"
+    storage_path, archive_size, archive_sha256 = _store_algorithm_submission_archive(owner_id, submission_id, archive_filename, archive_bytes)
+    created = time.time()
+    data = {
+        "submission_id": submission_id,
+        "task_type": task_type,
+        "name": name,
+        "version": _validate_text_encoding(payload.version or "v1", "algorithm_submission.version") or "v1",
+        "description": _validate_text_encoding(payload.description or "", "algorithm_submission.description"),
+        "dependency_text": _validate_text_encoding(payload.dependency_text or "", "algorithm_submission.dependency_text"),
+        "entry_text": _validate_text_encoding(payload.entry_text or "", "algorithm_submission.entry_text"),
+        "archive_filename": archive_filename,
+        "archive_size": archive_size,
+        "archive_sha256": archive_sha256,
+        "archive_path": storage_path,
+        "owner_id": owner_id,
+        "status": "pending",
+        "review_note": "",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "created_at": created,
+        "platform_algorithm_id": None,
+    }
+    save_algorithm_submission(r, submission_id, data)
+    return _algorithm_submission_to_out(data)
+
+
+@app.get("/algorithm-submissions/{submission_id}/download")
+def download_algorithm_submission_archive(submission_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    cur = load_algorithm_submission(r, submission_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_not_found", submission_id=submission_id)
+    username = _username_of(current_user)
+    is_admin = _normalize_user_role(current_user) == "admin"
+    if str(cur.get("owner_id") or "") != username and not is_admin:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    archive_path = Path(str(cur.get("archive_path") or "")).resolve()
+    if not archive_path.exists() or not archive_path.is_file():
+        err.api_error(404, err.E_HTTP, "algorithm_archive_not_found", submission_id=submission_id)
+    filename = str(cur.get("archive_filename") or archive_path.name).strip() or archive_path.name
+    return StreamingResponse(
+        open(archive_path, "rb"),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/algorithm-submissions/{submission_id}/publish-community", response_model=AlgorithmSubmissionOut)
+def publish_algorithm_submission_to_community(
+    submission_id: str,
+    payload: AlgorithmSubmissionPublish,
+    current_user: dict = Depends(get_current_user),
+):
+    r = make_redis()
+    cur = load_algorithm_submission(r, submission_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_not_found", submission_id=submission_id)
+    owner_id = _username_of(current_user)
+    if str(cur.get("owner_id") or "") != owner_id:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    if str(cur.get("status") or "").strip().lower() != "approved":
+        err.api_error(409, err.E_HTTP, "algorithm_submission_not_approved", submission_id=submission_id)
+    community_algorithm_id = _publish_algorithm_submission_to_community(
+        r,
+        cur,
+        owner_id,
+        payload.community_description,
+    )
+    cur["community_algorithm_id"] = community_algorithm_id
+    cur["community_published_at"] = time.time()
+    save_algorithm_submission(r, submission_id, cur)
+    return _algorithm_submission_to_out(cur)
+
+
+@app.get("/admin/algorithm-submissions", response_model=list[AlgorithmSubmissionOut])
+def admin_list_algorithm_submissions(
+    status: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    r = make_redis()
+    status_value = str(status or "").strip().lower()
+    items = []
+    for item in _list_all_algorithm_submissions(r):
+        item_status = str(item.get("status") or "").strip().lower()
+        if status_value and item_status != status_value:
+            continue
+        items.append(_algorithm_submission_to_out(item))
+    return items
+
+
+@app.post("/admin/algorithm-submissions/{submission_id}/review", response_model=AlgorithmSubmissionOut)
+def admin_review_algorithm_submission(
+    submission_id: str,
+    payload: AlgorithmSubmissionReview,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    r = make_redis()
+    cur = load_algorithm_submission(r, submission_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_not_found", submission_id=submission_id)
+    status = _normalize_algorithm_submission_status(payload.status)
+    cur["status"] = status
+    cur["review_note"] = _validate_text_encoding(payload.review_note or "", "algorithm_submission.review_note")
+    cur["reviewed_by"] = _username_of(current_user)
+    cur["reviewed_at"] = time.time()
+    if status == "approved" and bool(payload.collect_to_platform):
+        cur["platform_algorithm_id"] = _promote_algorithm_submission_to_platform(r, cur)
+    save_algorithm_submission(r, submission_id, cur)
+    owner_id = str(cur.get("owner_id") or "").strip()
+    if owner_id:
+        if status == "approved":
+            extra = ""
+            if cur.get("platform_algorithm_id"):
+                extra = f" 已生成平台留档算法：{cur['platform_algorithm_id']}。"
+            note = f"你提交的算法代码包“{cur.get('name') or submission_id}”已审核通过。{extra}"
+            if cur.get("review_note"):
+                note = f"{note} 审核说明：{cur['review_note']}"
+            _create_notice(r, owner_id, "算法代码接入申请已通过", note, kind="success")
+        else:
+            note = f"你提交的算法代码包“{cur.get('name') or submission_id}”未通过审核。"
+            if cur.get("review_note"):
+                note = f"{note} 审核说明：{cur['review_note']}"
+            _create_notice(r, owner_id, "算法代码接入申请未通过", note, kind="warning")
+    return _algorithm_submission_to_out(cur)
+
+
+@app.get("/metrics", response_model=list[MetricOut])
+def get_metrics(
+    limit: int = 500,
+    scope: str = Query("manage", description="manage|mine|ready"),
+    status: str | None = Query(None),
+    task_type: str | None = Query(None),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    username = _username_of(current_user)
+    scope_value = str(scope or "manage").strip().lower()
+    status_value = str(status or "").strip().lower()
+    task_filter = str(task_type or "").strip().lower()
+    items = _list_all_metric_records(r)
+    out = []
+    for item in items:
+        owner_id = str(item.get("owner_id") or "system").strip() or "system"
+        item_status = str(item.get("status") or "").strip().lower()
+        item_task_types = _normalize_metric_task_types(item.get("task_types") if isinstance(item.get("task_types"), list) else [])
+        if task_filter and item_task_types and task_filter not in item_task_types:
+            continue
+        if status_value and item_status != status_value:
+            continue
+        if scope_value == "ready":
+            if item_status != "approved" or not bool(item.get("runtime_ready")):
+                continue
+        elif scope_value == "mine":
+            if owner_id != username:
+                continue
+        else:
+            if owner_id != "system" and owner_id != username:
+                continue
+        out.append(MetricOut(**item))
+    out.sort(key=lambda x: (x.owner_id != "system", x.status != "approved", x.display_name or x.name or x.metric_key))
+    return out[:limit]
+
+
+@app.post("/metrics", response_model=MetricOut)
+def create_metric(payload: MetricCreate, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    metric_id = f"metric_{uuid.uuid4().hex[:10]}"
+    metric_key = _resolve_metric_key_for_create(r, payload.metric_key, payload.name)
+    created = time.time()
+    data = {
+        "metric_id": metric_id,
+        "metric_key": metric_key,
+        "name": _validate_text_encoding(payload.name, "metric.name"),
+        "display_name": _validate_text_encoding(payload.display_name or payload.name, "metric.display_name"),
+        "description": _validate_text_encoding(payload.description or "", "metric.description"),
+        "task_types": _normalize_metric_task_types(payload.task_types),
+        "direction": _normalize_metric_direction(payload.direction),
+        "requires_reference": bool(payload.requires_reference),
+        "implementation_type": _normalize_metric_implementation_type(payload.implementation_type),
+        "formula_text": _validate_text_encoding(payload.formula_text or "", "metric.formula_text"),
+        "code_text": _validate_text_encoding(payload.code_text or "", "metric.code_text"),
+        "code_filename": _validate_text_encoding(payload.code_filename or "", "metric.code_filename"),
+        "owner_id": _username_of(current_user),
+        "status": "pending",
+        "runtime_ready": False,
+        "review_note": "",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "created_at": created,
+    }
+    save_metric(r, metric_id, data)
+    return MetricOut(**data)
+
+
+@app.patch("/metrics/{metric_id}", response_model=MetricOut)
+def patch_metric(metric_id: str, payload: MetricPatch, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_metric(r, metric_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
+    _assert_metric_manage_access(cur, current_user)
+    if payload.metric_key is not None:
+        fallback_name = payload.display_name or payload.name or cur.get("display_name") or cur.get("name")
+        cur["metric_key"] = _resolve_metric_key_for_patch(r, metric_id, payload.metric_key, fallback_name)
+    if payload.name is not None:
+        cur["name"] = _validate_text_encoding(payload.name, "metric.name")
+    if payload.display_name is not None:
+        cur["display_name"] = _validate_text_encoding(payload.display_name, "metric.display_name")
+    if payload.description is not None:
+        cur["description"] = _validate_text_encoding(payload.description, "metric.description")
+    if payload.task_types is not None:
+        cur["task_types"] = _normalize_metric_task_types(payload.task_types)
+    if payload.direction is not None:
+        cur["direction"] = _normalize_metric_direction(payload.direction)
+    if payload.requires_reference is not None:
+        cur["requires_reference"] = bool(payload.requires_reference)
+    if payload.implementation_type is not None:
+        cur["implementation_type"] = _normalize_metric_implementation_type(payload.implementation_type)
+    if payload.formula_text is not None:
+        cur["formula_text"] = _validate_text_encoding(payload.formula_text, "metric.formula_text")
+    if payload.code_text is not None:
+        cur["code_text"] = _validate_text_encoding(payload.code_text, "metric.code_text")
+    if payload.code_filename is not None:
+        cur["code_filename"] = _validate_text_encoding(payload.code_filename, "metric.code_filename")
+    if str(cur.get("owner_id") or "") != "system":
+        cur["status"] = "pending"
+        cur["runtime_ready"] = False
+        cur["review_note"] = ""
+        cur["reviewed_by"] = None
+        cur["reviewed_at"] = None
+    save_metric(r, metric_id, cur)
+    return MetricOut(**cur)
+
+
+@app.delete("/metrics/{metric_id}")
+def remove_metric(metric_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_metric(r, metric_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
+    _assert_metric_manage_access(cur, current_user)
+    delete_metric(r, metric_id)
+    return {"ok": True, "metric_id": metric_id}
+
+
+@app.get("/admin/metrics", response_model=list[MetricOut])
+def admin_list_metrics(
+    status: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    if _normalize_user_role(current_user) != "admin":
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    status_value = str(status or "").strip().lower()
+    out = []
+    for item in _list_all_metric_records(r):
+        if status_value and str(item.get("status") or "").lower() != status_value:
+            continue
+        out.append(MetricOut(**item))
+    out.sort(key=lambda x: (x.status, -(x.created_at or 0)))
+    return out
+
+
+@app.post("/admin/metrics/{metric_id}/review", response_model=MetricOut)
+def admin_review_metric(metric_id: str, payload: MetricReview, current_user: dict = Depends(get_current_user)):
+    if _normalize_user_role(current_user) != "admin":
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_metric(r, metric_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
+    cur["status"] = _normalize_metric_status(payload.status)
+    cur["review_note"] = _validate_text_encoding(payload.review_note or "", "metric.review_note")
+    implementation_type = str(cur.get("implementation_type") or "").lower()
+    runtime_ready = bool(payload.runtime_ready) and cur["status"] == "approved"
+    if runtime_ready and implementation_type == "python":
+        try:
+            validate_python_metric_code(cur.get("code_text") or "")
+        except Exception as exc:
+            err.api_error(400, err.E_HTTP, "metric_code_invalid", detail=str(exc))
+    cur["runtime_ready"] = runtime_ready and implementation_type in {"builtin", "python"}
+    cur["reviewed_by"] = _username_of(current_user)
+    cur["reviewed_at"] = time.time()
+    save_metric(r, metric_id, cur)
+    return MetricOut(**cur)
+
+
 @app.post("/community/algorithms/{algorithm_id}/download", response_model=AlgorithmOut)
 def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = Depends(get_current_user)):
     r = make_redis()
@@ -3064,6 +3777,21 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "\u7b97\u6cd5\u4e0d\u5b58\u5728", algorithm_id=algorithm_id)
     _assert_resource_access(alg, current_user, allow_system=True)
 
+    requested_params = dict(payload.params or {})
+    requested_metrics_raw = requested_params.get("metrics")
+    runnable_metric_keys = {str(item.get("metric_key") or "").upper() for item in _list_runnable_metrics(r, task_type)}
+    if isinstance(requested_metrics_raw, list):
+        normalized_metrics = []
+        for item in requested_metrics_raw:
+            metric_key = str(item or "").strip().upper()
+            if not metric_key:
+                continue
+            if metric_key not in runnable_metric_keys:
+                err.api_error(409, err.E_HTTP, "metric_not_runnable", metric_key=metric_key, task_type=task_type)
+            if metric_key not in normalized_metrics:
+                normalized_metrics.append(metric_key)
+        requested_params["metrics"] = normalized_metrics
+
     expected_task = TASK_LABEL_BY_TYPE.get(task_type, "")
     if expected_task and (alg.get("task") or "").strip() != expected_task:
         err.api_error(
@@ -3133,7 +3861,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         "dataset_id": dataset_id,
         "algorithm_id": algorithm_id,
         "owner_id": owner_id,
-        "params": payload.params,
+        "params": requested_params,
         "strict_validate": bool(getattr(payload, "strict_validate", False)),
         "samples": [],
         "cancel_requested": False,

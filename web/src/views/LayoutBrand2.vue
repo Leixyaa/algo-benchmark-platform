@@ -10,6 +10,8 @@
         <el-menu-item index="/community">社区中心</el-menu-item>
         <el-menu-item index="/datasets">数据集管理</el-menu-item>
         <el-menu-item index="/algorithms">算法库</el-menu-item>
+        <el-menu-item index="/algorithm-access">算法接入</el-menu-item>
+        <el-menu-item index="/metrics">指标库</el-menu-item>
         <el-menu-item index="/new-run">发起评测</el-menu-item>
         <el-menu-item index="/runs">任务中心</el-menu-item>
         <el-menu-item index="/compare">结果对比</el-menu-item>
@@ -70,6 +72,8 @@ const title = computed(() => {
     "/community": "社区中心",
     "/datasets": "数据集管理",
     "/algorithms": "算法库",
+    "/algorithm-access": "算法接入",
+    "/metrics": "指标库",
     "/new-run": "发起评测",
     "/runs": "任务中心",
     "/compare": "结果对比",
@@ -86,7 +90,7 @@ async function handleLogout() {
 
 async function syncShellData() {
   try {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms(), store.fetchMetrics()]);
   } catch {
     // ignore
   }

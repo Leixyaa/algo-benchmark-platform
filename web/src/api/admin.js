@@ -42,4 +42,22 @@ export const adminApi = {
       method: "POST",
     });
   },
+  listMetrics(status) {
+    return request("/admin/metrics", { method: "GET", query: status ? { status } : {} });
+  },
+  reviewMetric(metricId, payload) {
+    return request(`/admin/metrics/${metricId}/review`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listAlgorithmSubmissions(status) {
+    return request("/admin/algorithm-submissions", { method: "GET", query: status ? { status } : {} });
+  },
+  reviewAlgorithmSubmission(submissionId, payload) {
+    return request(`/admin/algorithm-submissions/${submissionId}/review`, {
+      method: "POST",
+      body: payload,
+    });
+  },
 };

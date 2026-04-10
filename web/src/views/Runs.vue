@@ -1,12 +1,15 @@
+﻿
 <template>
   <div class="page">
     <div class="header-section">
       <div class="header-left">
         <h2 class="page-title">运行任务中心</h2>
-        <p class="page-subtitle">监控算法运行状态、查看量化指标、导出评测结果并排查失败原因</p>
+        <p class="page-subtitle">查看运行状态、量化指标、参数详情与综合评分结果。</p>
       </div>
       <div class="header-right">
-        <el-button type="primary" size="large" class="create-btn centered-btn" @click="goNewRun" :disabled="!store.user.isLoggedIn">新建运行任务</el-button>
+        <el-button type="primary" size="large" class="create-btn" @click="goNewRun" :disabled="!store.user.isLoggedIn">
+          新建运行任务
+        </el-button>
       </div>
     </div>
 
@@ -14,42 +17,27 @@
       <div class="toolbar-section">
         <div class="filter-group">
           <el-select v-model="statusFilter" clearable placeholder="运行状态" class="filter-item status-select">
-            <template #prefix><el-icon><InfoFilled /></el-icon></template>
             <el-option v-for="x in statusOptions" :key="x.value" :label="x.label" :value="x.value" />
           </el-select>
           <el-select v-model="taskFilter" clearable placeholder="算法任务" class="filter-item task-select">
-            <template #prefix><el-icon><Grid /></el-icon></template>
             <el-option v-for="x in taskOptions" :key="x.value" :label="x.label" :value="x.value" />
           </el-select>
-          <el-input v-model="keyword" clearable placeholder="搜索算法、数据集、参数方案..." class="filter-item search-input">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-button class="refresh-btn centered-btn" @click="clearFilters">清除筛选</el-button>
+          <el-input v-model="keyword" clearable placeholder="搜索算法、数据集、参数方案" class="filter-item search-input" />
+          <el-button class="refresh-btn" @click="clearFilters">清除筛选</el-button>
         </div>
 
         <div class="action-group">
           <el-dropdown trigger="click" :disabled="!store.user.isLoggedIn">
-            <el-button size="small" icon="Download" :disabled="!store.user.isLoggedIn">
-              导出数据<el-icon class="el-icon--right"><arrow-down /></el-icon>
-            </el-button>
+            <el-button size="small" :disabled="!store.user.isLoggedIn">导出数据</el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item icon="Document" @click="exportDoneCsv">导出已完成（CSV）</el-dropdown-item>
-                <el-dropdown-item icon="TrendCharts" @click="exportDoneXlsx">导出已完成（Excel）</el-dropdown-item>
+                <el-dropdown-item @click="exportDoneCsv">导出已完成 CSV</el-dropdown-item>
+                <el-dropdown-item @click="exportDoneXlsx">导出已完成 Excel</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button
-            size="small"
-            type="danger"
-            plain
-            class="centered-btn"
-            @click="clearSelected"
-            :disabled="!store.user.isLoggedIn || selectedIds.length === 0"
-          >
-            批量清除
-          </el-button>
-          <el-button size="small" type="danger" plain class="centered-btn" @click="clearDone" :disabled="!store.user.isLoggedIn">清理已完成</el-button>
+          <el-button size="small" type="danger" plain @click="clearSelected" :disabled="!store.user.isLoggedIn || selectedIds.length === 0">批量清除</el-button>
+          <el-button size="small" type="danger" plain @click="clearDone" :disabled="!store.user.isLoggedIn">清理已完成</el-button>
         </div>
       </div>
 
@@ -72,8 +60,8 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="dataset" label="评测数据集" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="algorithm" label="运行算法" min-width="140">
+        <el-table-column prop="dataset" label="评测数据集" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="algorithm" label="运行算法" min-width="180">
           <template #default="{ row }">
             <div class="algo-cell">
               <span class="algo-name">{{ row.algorithm }}</span>
@@ -82,44 +70,29 @@
             </div>
           </template>
         </el-table-column>
-
         <el-table-column label="运行状态" width="120" align="center">
           <template #default="{ row }">
-            <div class="status-cell">
-              <span class="status-pill" :class="`status-pill--${statusTagType(row.status)}`">
-                <el-icon v-if="statusText(row.status) === '运行中'" class="status-pill__icon"><Loading /></el-icon>
-                <span>{{ statusText(row.status) }}</span>
-              </span>
-            </div>
+            <span class="status-pill" :class="`status-pill--${statusTagType(row.status)}`">{{ statusText(row.status) }}</span>
           </template>
         </el-table-column>
-
-        <el-table-column label="综合评分" width="90" align="center">
+        <el-table-column label="综合评分" width="100" align="center">
           <template #default="{ row }">
             <div class="score-wrap">
-              <div v-if="row.score !== null && isRealDatasetRun(row)" class="score-cell">
-                <span class="score-val">{{ row.score }}</span>
-              </div>
-              <span v-else-if="row.score !== null" class="score-simulated">演示</span>
-              <span v-else-if="isActiveStatus(row.status)" class="score-pending">
-                <el-icon class="score-pending__icon"><Loading /></el-icon>
-                计算中
-              </span>
+              <span v-if="Number.isFinite(row.score) && isRealDatasetRun(row)" class="score-val">{{ row.score }}</span>
+              <span v-else-if="isActiveStatus(row.status)" class="score-pending">计算中</span>
               <span v-else class="score-null">-</span>
             </div>
           </template>
         </el-table-column>
-
         <el-table-column label="操作" width="180" align="center">
           <template #default="{ row }">
             <div class="row-actions">
-              <el-button size="small" class="op-btn centered-btn" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
-              <el-button v-if="canCancel(row)" size="small" class="op-btn centered-btn" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
-              <el-button v-if="!isActiveStatus(row.status)" size="small" class="op-btn centered-btn" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">隐藏</el-button>
+              <el-button size="small" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
+              <el-button v-if="canCancel(row)" size="small" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
+              <el-button v-if="!isActiveStatus(row.status)" size="small" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">隐藏</el-button>
             </div>
           </template>
         </el-table-column>
-
         <template #empty>
           <el-empty description="暂无运行记录" :image-size="120" />
         </template>
@@ -128,7 +101,7 @@
       <div class="pagination-mock">共 {{ filteredRows.length }} 条记录</div>
     </el-card>
 
-    <el-dialog v-model="detailVisible" title="运行任务详情" width="800px" class="detail-dialog" destroy-on-close>
+    <el-dialog v-model="detailVisible" title="运行任务详情" width="860px" class="detail-dialog" destroy-on-close>
       <div v-if="detail" class="detail-container">
         <div class="detail-header-card">
           <div class="detail-main-info">
@@ -149,60 +122,31 @@
 
         <div class="detail-section-grid">
           <div class="detail-card">
-            <div class="card-title"><el-icon><Memo /></el-icon> 基本配置</div>
+            <div class="card-title">基本配置</div>
             <div class="card-content">
-              <div class="kv-row">
-                <span class="kv-label">算法大类</span>
-                <span class="kv-value">{{ detail.task }}</span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">数据集</span>
-                <span class="kv-value">{{ detail.dataset }}</span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">算法名称</span>
-                <span class="kv-value">{{ detail.algorithm }}</span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">参数方案</span>
-                <span class="kv-value">{{ detail.paramSchemeText || '-' }}</span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">执行口径</span>
-                <span class="kv-value">
-                  <span class="algo-auth" :class="`algo-auth--${authenticityType(detail)}`">{{ authenticityLabel(detail) }}</span>
-                </span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">实际算法</span>
-                <span class="kv-value">{{ detail.raw?.params?.real_algo || '-' }}</span>
-              </div>
-              <div class="kv-row">
-                <span class="kv-label">输入目录</span>
-                <span class="kv-value">{{ detail.raw?.params?.input_dir || '-' }}</span>
-              </div>
+              <div class="kv-row"><span class="kv-label">算法大类</span><span class="kv-value">{{ detail.task }}</span></div>
+              <div class="kv-row"><span class="kv-label">数据集</span><span class="kv-value">{{ detail.dataset }}</span></div>
+              <div class="kv-row"><span class="kv-label">算法名称</span><span class="kv-value">{{ detail.algorithm }}</span></div>
+              <div class="kv-row"><span class="kv-label">参数方案</span><span class="kv-value">{{ detail.paramSchemeText || '-' }}</span></div>
+              <div class="kv-row"><span class="kv-label">执行口径</span><span class="kv-value"><span class="algo-auth" :class="`algo-auth--${authenticityType(detail)}`">{{ authenticityLabel(detail) }}</span></span></div>
+              <div class="kv-row"><span class="kv-label">实际算法</span><span class="kv-value">{{ detail.raw?.params?.real_algo || '-' }}</span></div>
+              <div class="kv-row"><span class="kv-label">输入目录</span><span class="kv-value">{{ detail.raw?.params?.input_dir || '-' }}</span></div>
             </div>
           </div>
 
           <div class="detail-card">
-            <div class="card-title"><el-icon><DataLine /></el-icon> 量化指标</div>
+            <div class="card-title">量化指标</div>
             <div class="card-content">
               <div class="metric-grid">
-                <div class="metric-box">
-                  <div class="metric-label">PSNR</div>
-                  <div class="metric-value">{{ detail.psnr ?? '-' }}</div>
-                </div>
-                <div class="metric-box">
-                  <div class="metric-label">SSIM</div>
-                  <div class="metric-value">{{ detail.ssim ?? '-' }}</div>
-                </div>
-                <div class="metric-box">
-                  <div class="metric-label">NIQE</div>
-                  <div class="metric-value">{{ detail.niqe ?? '-' }}</div>
-                </div>
-                <div class="metric-box highlighted">
-                  <div class="metric-label">综合评分</div>
-                  <div class="metric-value">{{ isRealDatasetRun(detail) ? (detail.score ?? '-') : '仅真实数据计分' }}</div>
+                <div class="metric-box"><div class="metric-label">PSNR</div><div class="metric-value">{{ detail.psnr ?? '-' }}</div></div>
+                <div class="metric-box"><div class="metric-label">SSIM</div><div class="metric-value">{{ detail.ssim ?? '-' }}</div></div>
+                <div class="metric-box"><div class="metric-label">NIQE</div><div class="metric-value">{{ detail.niqe ?? '-' }}</div></div>
+                <div class="metric-box highlighted"><div class="metric-label">综合评分</div><div class="metric-value">{{ detailScoreText(detail) }}</div></div>
+              </div>
+              <div v-if="(detail.customMetrics || []).length" class="metric-grid custom-metric-grid">
+                <div v-for="item in detail.customMetrics || []" :key="`metric-${item.key}`" class="metric-box custom-metric-box">
+                  <div class="metric-label">{{ item.label }}</div>
+                  <div class="metric-value">{{ formatMetricNumber(item.value) }}</div>
                 </div>
               </div>
               <div class="performance-info">
@@ -214,14 +158,11 @@
             </div>
           </div>
         </div>
-
         <div class="detail-card full-width">
-          <div class="card-title"><el-icon><Setting /></el-icon> 运行参数详情</div>
+          <div class="card-title">运行参数详情</div>
           <div class="card-content">
             <div class="params-container">
-              <div v-if="(detail.userParamRows || []).length === 0" class="params-empty">
-                本次运行使用系统内置默认参数。
-              </div>
+              <div v-if="(detail.userParamRows || []).length === 0" class="params-empty">本次运行使用系统内置默认参数。</div>
               <div class="params-grid">
                 <div v-for="item in detail.userParamRows || []" :key="`u-${item.key}`" class="param-card">
                   <div class="param-header">
@@ -236,14 +177,14 @@
         </div>
 
         <div v-if="detail.reason" class="detail-card full-width reason-card">
-          <div class="card-title"><el-icon><MagicStick /></el-icon> 推荐分析</div>
+          <div class="card-title">推荐分析</div>
           <div class="card-content">
             <div class="reason-text">{{ detail.reason }}</div>
           </div>
         </div>
 
         <div v-if="detail.raw?.error || detail.raw?.error_code" class="detail-card full-width error-card">
-          <div class="card-title"><el-icon><Warning /></el-icon> 异常报告</div>
+          <div class="card-title">异常报告</div>
           <div class="card-content">
             <pre class="error-pre">{{ formatRunError(detail.raw) }}</pre>
           </div>
@@ -264,147 +205,13 @@ const router = useRouter();
 const store = useAppStore();
 
 const HIDDEN_KEY = "hiddenRunIds_v1";
-function isBuiltinAlgorithm(alg) {
-  return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_");
-}
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
 const selectedIds = ref([]);
-
-function persistHidden() {
-  localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value)));
-}
-
-function downloadFile(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-async function exportDone(format, filename) {
-  const res = await authFetch("/runs/export", {
-    query: { format, status: "done" },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `导出失败(${res.status})`);
-  }
-  const blob = await res.blob();
-  downloadFile(blob, filename);
-}
-
-async function exportDoneCsv() {
-  try {
-    await exportDone("csv", "runs_done.csv");
-  } catch (e) {
-    ElMessage({ type: "error", message: `导出失败：${e?.message || e}` });
-  }
-}
-
-async function exportDoneXlsx() {
-  try {
-    await exportDone("xlsx", "runs_done.xlsx");
-  } catch (e) {
-    ElMessage({ type: "error", message: `导出失败：${e?.message || e}` });
-  }
-}
-
-async function clearDone() {
-  try {
-    await ElMessageBox.confirm("确认清理所有已完成任务吗？", "清理确认", {
-      type: "warning",
-      confirmButtonText: "清理",
-      cancelButtonText: "取消",
-    });
-    const res = await authFetch("/runs/clear", {
-      method: "POST",
-      query: { status: "done" },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(JSON.stringify(data));
-    ElMessage({ type: "success", message: `已清理 ${data.deleted} 条已完成任务` });
-    await refresh();
-  } catch (e) {
-    if (e === "cancel" || e === "close") return;
-    ElMessage({ type: "error", message: `清理失败：${e?.message || e}` });
-  }
-}
-
-function canBatchClearRow(row) {
-  return !isActiveStatus(row?.status);
-}
-
-function handleSelectionChange(selection) {
-  selectedIds.value = (selection || []).map((row) => row?.id).filter(Boolean);
-}
-
-async function clearSelected() {
-  if (!selectedIds.value.length) {
-    ElMessage({ type: "warning", message: "请先勾选要清除的任务" });
-    return;
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认批量清除已勾选的 ${selectedIds.value.length} 条任务吗？运行中和排队中的任务不会被清除。`,
-      "批量清除确认",
-      {
-        type: "warning",
-        confirmButtonText: "批量清除",
-        cancelButtonText: "取消",
-      }
-    );
-    const res = await authFetch("/runs/batch-clear", {
-      method: "POST",
-      body: JSON.stringify({ run_ids: selectedIds.value }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(JSON.stringify(data));
-    selectedIds.value = [];
-    ElMessage({
-      type: "success",
-      message: `已清除 ${data.deleted || 0} 条任务${data.skipped ? `，跳过 ${data.skipped} 条` : ""}`,
-    });
-    await refresh();
-  } catch (e) {
-    if (e === "cancel" || e === "close") return;
-    ElMessage({ type: "error", message: `批量清除失败：${e?.message || e}` });
-  }
-}
-
-
-const rows = computed(() => {
-  const dsMap = new Map((store.datasets ?? []).map((d) => [d.id, d.name]));
-  const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
-
-  return (store.runs ?? [])
-    .filter((r) => !hiddenIds.value.has(r.id))
-    .map((r) => {
-      const base = {
-        ...r,
-        name: r.name || `${r.task || "任务"} Run`,
-        dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
-        algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
-        paramSchemeText: resolveParamSchemeText(r),
-      };
-
-      const ctx = buildScoringContext(store.runs ?? []);
-      const s = scoreOne(base, ctx);
-      return {
-        ...base,
-        score: s.score,
-      };
-  });
-});
-
 const statusFilter = ref("");
 const taskFilter = ref("");
 const keyword = ref("");
+const detailVisible = ref(false);
+const detail = ref(null);
 
 const statusOptions = [
   { value: "queued", label: "排队中" },
@@ -415,14 +222,81 @@ const statusOptions = [
   { value: "canceled", label: "已取消" },
 ];
 
-const taskOptions = computed(() =>
-  Object.entries(TASK_LABEL_BY_TYPE).map(([value, label]) => ({ value, label }))
-);
+const PARAM_LABELS = {
+  dcp_patch: "暗通道窗口",
+  dcp_omega: "去雾强度",
+  dcp_t0: "最小透射率",
+  clahe_clip_limit: "对比度上限",
+  gamma: "Gamma 值",
+  lowlight_gamma: "低照度增强强度",
+  nlm_h: "去噪强度",
+  nlm_hColor: "彩色去噪强度",
+  nlm_templateWindowSize: "模板窗口大小",
+  nlm_searchWindowSize: "搜索窗口大小",
+  bilateral_d: "邻域直径",
+  bilateral_sigmaColor: "颜色域平滑系数",
+  bilateral_sigmaSpace: "空间域平滑系数",
+  gaussian_sigma: "高斯标准差",
+  median_ksize: "中值核大小",
+  unsharp_sigma: "锐化半径",
+  unsharp_amount: "锐化强度",
+  laplacian_strength: "拉普拉斯锐化强度",
+};
+
+const PARAM_DESC = {
+  dcp_patch: "越大去雾越明显，但细节可能减少。",
+  dcp_omega: "越大去雾越强。",
+  dcp_t0: "用于保护暗区，避免过度增强噪声。",
+  clahe_clip_limit: "越大对比越强，过高可能放大噪声。",
+  gamma: "小于 1 会提亮画面。",
+  lowlight_gamma: "建议从 0.5 到 0.8 起步。",
+  nlm_h: "越大去噪越强，细节可能减少。",
+  nlm_hColor: "建议与去噪强度接近。",
+  nlm_templateWindowSize: "常用奇数 7。",
+  nlm_searchWindowSize: "常用奇数 21。",
+  bilateral_d: "影响平滑范围。",
+  bilateral_sigmaColor: "影响颜色平滑强度。",
+  bilateral_sigmaSpace: "影响空间平滑强度。",
+  gaussian_sigma: "越大模糊越强。",
+  median_ksize: "应为奇数。",
+  unsharp_sigma: "控制锐化作用范围。",
+  unsharp_amount: "越大边缘越锐，过高容易产生白边。",
+  laplacian_strength: "越大锐化越明显。",
+};
+
+const SYSTEM_PARAM_KEYS = new Set([
+  "metrics","data_mode","data_used","algo_elapsed_mean","algo_elapsed_sum","metric_elapsed_mean","metric_elapsed_sum",
+  "metric_psnr_ssim_elapsed_mean","metric_psnr_ssim_elapsed_sum","metric_niqe_elapsed_mean","metric_niqe_elapsed_sum",
+  "metric_custom_elapsed_mean","metric_custom_elapsed_sum","read_ok","read_fail","real_algo","input_dir",
+  "batch_id","batch_name","param_scheme","user_scheme_name",
+]);
+
+const taskOptions = computed(() => Object.entries(TASK_LABEL_BY_TYPE).map(([value, label]) => ({ value, label })));
+
+const rows = computed(() => {
+  const dsMap = new Map((store.datasets ?? []).map((d) => [d.id, d.name]));
+  const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
+  const ctxCache = new Map();
+  return (store.runs ?? []).filter((r) => !hiddenIds.value.has(r.id)).map((r) => {
+    const base = {
+      ...r,
+      name: r.name || `${r.task || "任务"} Run`,
+      dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
+      algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
+      paramSchemeText: resolveParamSchemeText(r),
+    };
+    const key = comparableGroupKey(base);
+    if (!ctxCache.has(key)) ctxCache.set(key, buildScoringContext(store.runs ?? [], base));
+    const ctx = ctxCache.get(key);
+    const s = scoreOne(base, ctx);
+    return { ...base, score: s.score };
+  });
+});
 
 const filteredRows = computed(() => {
   const kw = String(keyword.value || "").trim().toLowerCase();
   return (rows.value ?? []).filter((r) => {
-    if (statusFilter.value && r.status !== statusFilter.value) return false;
+    if (statusFilter.value && String(r.status || "").toLowerCase() !== statusFilter.value) return false;
     if (taskFilter.value && r.taskType !== taskFilter.value) return false;
     if (!kw) return true;
     const hay = `${r.dataset ?? ""} ${r.algorithm ?? ""} ${r.task ?? ""} ${r.paramSchemeText ?? ""}`.toLowerCase();
@@ -430,30 +304,70 @@ const filteredRows = computed(() => {
   });
 });
 
-function goNewRun() {
-  router.push("/new-run");
+function persistHidden() { localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds.value))); }
+function goNewRun() { router.push("/new-run"); }
+function clearFilters() { statusFilter.value = ""; taskFilter.value = ""; keyword.value = ""; }
+function downloadFile(blob, filename) { const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+async function exportDone(format, filename) {
+  const res = await authFetch("/runs/export", { query: { format, status: "done" } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `导出失败(${res.status})`);
+  }
+  const blob = await res.blob();
+  downloadFile(blob, filename);
 }
 
-function clearFilters() {
-  statusFilter.value = "";
-  taskFilter.value = "";
-  keyword.value = "";
-}
+async function exportDoneCsv() { try { await exportDone("csv", "runs_done.csv"); } catch (e) { ElMessage({ type: "error", message: `导出失败：${e?.message || e}` }); } }
+async function exportDoneXlsx() { try { await exportDone("xlsx", "runs_done.xlsx"); } catch (e) { ElMessage({ type: "error", message: `导出失败：${e?.message || e}` }); } }
 
-function formatJson(v) {
+async function clearDone() {
   try {
-    return JSON.stringify(v ?? null, null, 2);
-  } catch {
-    return String(v ?? "");
+    await ElMessageBox.confirm("确认清理所有已完成任务吗？", "清理确认", { type: "warning", confirmButtonText: "清理", cancelButtonText: "取消" });
+    const res = await authFetch("/runs/clear", { method: "POST", query: { status: "done" } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    ElMessage({ type: "success", message: `已清理 ${data.deleted} 条已完成任务` });
+    await refresh();
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `清理失败：${e?.message || e}` });
   }
 }
 
-function formatNum(v) {
-  if (v == null || v === "") return "-";
-  const x = Number(v);
-  if (!Number.isFinite(x)) return String(v);
-  return x.toFixed(4);
+function canBatchClearRow(row) { return !isActiveStatus(row?.status); }
+function handleSelectionChange(selection) { selectedIds.value = (selection || []).map((row) => row?.id).filter(Boolean); }
+
+async function clearSelected() {
+  if (!selectedIds.value.length) {
+    ElMessage({ type: "warning", message: "请先勾选要清除的任务" });
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认批量清除已勾选的 ${selectedIds.value.length} 条任务吗？运行中和排队中的任务不会被清除。`, "批量清除确认", {
+      type: "warning",
+      confirmButtonText: "批量清除",
+      cancelButtonText: "取消",
+    });
+    const res = await authFetch("/runs/batch-clear", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: selectedIds.value }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    selectedIds.value = [];
+    ElMessage({ type: "success", message: `已清除 ${data.deleted || 0} 条任务${data.skipped ? `，跳过 ${data.skipped} 条` : ""}` });
+    await refresh();
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `批量清除失败：${e?.message || e}` });
+  }
 }
+
+function formatJson(v) { try { return JSON.stringify(v ?? null, null, 2); } catch { return String(v ?? ""); } }
+function formatMetricNumber(v) { if (v == null || v === "") return "-"; const x = Number(v); if (!Number.isFinite(x)) return String(v); return x.toFixed(4); }
+function detailScoreText(run) { if (!isRealDatasetRun(run)) return "仅真实数据评测"; return Number.isFinite(run?.score) ? run.score : "-"; }
 
 function formatRunError(raw) {
   if (!raw || typeof raw !== "object") return "-";
@@ -465,57 +379,13 @@ function formatRunError(raw) {
   return `${head}\n${formatJson(detail)}`;
 }
 
-function resolveParamSchemeText(run) {
-  const p = run?.raw?.params && typeof run.raw.params === "object" && !Array.isArray(run.raw.params) ? run.raw.params : {};
-  const s = String(p.param_scheme || "").trim().toLowerCase();
-  if (String(p.user_scheme_name || "").trim()) {
-    return `用户：${extractSchemeDisplayName(String(p.user_scheme_name).trim(), run?.algorithm || "")}`;
-  }
-  if (s.startsWith("user:")) {
-    return `用户：${extractSchemeDisplayName(String(p.param_scheme || "").trim().slice(5), run?.algorithm || "")}`;
-  }
-  const alg = (store.algorithms || []).find((a) => String(a?.id || "") === String(run?.algorithmId || ""));
-  const runEff = pickEffectiveParams(p);
-  if (alg) {
-    const def = pickEffectiveParams(alg?.defaultParams && typeof alg.defaultParams === "object" ? alg.defaultParams : {});
-    if (isSameParams(runEff, def)) return "系统内置默认参数";
-    const presets = alg?.paramPresets && typeof alg.paramPresets === "object" && !Array.isArray(alg.paramPresets) ? alg.paramPresets : {};
-    for (const [k, v] of Object.entries(presets)) {
-      const cur = pickEffectiveParams(v && typeof v === "object" && !Array.isArray(v) ? v : {});
-      if (isSameParams(runEff, cur)) {
-        if (k === "speed") return "系统：速度优先";
-        if (k === "quality") return "系统：质量优先";
-        return `系统：${k}`;
-      }
-    }
-    const base = normalizeSchemeBaseName(alg?.name || "");
-    const candidates = (store.algorithms || [])
-      .filter(
-        (x) =>
-          !isBuiltinAlgorithm(x) &&
-          String(x?.task || "") === String(alg?.task || "") &&
-          normalizeSchemeBaseName(x?.name || "") === base
-      );
-    for (const x of candidates) {
-      const up = pickEffectiveParams(x?.defaultParams && typeof x.defaultParams === "object" ? x.defaultParams : {});
-      if (isSameParams(runEff, up)) return `用户：${extractSchemeDisplayName(String(x?.name || "用户方案"), alg?.name || run?.algorithm || "")}`;
-    }
-  }
-  if (s === "speed") return "系统：速度优先";
-  if (s === "quality") return "系统：质量优先";
-  if (s === "default" || s === "__default__") return "系统内置默认参数";
-  return Object.keys(runEff).length ? "用户自定义参数方案" : "系统内置默认参数";
-}
-
 function extractSchemeDisplayName(fullName, baseName = "") {
   const full = String(fullName || "").trim();
   const base = String(baseName || "").trim();
   if (!full) return "用户方案";
   if (base && full.startsWith(base)) {
     const rest = full.slice(base.length).trim();
-    if (rest) {
-      return rest.replace(/^[（(]\s*/, "").replace(/\s*[）)]$/, "").trim() || full;
-    }
+    if (rest) return rest.replace(/^[（(]\s*/, "").replace(/\s*[）)]$/, "").trim() || full;
   }
   const m = full.match(/[（(]([^（）()]+)[）)]$/);
   return m?.[1]?.trim() || full;
@@ -539,98 +409,49 @@ function pickEffectiveParams(obj) {
   return out;
 }
 
-function isSameParams(a, b) {
-  const sa = JSON.stringify(Object.keys(a || {}).sort().reduce((acc, k) => ((acc[k] = (a || {})[k]), acc), {}));
-  const sb = JSON.stringify(Object.keys(b || {}).sort().reduce((acc, k) => ((acc[k] = (b || {})[k]), acc), {}));
-  return sa === sb;
+function isBuiltinAlgorithm(alg) { return String(alg?.raw?.owner_id || "") === "system" && String(alg?.id || "").startsWith("alg_"); }
+function isSameParams(a, b) { const sa = JSON.stringify(Object.keys(a || {}).sort().reduce((acc, k) => ((acc[k] = (a || {})[k]), acc), {})); const sb = JSON.stringify(Object.keys(b || {}).sort().reduce((acc, k) => ((acc[k] = (b || {})[k]), acc), {})); return sa === sb; }
+
+function resolveParamSchemeText(run) {
+  const p = run?.raw?.params && typeof run.raw.params === "object" && !Array.isArray(run.raw.params) ? run.raw.params : {};
+  const s = String(p.param_scheme || "").trim().toLowerCase();
+  if (String(p.user_scheme_name || "").trim()) return `用户：${extractSchemeDisplayName(String(p.user_scheme_name).trim(), run?.algorithm || "")}`;
+  if (s.startsWith("user:")) return `用户：${extractSchemeDisplayName(String(p.param_scheme || "").trim().slice(5), run?.algorithm || "")}`;
+  const alg = (store.algorithms || []).find((a) => String(a?.id || "") === String(run?.algorithmId || ""));
+  const runEff = pickEffectiveParams(p);
+  if (alg) {
+    const def = pickEffectiveParams(alg?.defaultParams && typeof alg.defaultParams === "object" ? alg.defaultParams : {});
+    if (isSameParams(runEff, def)) return "系统内置默认参数";
+    const presets = alg?.paramPresets && typeof alg.paramPresets === "object" && !Array.isArray(alg.paramPresets) ? alg.paramPresets : {};
+    for (const [k, v] of Object.entries(presets)) {
+      const cur = pickEffectiveParams(v && typeof v === "object" && !Array.isArray(v) ? v : {});
+      if (isSameParams(runEff, cur)) {
+        if (k === "speed") return "系统：速度优先";
+        if (k === "quality") return "系统：质量优先";
+        return `系统：${k}`;
+      }
+    }
+    const base = normalizeSchemeBaseName(alg?.name || "");
+    const candidates = (store.algorithms || []).filter((x) => !isBuiltinAlgorithm(x) && String(x?.task || "") === String(alg?.task || "") && normalizeSchemeBaseName(x?.name || "") === base);
+    for (const x of candidates) {
+      const up = pickEffectiveParams(x?.defaultParams && typeof x.defaultParams === "object" ? x.defaultParams : {});
+      if (isSameParams(runEff, up)) return `用户：${extractSchemeDisplayName(String(x?.name || "用户方案"), alg?.name || run?.algorithm || "")}`;
+    }
+  }
+  if (s === "speed") return "系统：速度优先";
+  if (s === "quality") return "系统：质量优先";
+  if (s === "default" || s === "__default__") return "系统内置默认参数";
+  return Object.keys(runEff).length ? "用户自定义参数方案" : "系统内置默认参数";
 }
-
-const PARAM_LABELS = {
-  dcp_patch: "暗通道窗口",
-  dcp_omega: "去雾强度",
-  dcp_t0: "最小透射率",
-  clahe_clip_limit: "对比度上限",
-  gamma: "伽马值",
-  lowlight_gamma: "低照增强强度",
-  nlm_h: "去噪强度",
-  nlm_hColor: "彩色去噪强度",
-  nlm_templateWindowSize: "模板窗口大小",
-  nlm_searchWindowSize: "搜索窗口大小",
-  bilateral_d: "邻域直径",
-  bilateral_sigmaColor: "颜色域平滑系数",
-  bilateral_sigmaSpace: "空间域平滑系数",
-  gaussian_sigma: "高斯标准差",
-  median_ksize: "中值核大小",
-  unsharp_sigma: "锐化半径",
-  unsharp_amount: "锐化强度",
-  laplacian_strength: "拉普拉斯锐化强度",
-};
-
-const PARAM_DESC = {
-  dcp_patch: "越大去雾越明显，但细节可能减少。",
-  dcp_omega: "越大去雾越强。",
-  dcp_t0: "用于保护暗区，避免过度增强噪声。",
-  clahe_clip_limit: "越大对比越强，过高可能放大噪声。",
-  gamma: "小于 1 会提亮画面。",
-  lowlight_gamma: "建议从 0.5~0.8 起步。",
-  nlm_h: "越大去噪越强，细节可能减少。",
-  nlm_hColor: "建议与去噪强度接近。",
-  nlm_templateWindowSize: "常用奇数 7。",
-  nlm_searchWindowSize: "常用奇数 21。",
-  bilateral_d: "影响平滑范围。",
-  bilateral_sigmaColor: "影响颜色平滑强度。",
-  bilateral_sigmaSpace: "影响空间平滑强度。",
-  gaussian_sigma: "越大模糊越强。",
-  median_ksize: "应为奇数。",
-  unsharp_sigma: "控制锐化作用范围。",
-  unsharp_amount: "越大边缘越锐，过高容易产生白边。",
-  laplacian_strength: "越大锐化越明显。",
-};
-
-const SYSTEM_PARAM_KEYS = new Set([
-  "metrics",
-  "data_mode",
-  "data_used",
-  "algo_elapsed_mean",
-  "algo_elapsed_sum",
-  "metric_elapsed_mean",
-  "metric_elapsed_sum",
-  "metric_psnr_ssim_elapsed_mean",
-  "metric_psnr_ssim_elapsed_sum",
-  "metric_niqe_elapsed_mean",
-  "metric_niqe_elapsed_sum",
-  "read_ok",
-  "read_fail",
-  "real_algo",
-  "input_dir",
-  "batch_id",
-  "batch_name",
-  "param_scheme",
-  "user_scheme_name",
-]);
-
-function prettyValue(v) {
-  if (Array.isArray(v)) return v.join("、");
-  if (v == null) return "-";
-  if (typeof v === "object") return formatJson(v);
-  return String(v);
-}
+function prettyValue(v) { if (Array.isArray(v)) return v.join("、"); if (v == null) return "-"; if (typeof v === "object") return formatJson(v); return String(v); }
 
 function splitParamRows(paramsObj) {
   const p = paramsObj && typeof paramsObj === "object" && !Array.isArray(paramsObj) ? paramsObj : {};
   const userParamRows = [];
   const systemParamRows = [];
   for (const [key, value] of Object.entries(p)) {
-    if (SYSTEM_PARAM_KEYS.has(key)) {
-      systemParamRows.push({ key, label: key, value: prettyValue(value) });
-      continue;
-    }
-    userParamRows.push({
-      key,
-      label: PARAM_LABELS[key] || key,
-      value: prettyValue(value),
-      desc: PARAM_DESC[key] || "当前参数暂无补充说明，可结合算法原理与预览结果进行调整。",
-    });
+    if (SYSTEM_PARAM_KEYS.has(key)) { systemParamRows.push({ key, label: key, value: prettyValue(value) }); continue; }
+    userParamRows.push({ key, label: PARAM_LABELS[key] || key, value: prettyValue(value), desc: PARAM_DESC[key] || "当前参数暂无补充说明，可结合算法原理与预览结果进行调整。" });
   }
   return { userParamRows, systemParamRows };
 }
@@ -657,23 +478,10 @@ function statusTagType(status) {
   return "info";
 }
 
-function canCancel(row) {
-  const text = statusText(row?.status);
-  return text === "排队中" || text === "运行中" || text === "取消中";
-}
-
-function isActiveStatus(status) {
-  const text = statusText(status);
-  return text === "排队中" || text === "运行中" || text === "取消中";
-}
-
-function getDataMode(row) {
-  return String(row?.raw?.params?.data_mode || row?.raw?.record?.data_mode || "").trim();
-}
-
-function isRealDatasetRun(row) {
-  return getDataMode(row) === "real_dataset";
-}
+function canCancel(row) { const text = statusText(row?.status); return text === "排队中" || text === "运行中" || text === "取消中"; }
+function isActiveStatus(status) { const text = statusText(status); return text === "排队中" || text === "运行中" || text === "取消中"; }
+function getDataMode(row) { return String(row?.raw?.params?.data_mode || row?.raw?.record?.data_mode || "").trim(); }
+function isRealDatasetRun(row) { return getDataMode(row) === "real_dataset"; }
 
 function authenticityType(row) {
   const mode = getDataMode(row);
@@ -696,11 +504,7 @@ function authenticityLabel(row) {
 
 async function cancel(runId) {
   try {
-    await ElMessageBox.confirm("确认取消该任务吗？", "取消确认", {
-      type: "warning",
-      confirmButtonText: "取消任务",
-      cancelButtonText: "返回",
-    });
+    await ElMessageBox.confirm("确认取消该任务吗？", "取消确认", { type: "warning", confirmButtonText: "取消任务", cancelButtonText: "返回" });
     await store.cancelRun(runId);
     await refresh();
   } catch (e) {
@@ -708,7 +512,6 @@ async function cancel(runId) {
     ElMessage({ type: "error", message: `取消失败：${e?.message || e}` });
   }
 }
-
 
 function parseElapsedSeconds(elapsed) {
   if (elapsed == null) return null;
@@ -719,633 +522,120 @@ function parseElapsedSeconds(elapsed) {
   return Number.isFinite(x) ? x : null;
 }
 
-function toNumber(v) {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : null;
+function toNumber(v) { const x = Number(v); return Number.isFinite(x) ? x : null; }
+function minMax(values) { const nums = values.filter((x) => Number.isFinite(x)); if (nums.length === 0) return { min: null, max: null }; return { min: Math.min(...nums), max: Math.max(...nums) }; }
+function norm01(x, min, max) { if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null; if (max === min) return 1.0; return (x - min) / (max - min); }
+
+function comparableTaskKey(run) {
+  return String(run?.taskType || run?.task || "").trim();
 }
 
-function minMax(values) {
-  const nums = values.filter((x) => Number.isFinite(x));
-  if (nums.length === 0) return { min: null, max: null };
-  return { min: Math.min(...nums), max: Math.max(...nums) };
+function comparableGroupKey(run) {
+  return `${comparableTaskKey(run)}::${String(run?.datasetId || "").trim()}`;
 }
 
-function norm01(x, min, max) {
-  if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null;
-  if (max === min) return 1.0;
-  return (x - min) / (max - min);
-}
-
-function buildScoringContext(allRuns) {
-  const psnrs = allRuns.map((r) => toNumber(r.psnr)).filter((x) => x != null);
-  const ssims = allRuns.map((r) => toNumber(r.ssim)).filter((x) => x != null);
-  const niqes = allRuns.map((r) => toNumber(r.niqe)).filter((x) => x != null);
-  const times = allRuns.map((r) => parseElapsedSeconds(r.elapsed)).filter((x) => x != null);
-
-  const mmPSNR = minMax(psnrs);
-  const mmSSIM = minMax(ssims);
-  const mmNIQE = minMax(niqes);
-  const mmTIME = minMax(times);
-
-  const W = { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 };
-
-  return { mmPSNR, mmSSIM, mmNIQE, mmTIME, W };
+function buildScoringContext(allRuns, targetRun) {
+  const targetKey = comparableGroupKey(targetRun);
+  const realRuns = (allRuns || []).filter((r) => isRealDatasetRun(r) && comparableGroupKey(r) === targetKey);
+  const psnrs = realRuns.map((r) => toNumber(r.psnr)).filter((x) => x != null);
+  const ssims = realRuns.map((r) => toNumber(r.ssim)).filter((x) => x != null);
+  const niqes = realRuns.map((r) => toNumber(r.niqe)).filter((x) => x != null);
+  const times = realRuns.map((r) => parseElapsedSeconds(r.elapsed)).filter((x) => x != null);
+  return {
+    mmPSNR: minMax(psnrs),
+    mmSSIM: minMax(ssims),
+    mmNIQE: minMax(niqes),
+    mmTIME: minMax(times),
+    sampleCount: realRuns.length,
+    W: { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 },
+  };
 }
 
 function scoreOne(run, ctx) {
-  if (!isRealDatasetRun(run)) {
-    return { score: null, reason: `${authenticityLabel(run)}，该结果仅用于流程演示，不参与真实性能评分` };
-  }
-
+  if (!isRealDatasetRun(run)) return { score: null, reason: `${authenticityLabel(run)}，该结果仅用于流程演示，不参与真实性能评分` };
   const psnr = toNumber(run.psnr);
   const ssim = toNumber(run.ssim);
   const niqe = toNumber(run.niqe);
   const tsec = parseElapsedSeconds(run.elapsed);
-
   const nPSNR = norm01(psnr, ctx.mmPSNR.min, ctx.mmPSNR.max);
   const nSSIM = norm01(ssim, ctx.mmSSIM.min, ctx.mmSSIM.max);
   const nNIQE = norm01(niqe, ctx.mmNIQE.min, ctx.mmNIQE.max);
   const nTIME = norm01(tsec, ctx.mmTIME.min, ctx.mmTIME.max);
-
   const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
-  if (!okAll) return { score: null, reason: "指标不完整，暂不评分" };
-
-  const score =
-    ctx.W.psnr * nPSNR +
-    ctx.W.ssim * nSSIM +
-    ctx.W.niqe * (1 - nNIQE) +
-    ctx.W.time * (1 - nTIME);
-
+  if (!okAll) return { score: null, reason: "同任务同数据集下指标不完整，暂不评分" };
+  const score = ctx.W.psnr * nPSNR + ctx.W.ssim * nSSIM + ctx.W.niqe * (1 - nNIQE) + ctx.W.time * (1 - nTIME);
   const parts = [];
   if (nPSNR >= 0.8) parts.push("PSNR 表现优秀");
   if (nSSIM >= 0.8) parts.push("SSIM 表现优秀");
   if (nNIQE <= 0.2) parts.push("NIQE 表现优秀（越低越好）");
   if (nTIME <= 0.2) parts.push("耗时表现较好");
   if (parts.length === 0) parts.push("综合表现均衡");
-
-  return {
-    score: Number(score.toFixed(4)),
-    reason: `${parts.join("，")}；评分权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%`,
-  };
+  return { score: Number(score.toFixed(4)), reason: `${parts.join("；")}；评分范围：同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）；评分权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%` };
 }
-// ===========================================================================//
 
-
-async function refresh() {
-  try {
-    await store.fetchRuns();
-  } catch (e) {
-    ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` });
-  }
-}
+async function refresh() { try { await store.fetchRuns(); } catch (e) { ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` }); } }
 
 function remove(id) {
-  ElMessageBox.confirm("确认从当前列表隐藏该任务吗？", "隐藏确认", {
-    type: "warning",
-    confirmButtonText: "隐藏",
-    cancelButtonText: "取消",
-  })
-    .then(() => {
-      hiddenIds.value.add(id);
-      persistHidden();
-      ElMessage({ type: "success", message: "已从当前列表隐藏" });
-    })
+  ElMessageBox.confirm("确认从当前列表隐藏该任务吗？", "隐藏确认", { type: "warning", confirmButtonText: "隐藏", cancelButtonText: "取消" })
+    .then(() => { hiddenIds.value.add(id); persistHidden(); ElMessage({ type: "success", message: "已从当前列表隐藏" }); })
     .catch(() => {});
 }
 
-onMounted(() => {
-  refresh();
-});
-
-const detailVisible = ref(false);
-const detail = ref(null);
-
 function openDetail(row) {
-  const ctx = buildScoringContext(filteredRows.value);
+  const ctx = buildScoringContext(store.runs ?? [], row);
   const s = scoreOne(row, ctx);
   const { userParamRows, systemParamRows } = splitParamRows(row?.raw?.params ?? {});
-
-  detail.value = {
-    ...row,
-    score: s.score,
-    reason: s.reason,
-    userParamRows,
-    systemParamRows,
-  };
+  detail.value = { ...row, score: s.score, reason: s.reason, userParamRows, systemParamRows };
   detailVisible.value = true;
 }
 
+onMounted(() => { refresh(); });
 </script>
 
 <style scoped>
-.page {
-  padding: 24px;
-  background-color: #f5f7fb;
-  min-height: 100%;
-}
-
-/* Header Section */
-.header-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  color: #1a2f62;
-  letter-spacing: -0.5px;
-}
-
-.page-subtitle {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 14px;
-}
-
-.centered-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.centered-btn > span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-}
-
-.create-btn {
-  box-shadow: none;
-  transition: none;
-}
-
-.create-btn:hover {
-  transform: none;
-  box-shadow: none;
-}
-
-/* Main Card & Toolbar */
-.main-card {
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  box-shadow: none;
-}
-
-.toolbar-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.filter-group {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.filter-item {
-  width: 160px;
-}
-
-.search-input {
-  width: 220px;
-}
-
-.refresh-btn {
-  color: #64748b;
-  border-color: #e2e8f0;
-}
-
-.action-group {
-  display: flex;
-  gap: 12px;
-  margin-left: auto;
-  align-items: center;
-}
-
-/* Table Customization */
-.custom-table {
-  --el-table-border-color: #f1f5f9;
-  --el-table-header-bg-color: #f8fafc;
-  --el-table-row-hover-bg-color: #f1f5f9;
-  width: 100%;
-}
-
-.custom-table :deep(.el-table__cell) {
-  vertical-align: middle;
-}
-
-.custom-table :deep(.el-table__body-wrapper) {
-  overflow-x: auto;
-}
-
-.task-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-}
-
-.task-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #cbd5e1;
-}
-
-.task-dot.denoise { background-color: #3b82f6; }
-.task-dot.deblur { background-color: #8b5cf6; }
-.task-dot.dehaze { background-color: #06b6d4; }
-.task-dot.sr { background-color: #f59e0b; }
-.task-dot.lowlight { background-color: #ec4899; }
-
-.algo-cell {
-  display: flex;
-  flex-direction: column;
-}
-
-.algo-name {
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.algo-scheme {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.algo-auth {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  margin-top: 6px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.algo-auth--real {
-  color: #166534;
-  background: #dcfce7;
-}
-
-.algo-auth--demo {
-  color: #92400e;
-  background: #fef3c7;
-}
-
-.algo-auth--fallback {
-  color: #b91c1c;
-  background: #fee2e2;
-}
-
-.algo-auth--unknown {
-  color: #475569;
-  background: #e2e8f0;
-}
-
-.status-cell,
-.score-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 32px;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 72px;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 999px;
-  box-sizing: border-box;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  border: 1px solid #cbd5e1;
-  color: #475569;
-  background: #f8fafc;
-}
-
-.status-pill__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-}
-
-.status-pill--success {
-  color: #166534;
-  border-color: #86efac;
-  background: #dcfce7;
-}
-
-.status-pill--warning {
-  color: #1d4ed8;
-  border-color: #93c5fd;
-  background: #dbeafe;
-}
-
-.status-pill--danger {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.status-pill--info {
-  color: #475569;
-  border-color: #cbd5e1;
-  background: #f8fafc;
-}
-
-.score-cell {
-  background: #eef6ff;
-  border-radius: 6px;
-  padding: 4px 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 52px;
-}
-
-.score-pending {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 52px;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.score-pending__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-}
-
-.score-val {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  color: #0369a1;
-}
-
-.score-simulated {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 52px;
-  color: #92400e;
-  font-size: 12px;
-  font-weight: 700;
-  background: #fef3c7;
-  border-radius: 6px;
-  padding: 4px 8px;
-}
-
-.score-null {
-  color: #cbd5e1;
-}
-
-.row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-}
-
-.op-btn {
-  min-width: 54px;
-  padding: 5px 10px;
-}
-
-.pagination-mock {
-  margin-top: 20px;
-  text-align: right;
-  color: #94a3b8;
-  font-size: 13px;
-}
-
-/* Dialog & Detail Styles */
-.detail-dialog :deep(.el-dialog) {
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.detail-dialog :deep(.el-dialog__header) {
-  margin-right: 0;
-  padding: 20px 24px;
-  background-color: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.detail-dialog :deep(.el-dialog__title) {
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.detail-container {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.detail-header-card {
-  background: #1e293b;
-  padding: 20px;
-  border-radius: 12px;
-  color: white;
-}
-
-.detail-main-info {
-  display: flex;
-  justify-content: space-around;
-  flex-wrap: wrap;
-  gap: 20px;
-}
-
-.info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.info-label {
-  font-size: 12px;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.info-value {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.detail-section-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
-.detail-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.detail-card.full-width {
-  grid-column: 1 / -1;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #475569;
-}
-
-.kv-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px dashed #f1f5f9;
-}
-
+.page { padding: 24px; background: #f5f7fb; min-height: 100%; }
+.header-section { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
+.page-title { margin: 0; font-size: 28px; font-weight: 800; color: #16305f; }
+.page-subtitle { margin: 8px 0 0; color: #6b7a96; }
+.main-card, .detail-card { border-radius: 18px; }
+.toolbar-section { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-group, .action-group, .row-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.filter-item { min-width: 180px; }
+.task-cell, .algo-cell { display: flex; flex-direction: column; gap: 4px; }
+.task-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 8px; background: #3b82f6; }
+.algo-name { font-weight: 700; color: #1d355e; }
+.algo-scheme { color: #7b8aa5; font-size: 12px; }
+.algo-auth { align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.algo-auth--real { background: #dcfce7; color: #15803d; }
+.algo-auth--demo, .algo-auth--fallback, .algo-auth--unknown { background: #eff6ff; color: #2563eb; }
+.status-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 76px; padding: 6px 14px; border-radius: 999px; font-weight: 700; }
+.status-pill--success { background: #dcfce7; color: #15803d; }
+.status-pill--warning { background: #fef3c7; color: #b45309; }
+.status-pill--danger { background: #fee2e2; color: #dc2626; }
+.status-pill--info { background: #e0f2fe; color: #0369a1; }
+.score-val { color: #2563eb; font-weight: 800; }
+.score-null, .score-pending, .pagination-mock { color: #7b8aa5; }
+.detail-container { display: flex; flex-direction: column; gap: 18px; }
+.detail-header-card { background: #1f2a44; color: #fff; border-radius: 18px; padding: 18px 24px; }
+.detail-main-info { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.info-label, .kv-label, .metric-label, .param-desc, .perf-item span { color: #6b7a96; }
+.info-value, .kv-value, .metric-value, .param-name { color: #203250; font-weight: 700; }
+.detail-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.card-title { margin-bottom: 14px; font-size: 18px; font-weight: 800; color: #203250; }
+.card-content { color: #203250; }
+.kv-row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #eef2f7; }
 .kv-row:last-child { border-bottom: none; }
-
-.kv-label { color: #64748b; font-size: 13px; }
-.kv-value { color: #1e293b; font-weight: 600; font-size: 13px; }
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-}
-
-.metric-box {
-  background-color: #f8fafc;
-  border: 1px solid #f1f5f9;
-  padding: 10px;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.metric-box.highlighted {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.metric-label { font-size: 11px; color: #64748b; margin-bottom: 2px; }
-.metric-value { font-size: 16px; font-weight: 700; color: #1e293b; }
-
-.performance-info {
-  margin-top: 10px;
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #64748b;
-  padding-top: 10px;
-  border-top: 1px solid #f1f5f9;
-}
-
-.params-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-}
-
-.param-card {
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px;
-}
-
-.param-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.param-name { font-weight: 700; color: #334155; font-size: 13px; }
-.param-val { color: #2563eb; font-weight: 700; font-size: 13px; }
-.param-desc { font-size: 11px; color: #64748b; line-height: 1.4; }
-
-.reason-card {
-  background-color: #f0fdf4;
-  border-color: #dcfce7;
-}
-
-.reason-text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #166534;
-}
-
-.error-card {
-  background-color: #fef2f2;
-  border-color: #fee2e2;
-}
-
-.error-pre {
-  background: #450a0a;
-  color: #fca5a5;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.mono { font-family: 'JetBrains Mono', monospace; }
-
-@media (max-width: 768px) {
-  .filter-item {
-    width: 100%;
-  }
-
-  .search-input {
-    width: 100%;
-  }
-
-  .action-group {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
-  .detail-section-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.custom-metric-grid { margin-top: 12px; }
+.metric-box, .param-card { background: #f8fbff; border: 1px solid #e6eef8; border-radius: 14px; padding: 14px; }
+.metric-box.highlighted { background: #eef5ff; border-color: #bfd6ff; }
+.metric-value { margin-top: 8px; font-size: 18px; }
+.performance-info { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef2f7; display: flex; flex-wrap: wrap; gap: 16px; }
+.params-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.param-header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.params-empty, .reason-text, .error-pre { color: #4f6185; }
+.reason-card { background: #effdf4; }
+.error-card { background: #fff7f7; }
+.mono { font-family: Consolas, Monaco, monospace; }
+@media (max-width: 980px) { .detail-section-grid, .detail-main-info, .params-grid { grid-template-columns: 1fr; } }
 </style>
-
-

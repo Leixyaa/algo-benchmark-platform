@@ -3,14 +3,14 @@
     <div class="header-section">
       <h2 class="title">&#31639;&#27861;&#24211;</h2>
       <div class="subtitle">
-        &#25903;&#25345;&#21019;&#24314;&#12289;&#21457;&#24067;&#21644;&#31649;&#7406;&#31639;&#27861;&#65292;&#21518;&#32493;&#35780;&#27979;&#26102;&#20174;&#36825;&#37324;&#36873;&#25321;&#31639;&#27861;&#65292;&#20844;&#24320;&#31639;&#27861;&#21487;&#22312;&#31038;&#53306;&#20013;&#24515;&#19979;&#36733;&#21040;&#24403;&#21069;&#36134;&#21495;&#12290;
+        &#36825;&#37324;&#20027;&#35201;&#29992;&#20110;&#26597;&#30475;&#24179;&#21488;&#31639;&#27861;&#12289;&#24050;&#19979;&#36733;&#31038;&#53306;&#31639;&#27861;&#19982;&#21382;&#21490;&#29992;&#25143;&#31639;&#27861;&#35760;&#24405;&#65307;&#26032;&#30340;&#33258;&#23450;&#20041;&#31639;&#27861;&#35831;&#36208;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#27969;&#31243;&#25552;&#20132;&#20195;&#30721;&#21253;&#12290;
       </div>
     </div>
 
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" icon="Plus" class="centered-btn action-btn" @click="openCreate" :disabled="!store.user.isLoggedIn">&#26032;&#22686;&#31639;&#27861;</el-button>
+          <el-button type="primary" class="centered-btn action-btn" @click="goToAlgorithmAccess" :disabled="!store.user.isLoggedIn">&#25552;&#20132;&#31639;&#27861;&#20195;&#30721;&#21253;</el-button>
           <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">&#28165;&#29702;&#29992;&#25143;&#31639;&#27861;</el-button>
         </div>
       </div>
@@ -61,14 +61,17 @@
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="&#29992;&#25143;&#31639;&#27861;" name="owned">
+        <el-tab-pane label="&#21382;&#21490;&#35760;&#24405;" name="owned">
+          <div class="history-tip">
+            &#26032;&#30340;&#33258;&#23450;&#20041;&#31639;&#27861;&#35831;&#36890;&#36807;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#25552;&#20132;&#20195;&#30721;&#21253;&#12290;&#36825;&#37324;&#20445;&#30041;&#30340;&#26159;&#26089;&#26399;&#29992;&#25143;&#31639;&#27861;&#35760;&#24405;&#65292;&#20316;&#20026;&#21382;&#21490;&#31639;&#27861;&#31649;&#29702;&#19982;&#23548;&#20986;&#20837;&#21475;&#12290;
+          </div>
           <el-table :data="pagedOwnedAlgorithms" border stripe class="data-table">
             <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
             <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
             <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
             <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
             <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
-            <el-table-column label="&#25805;&#20316;" width="140">
+            <el-table-column label="&#25805;&#20316;" width="120">
               <template #default="{ row }">
                 <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
@@ -76,9 +79,7 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="community">{{ isSelfPublishedAlgorithm(row) ? '&#26356;&#26032;&#31038;&#53306;&#20449;&#24687;' : '&#19978;&#20256;&#21040;&#31038;&#53306;' }}</el-dropdown-item>
                       <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
-                      <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
                       <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
@@ -86,7 +87,7 @@
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty description="&#26242;&#26080;&#29992;&#25143;&#31639;&#27861;" />
+              <el-empty description="&#26242;&#26080;&#21382;&#21490;&#31639;&#27861;&#35760;&#24405;" />
             </template>
           </el-table>
 
@@ -402,6 +403,10 @@ function resetFilters() {
   filterImpl.value = "";
   filterKeyword.value = "";
   currentPage.value = 1;
+}
+
+function goToAlgorithmAccess() {
+  router.push("/algorithm-access");
 }
 
 const PRESET_BY_TASK = {
@@ -1330,6 +1335,16 @@ async function resetToBuiltins() {
   gap: 20px;
 }
 
+.history-tip {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #dbe7ff;
+  background: #f7faff;
+  color: #5d6c8c;
+  line-height: 1.7;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -1580,10 +1595,6 @@ async function resetToBuiltins() {
   margin-top: 4px;
 }
 </style>
-
-
-
-
 
 
 

@@ -541,7 +541,7 @@ async function downloadAlgorithm(row) {
     locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
     await store.fetchAlgorithms();
     await loadCommunity();
-    ElMessage({ type: "success", message: "已下载到数据库中" });
+    ElMessage({ type: "success", message: "已下载到你的算法库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("algorithm_already_downloaded")) {
       await store.fetchAlgorithms();
@@ -571,7 +571,7 @@ async function downloadDataset(row) {
     locallyDownloadedDatasetIds.value = new Set([...locallyDownloadedDatasetIds.value, String(row.id)]);
     await store.fetchDatasets();
     await loadCommunity();
-    ElMessage({ type: "success", message: "已下载到数据库中" });
+    ElMessage({ type: "success", message: "已下载到你的数据集库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("dataset_already_downloaded")) {
       locallyDownloadedDatasetIds.value = new Set([...locallyDownloadedDatasetIds.value, String(row.id)]);

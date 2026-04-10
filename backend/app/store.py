@@ -185,6 +185,78 @@ def list_presets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = Non
     return items[:limit]
 
 
+def metric_key(metric_id: str) -> str:
+    return f"metric:{metric_id}"
+
+
+def save_metric(r: redis.Redis, metric_id: str, data: Dict[str, Any]) -> None:
+    r.set(metric_key(metric_id), json.dumps(data, ensure_ascii=False))
+
+
+def load_metric(r: redis.Redis, metric_id: str) -> Optional[Dict[str, Any]]:
+    s = r.get(metric_key(metric_id))
+    if not s:
+        return None
+    return json.loads(s)
+
+
+def delete_metric(r: redis.Redis, metric_id: str) -> None:
+    r.delete(metric_key(metric_id))
+
+
+def list_metrics(r: redis.Redis, limit: int = 500) -> list[Dict[str, Any]]:
+    keys = r.keys("metric:*")
+    items = []
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict) and "metric_id" in data:
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return items[:limit]
+
+
+def algorithm_submission_key(submission_id: str) -> str:
+    return f"algorithm_submission:{submission_id}"
+
+
+def save_algorithm_submission(r: redis.Redis, submission_id: str, data: Dict[str, Any]) -> None:
+    r.set(algorithm_submission_key(submission_id), json.dumps(data, ensure_ascii=False))
+
+
+def load_algorithm_submission(r: redis.Redis, submission_id: str) -> Optional[Dict[str, Any]]:
+    s = r.get(algorithm_submission_key(submission_id))
+    if not s:
+        return None
+    return json.loads(s)
+
+
+def delete_algorithm_submission(r: redis.Redis, submission_id: str) -> None:
+    r.delete(algorithm_submission_key(submission_id))
+
+
+def list_algorithm_submissions(r: redis.Redis, limit: int = 5000) -> list[Dict[str, Any]]:
+    keys = r.keys("algorithm_submission:*")
+    items = []
+    for k in keys:
+        s = r.get(k)
+        if not s:
+            continue
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict) and "submission_id" in data:
+                items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return items[:limit]
+
+
 def user_key(username: str) -> str:
     return f"user:{username}"
 

@@ -22,6 +22,7 @@
 
         <div class="actions">
           <el-button type="primary" :loading="loading" @click="handleRegister" class="submit-btn">注册并登录</el-button>
+          <router-link to="/login" class="back-link">返回登录</router-link>
         </div>
       </el-form>
     </el-card>
@@ -142,5 +143,19 @@ async function handleRegister() {
   width: 100%;
   height: 48px;
   border-radius: 12px;
+}
+
+.back-link {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 14px;
+  color: #6a7ca9;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.back-link:hover {
+  color: #2f6bff;
 }
 </style>

@@ -134,6 +134,72 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="指标审核" name="metrics">
+        <div class="toolbar">
+          <el-input v-model="metricKeyword" placeholder="搜索指标名称 / 标识 / 提交人" clearable class="search-input" />
+        </div>
+        <el-table :data="filteredMetrics" border stripe class="data-table">
+          <el-table-column prop="displayName" label="指标名称" min-width="160" />
+          <el-table-column prop="metricKey" label="指标标识" width="150" />
+          <el-table-column label="适用任务" min-width="180">
+            <template #default="{ row }">
+              {{ formatTaskTypes(row.taskTypes) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="方向" width="110">
+            <template #default="{ row }">
+              {{ row.direction === "lower_better" ? "越小越好" : "越大越好" }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="uploaderId" label="提交人" width="140" />
+          <el-table-column label="代码文件" width="180">
+            <template #default="{ row }">
+              {{ row.codeFilename || "-" }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="提交时间" width="180" />
+          <el-table-column label="操作" width="140">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" @click="openMetricReview(row)" :loading="reviewingMetricIds.has(row.id)">
+                审核
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="算法接入审核" name="algorithm-submissions">
+        <div class="toolbar">
+          <el-input
+            v-model="algorithmSubmissionKeyword"
+            placeholder="搜索算法名称 / 任务 / 提交人 / 文件名"
+            clearable
+            class="search-input"
+          />
+        </div>
+        <el-table :data="filteredAlgorithmSubmissions" border stripe class="data-table">
+          <el-table-column prop="name" label="算法名称" min-width="180" />
+          <el-table-column prop="taskLabel" label="任务" width="110" />
+          <el-table-column prop="uploaderId" label="提交人" width="140" />
+          <el-table-column prop="archiveFilename" label="代码包" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="version" label="版本" width="100" />
+          <el-table-column prop="createdAt" label="提交时间" width="180" />
+          <el-table-column label="操作" width="190">
+            <template #default="{ row }">
+              <el-button size="small" plain @click="downloadAlgorithmSubmission(row)">下载代码包</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                @click="openAlgorithmSubmissionReview(row)"
+                :loading="reviewingSubmissionIds.has(row.id)"
+              >
+                审核
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <el-tab-pane label="举报处理" name="reports">
         <div class="toolbar">
           <el-input v-model="pendingReportKeyword" placeholder="搜索待处理举报对象 / 举报人 / 原因" clearable class="search-input" />
@@ -159,6 +225,45 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="指标处理日志" name="metric-logs">
+        <div class="toolbar">
+          <el-input v-model="metricLogKeyword" placeholder="搜索指标名称 / 标识 / 提交人 / 处理人" clearable class="search-input" />
+        </div>
+        <el-table :data="handledMetricLogs" border stripe class="data-table">
+          <el-table-column prop="name" label="指标名称" min-width="180" />
+          <el-table-column prop="targetId" label="指标标识" min-width="180" />
+          <el-table-column prop="submitterId" label="提交人" width="140" />
+          <el-table-column prop="statusLabel" label="状态" width="100" />
+          <el-table-column prop="resolution" label="处理说明" min-width="260" show-overflow-tooltip />
+          <el-table-column prop="resolvedBy" label="处理人" width="120" />
+          <el-table-column prop="resolvedAt" label="处理时间" width="180" />
+          <el-table-column prop="createdAt" label="提交时间" width="180" />
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="算法接入日志" name="algorithm-submission-logs">
+        <div class="toolbar">
+          <el-input
+            v-model="algorithmSubmissionLogKeyword"
+            placeholder="搜索算法名称 / 提交人 / 审核人 / 收录结果"
+            clearable
+            class="search-input"
+          />
+        </div>
+        <el-table :data="handledAlgorithmSubmissionLogs" border stripe class="data-table">
+          <el-table-column prop="name" label="算法名称" min-width="180" />
+          <el-table-column prop="taskLabel" label="任务" width="110" />
+          <el-table-column prop="submitterId" label="提交人" width="140" />
+          <el-table-column prop="archiveFilename" label="代码包" min-width="170" show-overflow-tooltip />
+          <el-table-column prop="statusLabel" label="状态" width="100" />
+          <el-table-column prop="resolution" label="审核说明" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="platformAlgorithmId" label="平台留档" min-width="170" />
+          <el-table-column prop="resolvedBy" label="审核人" width="120" />
+          <el-table-column prop="resolvedAt" label="审核时间" width="180" />
+          <el-table-column prop="createdAt" label="提交时间" width="180" />
+        </el-table>
+      </el-tab-pane>
+
       <el-tab-pane label="处理日志" name="report-logs">
         <div class="toolbar">
           <el-input v-model="reportLogKeyword" placeholder="搜索处理记录 / 处理人 / 理由" clearable class="search-input" />
@@ -166,10 +271,10 @@
             plain
             class="clear-btn"
             @click="clearHandledReports"
-            :disabled="!handledReportsCount"
+            :disabled="!handledReports.length"
             :loading="clearingReports"
           >
-            清除记录
+            清除举报记录
           </el-button>
         </div>
         <el-table :data="handledReports" border stripe class="data-table">
@@ -315,6 +420,135 @@
         <el-button type="primary" @click="submitReportProcess" :loading="reportProcessSubmitting">确认处理</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="metricReviewVisible" title="审核指标" width="640px">
+      <div v-if="activeMetric" class="process-panel">
+        <div class="process-meta">
+          <div>指标名称：{{ activeMetric.displayName }}</div>
+          <div>指标标识：{{ activeMetric.metricKey }}</div>
+          <div>提交人：{{ activeMetric.uploaderId }}</div>
+        </div>
+        <div class="detail-block">
+          <div class="block-title">指标说明</div>
+          <div class="description-box">{{ activeMetric.description || "暂无说明" }}</div>
+          <div class="detail-grid">
+            <div>适用任务：{{ formatTaskTypes(activeMetric.taskTypes) }}</div>
+            <div>指标方向：{{ activeMetric.direction === "lower_better" ? "越小越好" : "越大越好" }}</div>
+            <div>是否需要 GT：{{ activeMetric.requiresReference ? "需要" : "不需要" }}</div>
+            <div>实现方式：{{ activeMetric.implementationType === "formula" ? "公式/说明" : activeMetric.implementationType === "builtin" ? "内置" : "Python 代码" }}</div>
+          </div>
+        </div>
+        <div v-if="activeMetric.formulaText" class="detail-block">
+          <div class="block-title">公式说明</div>
+          <div class="description-box code-box">{{ activeMetric.formulaText }}</div>
+        </div>
+        <div v-if="activeMetric.codeText" class="detail-block">
+          <div class="block-title">代码内容</div>
+          <div class="description-box code-box">{{ activeMetric.codeText }}</div>
+        </div>
+        <div v-if="activeMetric.codeText || activeMetric.codeFilename" class="detail-block">
+          <div class="block-title">{{ activeMetric.codeFilename ? "原始上传文件" : "代码内容导出" }}</div>
+          <div class="file-preview-row">
+            <div class="description-box">
+              {{ activeMetric.codeFilename || "当前未上传独立文件，可导出本次提交的代码内容" }}
+            </div>
+            <el-button size="small" plain @click="downloadMetricCode(activeMetric)">
+              {{ activeMetric.codeFilename ? "下载原始文件" : "下载代码内容" }}
+            </el-button>
+          </div>
+        </div>
+        <div class="detail-block">
+          <div class="block-title">自定义指标代码协议</div>
+          <div class="description-box protocol-box">
+            <div>1. 仅 `Python 代码` 指标可接入运行链路，`公式/说明型` 仅用于存档与审核。</div>
+            <div>2. 代码中需定义 `compute_metric(...)` 函数，并返回单个数值结果。</div>
+            <div>3. 推荐签名：`def compute_metric(gt_bgr_u8, pred_bgr_u8, sample_name="", task_type=""):`</div>
+            <div>4. `gt_bgr_u8` 在“需要 GT”时提供；无 GT 指标应只使用 `pred_bgr_u8`。</div>
+            <div>5. 运行环境已注入 `np`、`cv2`、`math` 等常用对象，返回值必须是有限数值。</div>
+          </div>
+        </div>
+        <el-form label-position="top">
+          <el-form-item label="审核结论">
+            <el-select v-model="metricReviewStatus" class="full-width">
+              <el-option label="通过" value="approved" />
+              <el-option label="驳回" value="rejected" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="接入运行链路">
+            <el-switch v-model="metricReviewRuntimeReady" :disabled="activeMetric.implementationType === 'formula'" />
+          </el-form-item>
+          <el-form-item label="审核说明">
+            <el-input v-model="metricReviewNote" type="textarea" :rows="4" placeholder="填写审核意见与接入说明。" />
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="closeMetricReview">取消</el-button>
+        <el-button type="primary" @click="submitMetricReview" :loading="metricReviewSubmitting">提交审核</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="submissionReviewVisible" title="审核算法接入申请" width="680px">
+      <div v-if="activeSubmission" class="process-panel">
+        <div class="process-meta">
+          <div>算法名称：{{ activeSubmission.name }}</div>
+          <div>任务：{{ activeSubmission.taskLabel }}</div>
+          <div>提交人：{{ activeSubmission.uploaderId }}</div>
+        </div>
+
+        <div class="detail-block">
+          <div class="block-title">提交说明</div>
+          <div class="detail-grid">
+            <div>版本：{{ activeSubmission.version || "-" }}</div>
+            <div>代码包：{{ activeSubmission.archiveFilename || "-" }}</div>
+            <div>提交时间：{{ activeSubmission.createdAt || "-" }}</div>
+            <div>SHA256：{{ activeSubmission.archiveSha256 || "-" }}</div>
+          </div>
+        </div>
+
+        <div class="detail-block">
+          <div class="block-title">算法描述</div>
+          <div class="description-box">{{ activeSubmission.description || "暂无说明" }}</div>
+        </div>
+
+        <div class="detail-block">
+          <div class="block-title">依赖说明</div>
+          <div class="description-box">{{ activeSubmission.dependencyText || "暂无依赖说明" }}</div>
+        </div>
+
+        <div class="detail-block">
+          <div class="block-title">入口说明</div>
+          <div class="description-box">{{ activeSubmission.entryText || "暂无入口说明" }}</div>
+        </div>
+
+        <div class="file-preview-row">
+          <div class="description-box">{{ activeSubmission.archiveFilename || "当前未上传文件" }}</div>
+          <el-button size="small" plain @click="downloadAlgorithmSubmission(activeSubmission)">下载代码包</el-button>
+        </div>
+
+        <el-form label-position="top">
+          <el-form-item label="审核结论">
+            <el-select v-model="submissionReviewStatus" class="full-width">
+              <el-option label="通过" value="approved" />
+              <el-option label="驳回" value="rejected" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="收录为平台留档算法">
+            <el-switch
+              v-model="submissionReviewCollect"
+              :disabled="submissionReviewStatus !== 'approved'"
+            />
+          </el-form-item>
+          <el-form-item label="审核说明">
+            <el-input v-model="submissionReviewNote" type="textarea" :rows="4" placeholder="填写审核结论、接入建议或驳回原因。" />
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="closeAlgorithmSubmissionReview">取消</el-button>
+        <el-button type="primary" @click="submitAlgorithmSubmissionReview" :loading="submissionReviewSubmitting">提交审核</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -322,18 +556,25 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { adminApi } from "../api/admin";
-import { toTaskType, useAppStore } from "../stores/app";
+import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
+import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 
 const tab = ref("algorithms");
 const algorithms = ref([]);
 const datasets = ref([]);
+const metrics = ref([]);
+const algorithmSubmissions = ref([]);
 const comments = ref([]);
 const reports = ref([]);
 
 const algorithmKeyword = ref("");
 const datasetKeyword = ref("");
+const metricKeyword = ref("");
+const algorithmSubmissionKeyword = ref("");
+const algorithmSubmissionLogKeyword = ref("");
+const metricLogKeyword = ref("");
 const pendingReportKeyword = ref("");
 const reportLogKeyword = ref("");
 const screeningKeyword = ref("");
@@ -344,6 +585,8 @@ const deletingCommentIds = ref(new Set());
 const resolvingReportIds = ref(new Set());
 const promotingAlgorithmIds = ref(new Set());
 const clearingReports = ref(false);
+const reviewingMetricIds = ref(new Set());
+const reviewingSubmissionIds = ref(new Set());
 const screeningLoading = ref(false);
 
 const detailVisible = ref(false);
@@ -357,6 +600,18 @@ const reportProcessNote = ref("");
 const reportProcessSubmitting = ref(false);
 const reportTargetDetail = ref(null);
 const reportTargetComment = ref(null);
+const metricReviewVisible = ref(false);
+const activeMetric = ref(null);
+const metricReviewStatus = ref("approved");
+const metricReviewRuntimeReady = ref(false);
+const metricReviewNote = ref("");
+const metricReviewSubmitting = ref(false);
+const submissionReviewVisible = ref(false);
+const activeSubmission = ref(null);
+const submissionReviewStatus = ref("approved");
+const submissionReviewCollect = ref(true);
+const submissionReviewNote = ref("");
+const submissionReviewSubmitting = ref(false);
 const screeningTask = ref("");
 const screeningTopK = ref(3);
 const screeningAlpha = ref(0.35);
@@ -407,6 +662,53 @@ function mapDataset(x) {
     downloadCount: Number(x.download_count || 0),
     createdAt: formatTs(x.created_at),
     storagePath: x.storage_path || "",
+  };
+}
+
+function mapMetric(x) {
+  return {
+    id: x.metric_id,
+    metricKey: String(x.metric_key || ""),
+    name: String(x.name || ""),
+    displayName: String(x.display_name || x.name || x.metric_key || ""),
+    description: String(x.description || ""),
+    taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
+    direction: String(x.direction || "higher_better"),
+    requiresReference: Boolean(x.requires_reference),
+    implementationType: String(x.implementation_type || "python"),
+    formulaText: String(x.formula_text || ""),
+    codeText: String(x.code_text || ""),
+    codeFilename: String(x.code_filename || ""),
+    uploaderId: String(x.owner_id || ""),
+    status: String(x.status || "pending"),
+    runtimeReady: Boolean(x.runtime_ready),
+    reviewNote: String(x.review_note || ""),
+    reviewedBy: String(x.reviewed_by || ""),
+    reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "",
+    createdAt: formatTs(x.created_at),
+  };
+}
+
+function mapAlgorithmSubmission(x) {
+  return {
+    id: String(x.submission_id || ""),
+    taskType: String(x.task_type || ""),
+    taskLabel: String(x.task_label || TASK_LABEL_BY_TYPE[x.task_type] || x.task_type || ""),
+    name: String(x.name || ""),
+    version: String(x.version || ""),
+    description: String(x.description || ""),
+    dependencyText: String(x.dependency_text || ""),
+    entryText: String(x.entry_text || ""),
+    archiveFilename: String(x.archive_filename || ""),
+    archiveSize: Number(x.archive_size || 0),
+    archiveSha256: String(x.archive_sha256 || ""),
+    uploaderId: String(x.owner_id || ""),
+    status: String(x.status || "pending"),
+    reviewNote: String(x.review_note || ""),
+    reviewedBy: String(x.reviewed_by || ""),
+    reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "",
+    createdAt: formatTs(x.created_at),
+    platformAlgorithmId: String(x.platform_algorithm_id || ""),
   };
 }
 
@@ -469,6 +771,23 @@ const filteredDatasets = computed(() =>
   )
 );
 
+const filteredMetrics = computed(() =>
+  (metrics.value || []).filter((item) =>
+    String(item.status || "") === "pending" &&
+    includesKeyword([item.displayName, item.metricKey, item.uploaderId, item.description], metricKeyword.value)
+  )
+);
+
+const filteredAlgorithmSubmissions = computed(() =>
+  (algorithmSubmissions.value || []).filter((item) =>
+    String(item.status || "") === "pending" &&
+    includesKeyword(
+      [item.name, item.taskLabel, item.uploaderId, item.archiveFilename, item.description, item.dependencyText, item.entryText],
+      algorithmSubmissionKeyword.value
+    )
+  )
+);
+
 const pendingReports = computed(() =>
   (reports.value || []).filter(
     (item) =>
@@ -488,8 +807,46 @@ const handledReports = computed(() =>
   )
 );
 
-const handledReportsCount = computed(() =>
-  (reports.value || []).filter((item) => String(item.status || "") !== "pending").length
+const handledMetricLogs = computed(() =>
+  (metrics.value || []).filter(
+    (item) =>
+      String(item.status || "") !== "pending" &&
+      includesKeyword(
+        [item.displayName, item.metricKey, item.uploaderId, item.reviewNote, item.reviewedBy],
+        metricLogKeyword.value
+      )
+  ).map((item) => ({
+    name: item.displayName,
+    targetId: item.metricKey,
+    submitterId: item.uploaderId,
+    statusLabel: metricStatusLabel(item.status),
+    resolution: item.reviewNote || "-",
+    resolvedBy: item.reviewedBy || "-",
+    resolvedAt: item.reviewedAt || "-",
+    createdAt: item.createdAt,
+  }))
+);
+
+const handledAlgorithmSubmissionLogs = computed(() =>
+  (algorithmSubmissions.value || []).filter(
+    (item) =>
+      String(item.status || "") !== "pending" &&
+      includesKeyword(
+        [item.name, item.taskLabel, item.uploaderId, item.archiveFilename, item.reviewNote, item.reviewedBy, item.platformAlgorithmId],
+        algorithmSubmissionLogKeyword.value
+      )
+  ).map((item) => ({
+    name: item.name,
+    taskLabel: item.taskLabel,
+    submitterId: item.uploaderId,
+    archiveFilename: item.archiveFilename || "-",
+    statusLabel: metricStatusLabel(item.status),
+    resolution: item.reviewNote || "-",
+    platformAlgorithmId: item.platformAlgorithmId || "-",
+    resolvedBy: item.reviewedBy || "-",
+    resolvedAt: item.reviewedAt || "-",
+    createdAt: item.createdAt,
+  }))
 );
 
 const detailTitle = computed(() => (detailType.value === "algorithm" ? "算法详情" : "数据集详情"));
@@ -566,14 +923,18 @@ const detailComments = computed(() =>
 
 async function loadAll() {
   if (store.user.role !== "admin") return;
-  const [algRes, dsRes, commentRes, reportRes] = await Promise.all([
+  const [algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
     adminApi.listCommunityAlgorithms(),
     adminApi.listCommunityDatasets(),
+    adminApi.listMetrics(),
+    adminApi.listAlgorithmSubmissions(),
     adminApi.listComments(),
     adminApi.listReports(),
   ]);
   algorithms.value = (algRes || []).map(mapAlgorithm);
   datasets.value = (dsRes || []).map(mapDataset);
+  metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
+  algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
   comments.value = (commentRes || []).map(mapComment);
   reports.value = (reportRes || []).map(mapReport);
   if (!screeningTask.value && screeningTaskOptions.value.length) {
@@ -658,6 +1019,133 @@ async function promoteAlgorithm(row) {
   } finally {
     setLoading(promotingAlgorithmIds, row.id, false);
   }
+}
+
+async function downloadAlgorithmSubmission(row) {
+  try {
+    await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
+  } catch (e) {
+    ElMessage.error(e?.message || "下载代码包失败");
+  }
+}
+
+function formatTaskTypes(taskTypes) {
+  if (!Array.isArray(taskTypes) || !taskTypes.length) return "未限定";
+  return taskTypes.map((item) => TASK_LABEL_BY_TYPE[item] || item).join(" / ");
+}
+
+function metricStatusLabel(status) {
+  if (status === "approved") return "已通过";
+  if (status === "rejected") return "已驳回";
+  return "待审核";
+}
+
+function metricStatusTagType(status) {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "danger";
+  return "warning";
+}
+
+function openAlgorithmSubmissionReview(row) {
+  activeSubmission.value = row;
+  submissionReviewStatus.value = row.status === "rejected" ? "rejected" : "approved";
+  submissionReviewCollect.value = !row.platformAlgorithmId;
+  submissionReviewNote.value = String(row.reviewNote || "");
+  submissionReviewVisible.value = true;
+}
+
+function closeAlgorithmSubmissionReview() {
+  submissionReviewVisible.value = false;
+  activeSubmission.value = null;
+  submissionReviewStatus.value = "approved";
+  submissionReviewCollect.value = true;
+  submissionReviewNote.value = "";
+}
+
+async function submitAlgorithmSubmissionReview() {
+  const row = activeSubmission.value;
+  if (!row?.id) return;
+  try {
+    submissionReviewSubmitting.value = true;
+    setLoading(reviewingSubmissionIds, row.id, true);
+    const out = await adminApi.reviewAlgorithmSubmission(row.id, {
+      status: submissionReviewStatus.value,
+      review_note: submissionReviewNote.value,
+      collect_to_platform: submissionReviewStatus.value === "approved" ? submissionReviewCollect.value : false,
+    });
+    algorithmSubmissions.value = (algorithmSubmissions.value || []).map((item) =>
+      item.id === row.id ? mapAlgorithmSubmission(out) : item
+    );
+    if (submissionReviewStatus.value === "approved" && submissionReviewCollect.value) {
+      await store.fetchAlgorithms();
+    }
+    ElMessage.success("算法接入审核结果已保存");
+    closeAlgorithmSubmissionReview();
+  } catch (e) {
+    ElMessage.error(e?.message || "算法接入审核失败");
+  } finally {
+    submissionReviewSubmitting.value = false;
+    setLoading(reviewingSubmissionIds, row.id, false);
+  }
+}
+
+function openMetricReview(row) {
+  activeMetric.value = row;
+  metricReviewStatus.value = row.status === "rejected" ? "rejected" : "approved";
+  metricReviewRuntimeReady.value = Boolean(row.runtimeReady);
+  metricReviewNote.value = String(row.reviewNote || "");
+  metricReviewVisible.value = true;
+}
+
+function closeMetricReview() {
+  metricReviewVisible.value = false;
+  activeMetric.value = null;
+  metricReviewStatus.value = "approved";
+  metricReviewRuntimeReady.value = false;
+  metricReviewNote.value = "";
+}
+
+async function submitMetricReview() {
+  const row = activeMetric.value;
+  if (!row?.id) return;
+  try {
+    metricReviewSubmitting.value = true;
+    setLoading(reviewingMetricIds, row.id, true);
+    const out = await adminApi.reviewMetric(row.id, {
+      status: metricReviewStatus.value,
+      review_note: metricReviewNote.value,
+      runtime_ready: metricReviewRuntimeReady.value,
+    });
+    metrics.value = (metrics.value || []).map((item) =>
+      item.id === row.id ? mapMetric(out) : item
+    );
+    await store.fetchMetrics();
+    ElMessage.success("指标审核结果已保存");
+    closeMetricReview();
+  } catch (e) {
+    ElMessage.error(e?.message || "指标审核失败");
+  } finally {
+    metricReviewSubmitting.value = false;
+    setLoading(reviewingMetricIds, row.id, false);
+  }
+}
+
+function downloadMetricCode(row) {
+  const codeText = String(row?.codeText || "");
+  const fileName = String(row?.codeFilename || row?.metricKey || "metric_code.py").trim() || "metric_code.py";
+  if (!codeText) {
+    ElMessage.warning("当前没有可下载的代码内容");
+    return;
+  }
+  const blob = new Blob([codeText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 async function takedownDataset(row) {
@@ -963,6 +1451,16 @@ onMounted(loadAll);
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px 16px;
   color: #334466;
+}
+
+.code-box {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.full-width {
+  width: 100%;
 }
 
 .screening-rank-cell {

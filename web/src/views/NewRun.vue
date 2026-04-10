@@ -102,9 +102,12 @@
           <el-form :model="form" label-position="top" class="modern-form">
             <el-form-item label="选择评测算法">
               <el-select 
-                v-model="form.algorithmId" 
+                v-model="form.algorithmIds" 
                 :disabled="!!form.presetId" 
                 filterable 
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
                 placeholder="请选择内置评测算法" 
                 class="full-width-select"
               >
@@ -115,37 +118,55 @@
                   :value="a.id"
                 />
               </el-select>
+              <div class="algorithm-selection-note">
+                <span v-if="form.algorithmIds.length <= 1">单选时可继续配置参数方案；多选时会按各算法默认参数批量创建任务。</span>
+                <span v-else>当前已选择 {{ form.algorithmIds.length }} 个算法，将针对同一任务和数据集一次性创建 {{ form.algorithmIds.length }} 条运行任务。</span>
+              </div>
+              <div v-if="form.algorithmIds.length > 1" class="algorithm-batch-panel">
+                <div class="algorithm-batch-head">
+                  <div class="algorithm-batch-title">批量对比模式</div>
+                  <div class="algorithm-batch-count">已选 {{ form.algorithmIds.length }} 个算法</div>
+                </div>
+                <div class="algorithm-batch-list">
+                  <div v-for="alg in selectedAlgorithms" :key="alg.id" class="algorithm-batch-chip">
+                    <span class="algorithm-batch-name">{{ alg.name }}</span>
+                    <span class="algorithm-batch-meta">{{ alg.impl }} / {{ alg.version }}</span>
+                  </div>
+                </div>
+                <div class="algorithm-batch-tip">提交后会针对当前任务和当前数据集，分别创建这些算法的运行任务，适合直接做横向对比。</div>
+              </div>
             </el-form-item>
 
             <el-form-item label="评测指标">
-              <div class="metrics-group">
-                <button
-                  type="button"
-                  class="metric-chip"
-                  :class="{ active: isMetricSelected('PSNR'), locked: !!form.presetId }"
-                  :disabled="!!form.presetId"
-                  @click="toggleMetric('PSNR')"
-                >
-                  PSNR
-                </button>
-                <button
-                  type="button"
-                  class="metric-chip"
-                  :class="{ active: isMetricSelected('SSIM'), locked: !!form.presetId }"
-                  :disabled="!!form.presetId"
-                  @click="toggleMetric('SSIM')"
-                >
-                  SSIM
-                </button>
-                <button
-                  type="button"
-                  class="metric-chip metric-chip-wide"
-                  :class="{ active: isMetricSelected('NIQE'), locked: !!form.presetId }"
-                  :disabled="!!form.presetId"
-                  @click="toggleMetric('NIQE')"
-                >
-                  NIQE (无参考)
-                </button>
+              <div class="metrics-panel">
+                <div class="metrics-subtitle">平台内置指标（必选，参与默认综合排名）</div>
+                <div class="metrics-group">
+                  <button
+                    v-for="metric in builtinReadyMetrics"
+                    :key="metric.id"
+                    type="button"
+                    class="metric-chip locked active"
+                    disabled
+                  >
+                    {{ metric.displayName }}<span v-if="!metric.requiresReference"> (无参考)</span>
+                  </button>
+                </div>
+
+                <div class="metrics-subtitle metrics-subtitle-spaced">自定义指标（可选，支持补充分析与单指标排序）</div>
+                <div class="metrics-group">
+                  <button
+                    v-for="metric in customReadyMetrics"
+                    :key="metric.id"
+                    type="button"
+                    class="metric-chip"
+                    :class="{ active: isMetricSelected(metric.metricKey), locked: !!form.presetId }"
+                    :disabled="!!form.presetId"
+                    @click="toggleMetric(metric.metricKey)"
+                  >
+                    {{ metric.displayName }}<span v-if="!metric.requiresReference"> (无参考)</span>
+                  </button>
+                </div>
+                <div v-if="customReadyMetrics.length === 0" class="metrics-empty-tip">当前任务下暂无可附加的自定义指标。</div>
               </div>
             </el-form-item>
           </el-form>
@@ -160,15 +181,17 @@
 
           <el-form :model="form" label-position="top" class="modern-form">
             <el-form-item label="参数方案">
-              <el-select v-model="form.paramSchemeKey" :disabled="!!form.presetId || !form.algorithmId" class="full-width-select">
+              <el-select v-model="form.paramSchemeKey" :disabled="!!form.presetId || !isSingleAlgorithmMode" class="full-width-select">
                 <el-option label="系统内置默认参数" value="__default__" />
                 <el-option v-for="entry in userSchemeEntries" :key="entry.id" :label="`用户自定义：${entry.name}`" :value="`__user__${entry.id}`" />
               </el-select>
+              <div v-if="!isSingleAlgorithmMode" class="algorithm-selection-note">批量模式下不单独编辑参数方案，创建时会自动使用每个算法自己的默认参数。</div>
             </el-form-item>
 
             <el-form-item label="运行参数预览">
               <div class="readonly-param-container">
-                <div v-if="paramDisplayRows.length === 0" class="readonly-empty">当前算法无需配置参数</div>
+                <div v-if="!isSingleAlgorithmMode" class="readonly-empty">当前为批量模式：会对所选算法分别使用默认参数创建运行任务。</div>
+                <div v-else-if="paramDisplayRows.length === 0" class="readonly-empty">当前算法无需配置参数</div>
                 <div class="param-cards-grid">
                   <div v-for="row in paramDisplayRows" :key="row.key" class="param-info-card">
                     <div class="param-info-head">
@@ -187,13 +210,14 @@
                 <el-button 
                   type="success" 
                   plain 
-                  :disabled="!!form.presetId || !form.presetName.trim()" 
+                  :disabled="!!form.presetId || !form.presetName.trim() || !isSingleAlgorithmMode" 
                   class="centered-btn"
                   @click="savePreset"
                 >
                   保存预设
                 </el-button>
               </div>
+              <div v-if="!isSingleAlgorithmMode" class="algorithm-selection-note">预设当前仍按单算法配置保存；如需保存预设，请先只选择一个算法。</div>
             </el-form-item>
           </el-form>
         </div>
@@ -279,13 +303,31 @@ const store = useAppStore();
 const applyingPreset = ref(false);
 const activeStep = ref(0);
 
-// 使用ref创建响应式的metrics变量
-const metrics = ref(["PSNR", "SSIM"]);
-const ALLOWED_METRICS = ["PSNR", "SSIM", "NIQE"];
+const BUILTIN_METRIC_KEYS = ["PSNR", "SSIM", "NIQE"];
+const metrics = ref([...BUILTIN_METRIC_KEYS]);
+const readyMetrics = computed(() =>
+  (store.metricsCatalog || [])
+    .filter((item) => item.status === "approved" && item.runtimeReady)
+    .filter((item) => !item.taskTypes?.length || item.taskTypes.includes(form.taskType))
+    .sort((a, b) => {
+      const order = ["PSNR", "SSIM", "NIQE"];
+      const ia = order.indexOf(a.metricKey);
+      const ib = order.indexOf(b.metricKey);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      return String(a.displayName || a.metricKey).localeCompare(String(b.displayName || b.metricKey), "zh-Hans-CN-u-co-pinyin");
+    })
+);
+const builtinReadyMetrics = computed(() =>
+  readyMetrics.value.filter((item) => BUILTIN_METRIC_KEYS.includes(String(item.metricKey || "").toUpperCase()))
+);
+const customReadyMetrics = computed(() =>
+  readyMetrics.value.filter((item) => !BUILTIN_METRIC_KEYS.includes(String(item.metricKey || "").toUpperCase()))
+);
+const allowedMetricKeys = computed(() => readyMetrics.value.map((item) => item.metricKey));
 
 const isNextEnabled = computed(() => {
   if (activeStep.value === 0) return !!form.taskType && !!form.datasetId;
-  if (activeStep.value === 1) return !!form.algorithmId && metrics.value.length > 0;
+  if (activeStep.value === 1) return form.algorithmIds.length > 0 && metrics.value.length > 0;
   return true;
 });
 
@@ -314,6 +356,7 @@ const form = reactive({
   presetName: "",
   taskType: "denoise",
   datasetId: "",
+  algorithmIds: [],
   algorithmId: "",
   metrics: [], // 不再使用，改用metrics.value
   paramSchemeKey: "__default__",
@@ -329,7 +372,9 @@ try {
     if (typeof cached.taskType === "string") form.taskType = cached.taskType;
     else if (typeof cached.task === "string") form.taskType = toTaskType(cached.task);
     if (cached.datasetId) form.datasetId = cached.datasetId;
+    if (Array.isArray(cached.algorithmIds)) form.algorithmIds = cached.algorithmIds.filter(Boolean);
     if (cached.algorithmId) form.algorithmId = cached.algorithmId;
+    if (!form.algorithmIds.length && form.algorithmId) form.algorithmIds = [form.algorithmId];
     if (Array.isArray(cached.metrics)) metrics.value = cached.metrics;
     if (typeof cached.paramsText === "string") form.paramsText = cached.paramsText;
     if (typeof cached.presetId === "string") form.presetId = cached.presetId;
@@ -355,6 +400,10 @@ const taskTypeOptions = computed(() =>
 
 const filteredAlgorithms = computed(() =>
   store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && isVisiblePlatformAlgorithm(a))
+);
+const isSingleAlgorithmMode = computed(() => form.algorithmIds.length === 1);
+const selectedAlgorithms = computed(() =>
+  filteredAlgorithms.value.filter((a) => form.algorithmIds.includes(a.id))
 );
 
 const presetsAll = computed(() => {
@@ -436,9 +485,31 @@ const userSchemeEntries = computed(() => {
 });
 
 watch(
+  () => form.algorithmIds.join("|"),
+  () => {
+    if (applyingPreset.value) return;
+    const validIds = filteredAlgorithms.value.map((a) => a.id);
+    form.algorithmIds = form.algorithmIds.filter((id) => validIds.includes(id));
+    form.algorithmId = form.algorithmIds[0] || "";
+    if (!isSingleAlgorithmMode.value) {
+      form.paramSchemeKey = "__default__";
+      form.paramsText = "{}";
+      return;
+    }
+    const alg = selectedAlgorithm.value;
+    const obj =
+      alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams)
+        ? alg.defaultParams
+        : {};
+    form.paramSchemeKey = "__default__";
+    form.paramsText = JSON.stringify(obj, null, 2);
+  }
+);
+
+watch(
   () => form.paramSchemeKey,
   () => {
-    if (!form.algorithmId) return;
+    if (!form.algorithmId || !isSingleAlgorithmMode.value) return;
     if (applyingPreset.value) return;
     if (form.paramSchemeKey !== "__default__" && !String(form.paramSchemeKey).startsWith("__user__")) {
       form.paramSchemeKey = "__default__";
@@ -452,9 +523,9 @@ watch(
   () => form.taskType,
   () => {
     if (applyingPreset.value) return;
-    if (!filteredAlgorithms.value.some((a) => a.id === form.algorithmId)) {
-      form.algorithmId = "";
-    }
+    const validIds = filteredAlgorithms.value.map((a) => a.id);
+    form.algorithmIds = form.algorithmIds.filter((id) => validIds.includes(id));
+    form.algorithmId = form.algorithmIds[0] || "";
   }
 );
 
@@ -462,15 +533,20 @@ watch(
   () => filteredAlgorithms.value.map((a) => a.id).join("|"),
   () => {
     if (applyingPreset.value) return;
-    if (form.algorithmId && filteredAlgorithms.value.some((a) => a.id === form.algorithmId)) return;
-    form.algorithmId = filteredAlgorithms.value[0]?.id || "";
+    const validIds = filteredAlgorithms.value.map((a) => a.id);
+    form.algorithmIds = form.algorithmIds.filter((id) => validIds.includes(id));
+    if (form.algorithmIds.length) {
+      form.algorithmId = form.algorithmIds[0];
+      return;
+    }
+    form.algorithmId = "";
   }
 );
 
 watch(
   () => form.algorithmId,
   () => {
-    if (applyingPreset.value) return;
+    if (applyingPreset.value || !isSingleAlgorithmMode.value) return;
     const alg = selectedAlgorithm.value;
     const obj =
       alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams)
@@ -484,7 +560,7 @@ watch(
 watch(
   () => selectedAlgorithm.value?.id,
   () => {
-    if (applyingPreset.value) return;
+    if (applyingPreset.value || !isSingleAlgorithmMode.value) return;
     if (!form.algorithmId) return;
     const alg = selectedAlgorithm.value;
     const obj =
@@ -512,6 +588,7 @@ function applyPreset() {
   form.taskType = p.taskType;
   form.datasetId = p.datasetId || "";
   form.algorithmId = p.algorithmId || "";
+  form.algorithmIds = form.algorithmId ? [form.algorithmId] : [];
   metrics.value = normalizeMetrics(p.metrics);
   const params = p.params && typeof p.params === "object" && !Array.isArray(p.params) ? p.params : {};
   form.paramSchemeKey = resolveSchemeKeyByParams(params);
@@ -519,11 +596,15 @@ function applyPreset() {
 }
 
 function normalizeMetrics(list) {
-  if (!Array.isArray(list)) return ["PSNR", "SSIM"];
+  const allowed = allowedMetricKeys.value;
+  const builtinDefaults = BUILTIN_METRIC_KEYS.filter((item) => allowed.includes(item));
+  if (!Array.isArray(list)) return builtinDefaults.length ? builtinDefaults : [...allowed];
   const normalized = list
     .map((item) => String(item || "").trim().toUpperCase())
-    .filter((item) => ALLOWED_METRICS.includes(item));
-  return normalized.length ? [...new Set(normalized)] : ["PSNR", "SSIM"];
+    .filter((item) => allowed.includes(item));
+  const merged = [...builtinDefaults, ...normalized];
+  const deduped = [...new Set(merged)];
+  return deduped.length ? deduped : (builtinDefaults.length ? builtinDefaults : [...allowed]);
 }
 
 watch(
@@ -553,6 +634,14 @@ function applyParamScheme() {
     if (!found) return;
     form.paramsText = JSON.stringify(found.params, null, 2);
   }
+}
+
+function getDefaultParamsForAlgorithm(alg) {
+  const obj =
+    alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams)
+      ? alg.defaultParams
+      : {};
+  return JSON.parse(JSON.stringify(obj));
 }
 
 function _normalizeParamObj(x) {
@@ -631,6 +720,7 @@ async function savePreset() {
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
   if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
   if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
+  if (!isSingleAlgorithmMode.value) return ElMessage({ type: "warning", message: "多选算法模式下暂不支持保存预设，请先只选择一个算法" });
   {
     const wanted = normalizePresetName(form.presetName);
     const dup = (store.presets || []).find(
@@ -703,10 +793,14 @@ function clearPreset() {
 }
 
 async function create() {
+  if (!form.algorithmIds.length) return ElMessage({ type: "warning", message: "请至少选择一个算法" });
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
   if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
   if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
 
+  const targetAlgorithmIds = form.algorithmIds.length
+    ? [...form.algorithmIds]
+    : (form.algorithmId ? [form.algorithmId] : []);
   const tt = form.taskType;
   const d = selectedDataset.value;
   const pairs =
@@ -740,14 +834,22 @@ async function create() {
   }
 
   try {
-    await store.createRun({
-      task: toTaskLabel(form.taskType),
-      datasetId: form.datasetId,
-      algorithmId: form.algorithmId,
-      metrics: [...metrics.value],
-      params,
-      strictValidate: true,
-    });
+    const creationResults = [];
+    for (const algorithmId of targetAlgorithmIds) {
+      const currentAlgorithm = store.algorithms.find((item) => item.id === algorithmId);
+      const runParams = isSingleAlgorithmMode.value
+        ? JSON.parse(JSON.stringify(params))
+        : { ...getDefaultParamsForAlgorithm(currentAlgorithm), param_scheme: "default" };
+      await store.createRun({
+        task: toTaskLabel(form.taskType),
+        datasetId: form.datasetId,
+        algorithmId,
+        metrics: [...metrics.value],
+        params: runParams,
+        strictValidate: true,
+      });
+      creationResults.push(algorithmId);
+    }
     // 让用户选择是否留在当前页面或转到任务中心
     try {
       await ElMessageBox.confirm(
@@ -813,6 +915,7 @@ function isMetricSelected(metric) {
 
 function toggleMetric(metric) {
   if (form.presetId) return;
+  if (BUILTIN_METRIC_KEYS.includes(String(metric || "").toUpperCase())) return;
   const next = normalizeMetrics(metrics.value);
   if (next.includes(metric)) {
     metrics.value = next.filter((item) => item !== metric);
@@ -820,6 +923,14 @@ function toggleMetric(metric) {
   }
   metrics.value = [...next, metric];
 }
+
+watch(
+  readyMetrics,
+  () => {
+    metrics.value = normalizeMetrics(metrics.value);
+  },
+  { deep: true }
+);
 
 function goRuns() {
   router.push("/runs");
@@ -997,6 +1108,80 @@ function goRuns() {
   width: 100%;
 }
 
+.algorithm-selection-note {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.algorithm-batch-panel {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid #cfe0ff;
+  background: linear-gradient(180deg, #f7faff 0%, #eef5ff 100%);
+}
+
+.algorithm-batch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.algorithm-batch-title {
+  color: #1d4ed8;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.algorithm-batch-count {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.algorithm-batch-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.algorithm-batch-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #d7e5fb;
+}
+
+.algorithm-batch-name {
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.algorithm-batch-meta {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.algorithm-batch-tip {
+  margin-top: 12px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .dataset-alert {
   margin-top: 12px;
 }
@@ -1024,6 +1209,27 @@ function goRuns() {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metrics-subtitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.metrics-subtitle-spaced {
+  margin-top: 6px;
+}
+
+.metrics-empty-tip {
+  font-size: 13px;
+  color: #94a3b8;
 }
 
 .metric-chip {

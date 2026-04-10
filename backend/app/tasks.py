@@ -7,15 +7,17 @@ import os
 import socket
 import platform
 import tracemalloc
+import math
 from typing import Any, Dict
 
 import numpy as np
 import hashlib
 
 from .celery_app import celery_app
-from .store import make_redis, load_run, save_run, load_dataset, load_algorithm
+from .store import make_redis, load_run, save_run, load_dataset, load_algorithm, list_metrics
 from . import errors as err
 from .selector import online_update_model_with_run
+from .metric_runtime import execute_python_metric
 
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
@@ -50,30 +52,122 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
     return {"PSNR": psnr, "SSIM": ssim, "NIQE": niqe}
 
 
-ALLOWED_METRICS = ("PSNR", "SSIM", "NIQE")
+BUILTIN_METRICS = ("PSNR", "SSIM", "NIQE")
 
 
 def _normalize_selected_metrics(params: dict[str, Any] | None) -> list[str]:
     src = params if isinstance(params, dict) else {}
     raw = src.get("metrics")
     if not isinstance(raw, list):
-        return list(ALLOWED_METRICS)
+        return list(BUILTIN_METRICS)
     out: list[str] = []
     for item in raw:
         name = str(item or "").strip().upper()
-        if name in ALLOWED_METRICS and name not in out:
+        if name and name not in out:
             out.append(name)
-    return out or list(ALLOWED_METRICS)
+    return out or list(BUILTIN_METRICS)
 
 
 def _filter_metrics(metrics: dict[str, float], selected_metrics: list[str]) -> dict[str, float]:
-    wanted = set(selected_metrics or ALLOWED_METRICS)
+    wanted = set(selected_metrics or BUILTIN_METRICS)
     return {k: v for k, v in metrics.items() if k in wanted}
 
 
 def _filter_sample_metrics(sample: dict[str, Any], selected_metrics: list[str]) -> dict[str, Any]:
-    wanted = set(selected_metrics or ALLOWED_METRICS)
+    wanted = set(selected_metrics or BUILTIN_METRICS)
     return {k: v for k, v in sample.items() if k == "name" or k in wanted}
+
+
+def _load_runnable_metric_defs(r, task_type: str, selected_metrics: list[str]) -> dict[str, dict[str, Any]]:
+    wanted = {str(item or "").strip().upper() for item in (selected_metrics or []) if str(item or "").strip()}
+    out: dict[str, dict[str, Any]] = {}
+    for item in list_metrics(r, limit=5000) or []:
+        metric_key = str(item.get("metric_key") or "").strip().upper()
+        if not metric_key or metric_key not in wanted:
+            continue
+        if str(item.get("status") or "").strip().lower() != "approved":
+            continue
+        if not bool(item.get("runtime_ready")):
+            continue
+        implementation_type = str(item.get("implementation_type") or "").strip().lower()
+        if implementation_type not in {"builtin", "python"}:
+            continue
+        task_types = [str(x or "").strip().lower() for x in (item.get("task_types") or []) if str(x or "").strip()]
+        if task_type and task_types and task_type not in task_types:
+            continue
+        out[metric_key] = item
+    return out
+
+
+def _round_metric_value(metric_key: str, value: float) -> float:
+    key = str(metric_key or "").upper()
+    if key == "PSNR":
+        return round(float(value), 3)
+    if key == "SSIM":
+        return round(float(value), 4)
+    if key == "NIQE":
+        return round(float(value), 3)
+    return round(float(value), 6)
+
+
+def _compute_metric_sample(
+    gt_u8: np.ndarray,
+    pred_u8: np.ndarray,
+    selected_metrics: list[str],
+    metric_defs: dict[str, dict[str, Any]],
+    task_type: str,
+    sample_name: str,
+) -> tuple[dict[str, Any], dict[str, float], dict[str, float]]:
+    sample: dict[str, Any] = {"name": sample_name}
+    timings = {
+        "metric_elapsed": 0.0,
+        "builtin_elapsed": 0.0,
+        "niqe_elapsed": 0.0,
+        "custom_elapsed": 0.0,
+    }
+    custom_values: dict[str, float] = {}
+    need_psnr_ssim = "PSNR" in selected_metrics or "SSIM" in selected_metrics
+    need_niqe = "NIQE" in selected_metrics
+
+    m0 = time.time()
+    if need_psnr_ssim:
+        t_builtin = time.time()
+        psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
+        timings["builtin_elapsed"] += time.time() - t_builtin
+        if "PSNR" in selected_metrics:
+            sample["PSNR"] = _round_metric_value("PSNR", psnr)
+        if "SSIM" in selected_metrics:
+            sample["SSIM"] = _round_metric_value("SSIM", ssim)
+
+    if need_niqe:
+        t_niqe = time.time()
+        niqe = float(niqe_score(pred_u8))
+        timings["niqe_elapsed"] += time.time() - t_niqe
+        sample["NIQE"] = _round_metric_value("NIQE", niqe)
+
+    for metric_key in selected_metrics:
+        if metric_key in BUILTIN_METRICS:
+            continue
+        metric_def = metric_defs.get(metric_key)
+        if not metric_def:
+            continue
+        if str(metric_def.get("implementation_type") or "").lower() != "python":
+            continue
+        t_custom = time.time()
+        value = execute_python_metric(
+            code_text=metric_def.get("code_text") or "",
+            gt_bgr_u8=gt_u8,
+            pred_bgr_u8=pred_u8,
+            sample_name=sample_name,
+            task_type=task_type,
+        )
+        timings["custom_elapsed"] += time.time() - t_custom
+        rounded = _round_metric_value(metric_key, value)
+        sample[metric_key] = rounded
+        custom_values[metric_key] = rounded
+
+    timings["metric_elapsed"] = time.time() - m0
+    return sample, custom_values, timings
 
 
 
@@ -253,21 +347,22 @@ def _compute_run_for_task_from_pairs(
     check_cancel,
     strict_validate: bool,
     selected_metrics: list[str],
+    metric_defs: dict[str, dict[str, Any]],
+    task_type: str,
 ) -> tuple[dict[str, float], dict[str, Any], list[dict[str, Any]]]:
     psnr_list: list[float] = []
     ssim_list: list[float] = []
     niqe_list: list[float] = []
+    custom_metric_values: dict[str, list[float]] = {}
     algo_elapsed_list: list[float] = []
     metric_elapsed_list: list[float] = []
     metric_psnr_ssim_elapsed_list: list[float] = []
     metric_niqe_elapsed_list: list[float] = []
+    metric_custom_elapsed_list: list[float] = []
     samples: list[dict[str, Any]] = []
     read_ok = 0
     read_fail = 0
     processed_count = 0
-    need_psnr_ssim = "PSNR" in selected_metrics or "SSIM" in selected_metrics
-    need_niqe = "NIQE" in selected_metrics
-
     for pair in pairs:
         check_cancel()
         inp_u8 = cv2.imread(str(pair.input_path), cv2.IMREAD_COLOR)
@@ -283,24 +378,27 @@ def _compute_run_for_task_from_pairs(
         processed_count += 1
 
         gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
-        m0 = time.time()
-        sample = {"name": getattr(pair, "name", None) or ""}
-        if need_psnr_ssim:
-            psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-            metric_psnr_ssim_elapsed_list.append(time.time() - m0)
-            psnr_list.append(psnr)
-            ssim_list.append(ssim)
-            sample["PSNR"] = round(float(psnr), 3)
-            sample["SSIM"] = round(float(ssim), 4)
-
-        if need_niqe:
-            m1 = time.time()
-            niqe = float(niqe_score(pred_u8))
-            metric_niqe_elapsed_list.append(time.time() - m1)
-            niqe_list.append(float(niqe))
-            sample["NIQE"] = round(float(niqe), 3)
-
-        metric_elapsed_list.append(time.time() - m0)
+        sample_name = getattr(pair, "name", None) or ""
+        sample, custom_values, timings = _compute_metric_sample(
+            gt_u8=gt_u8,
+            pred_u8=pred_u8,
+            selected_metrics=selected_metrics,
+            metric_defs=metric_defs,
+            task_type=task_type,
+            sample_name=sample_name,
+        )
+        if "PSNR" in sample:
+            psnr_list.append(float(sample["PSNR"]))
+        if "SSIM" in sample:
+            ssim_list.append(float(sample["SSIM"]))
+        if "NIQE" in sample:
+            niqe_list.append(float(sample["NIQE"]))
+        for metric_key, value in custom_values.items():
+            custom_metric_values.setdefault(metric_key, []).append(float(value))
+        metric_elapsed_list.append(float(timings["metric_elapsed"]))
+        metric_psnr_ssim_elapsed_list.append(float(timings["builtin_elapsed"]))
+        metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
+        metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
         samples.append(_filter_sample_metrics(sample, selected_metrics))
 
     if processed_count <= 0:
@@ -313,8 +411,29 @@ def _compute_run_for_task_from_pairs(
         remain = min_demo_seconds - (time.time() - demo_start)
         if remain > 0:
             time.sleep(remain)
-        metrics = _filter_metrics(_simulate_metrics(seed), selected_metrics)
-        params = {"data_mode": "dataset_read_failed_or_empty"}
+        gt_u8, pred_u8 = _make_synthetic_pair_for_task(task_type=task_type, seed=seed)
+        sample, custom_values, timings = _compute_metric_sample(
+            gt_u8=gt_u8,
+            pred_u8=pred_u8,
+            selected_metrics=selected_metrics,
+            metric_defs=metric_defs,
+            task_type=task_type,
+            sample_name="synthetic_fallback",
+        )
+        metrics = {k: v for k, v in sample.items() if k != "name"}
+        for metric_key, value in custom_values.items():
+            metrics[metric_key] = value
+        params = {
+            "data_mode": "dataset_read_failed_or_empty",
+            "metric_elapsed_mean": round(float(timings["metric_elapsed"]), 6),
+            "metric_elapsed_sum": round(float(timings["metric_elapsed"]), 6),
+            "metric_psnr_ssim_elapsed_mean": round(float(timings["builtin_elapsed"]), 6),
+            "metric_psnr_ssim_elapsed_sum": round(float(timings["builtin_elapsed"]), 6),
+            "metric_niqe_elapsed_mean": round(float(timings["niqe_elapsed"]), 6),
+            "metric_niqe_elapsed_sum": round(float(timings["niqe_elapsed"]), 6),
+            "metric_custom_elapsed_mean": round(float(timings["custom_elapsed"]), 6),
+            "metric_custom_elapsed_sum": round(float(timings["custom_elapsed"]), 6),
+        }
         return metrics, params, samples
 
     algo_elapsed_mean = float(np.mean(algo_elapsed_list)) if algo_elapsed_list else 0.0
@@ -325,6 +444,8 @@ def _compute_run_for_task_from_pairs(
     metric_psnr_ssim_elapsed_sum = float(np.sum(metric_psnr_ssim_elapsed_list)) if metric_psnr_ssim_elapsed_list else 0.0
     metric_niqe_elapsed_mean = float(np.mean(metric_niqe_elapsed_list)) if metric_niqe_elapsed_list else 0.0
     metric_niqe_elapsed_sum = float(np.sum(metric_niqe_elapsed_list)) if metric_niqe_elapsed_list else 0.0
+    metric_custom_elapsed_mean = float(np.mean(metric_custom_elapsed_list)) if metric_custom_elapsed_list else 0.0
+    metric_custom_elapsed_sum = float(np.sum(metric_custom_elapsed_list)) if metric_custom_elapsed_list else 0.0
 
     remain = min_demo_seconds - (time.time() - demo_start)
     if remain > 0:
@@ -337,6 +458,9 @@ def _compute_run_for_task_from_pairs(
         metrics["SSIM"] = round(float(np.mean(ssim_list)), 4)
     if niqe_list:
         metrics["NIQE"] = round(float(np.mean(niqe_list)), 3)
+    for metric_key, values in custom_metric_values.items():
+        if values and metric_key in selected_metrics:
+            metrics[metric_key] = _round_metric_value(metric_key, float(np.mean(values)))
     params = {
         "data_mode": "real_dataset",
         "data_used": processed_count,
@@ -348,6 +472,8 @@ def _compute_run_for_task_from_pairs(
         "metric_psnr_ssim_elapsed_sum": round(float(metric_psnr_ssim_elapsed_sum), 6),
         "metric_niqe_elapsed_mean": round(float(metric_niqe_elapsed_mean), 6),
         "metric_niqe_elapsed_sum": round(float(metric_niqe_elapsed_sum), 6),
+        "metric_custom_elapsed_mean": round(float(metric_custom_elapsed_mean), 6),
+        "metric_custom_elapsed_sum": round(float(metric_custom_elapsed_sum), 6),
         "read_ok": read_ok,
         "read_fail": read_fail,
     }
@@ -495,6 +621,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             algorithm_id = (algorithm_id or "").lower()
             algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
             selected_metrics = _normalize_selected_metrics(algo_params)
+            metric_defs = _load_runnable_metric_defs(r, task_type, selected_metrics)
             data_root = Path(__file__).resolve().parents[1] / "data"  # backend/app/.. -> backend/data
 
             min_demo_seconds = 1.6
@@ -707,6 +834,11 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     psnr_list: list[float] = []
                     ssim_list: list[float] = []
                     niqe_list: list[float] = []
+                    custom_metric_values: dict[str, list[float]] = {}
+                    metric_elapsed_list: list[float] = []
+                    metric_psnr_ssim_elapsed_list: list[float] = []
+                    metric_niqe_elapsed_list: list[float] = []
+                    metric_custom_elapsed_list: list[float] = []
                     samples: list[dict[str, Any]] = []
                     read_ok = 0
                     read_fail = 0
@@ -720,17 +852,27 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         read_ok += 1
                         pred_u8 = compute_pred(inp_u8, gt_u8, pair)
                         gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
-                        sample = {"name": getattr(pair, "name", None) or ""}
-                        if "PSNR" in selected_metrics or "SSIM" in selected_metrics:
-                            psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-                            psnr_list.append(float(psnr))
-                            ssim_list.append(float(ssim))
-                            sample["PSNR"] = round(float(psnr), 3)
-                            sample["SSIM"] = round(float(ssim), 4)
-                        if "NIQE" in selected_metrics:
-                            niqe = float(niqe_score(pred_u8))
-                            niqe_list.append(float(niqe))
-                            sample["NIQE"] = round(float(niqe), 3)
+                        sample_name = getattr(pair, "name", None) or ""
+                        sample, custom_values, timings = _compute_metric_sample(
+                            gt_u8=gt_u8,
+                            pred_u8=pred_u8,
+                            selected_metrics=selected_metrics,
+                            metric_defs=metric_defs,
+                            task_type=task_type,
+                            sample_name=sample_name,
+                        )
+                        if "PSNR" in sample:
+                            psnr_list.append(float(sample["PSNR"]))
+                        if "SSIM" in sample:
+                            ssim_list.append(float(sample["SSIM"]))
+                        if "NIQE" in sample:
+                            niqe_list.append(float(sample["NIQE"]))
+                        for metric_key, value in custom_values.items():
+                            custom_metric_values.setdefault(metric_key, []).append(float(value))
+                        metric_elapsed_list.append(float(timings["metric_elapsed"]))
+                        metric_psnr_ssim_elapsed_list.append(float(timings["builtin_elapsed"]))
+                        metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
+                        metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
                         samples.append(_filter_sample_metrics(sample, selected_metrics))
                     if read_ok <= 0:
                         if strict_validate:
@@ -745,7 +887,23 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                             metrics["SSIM"] = round(float(np.mean(ssim_list)), 4)
                         if niqe_list:
                             metrics["NIQE"] = round(float(np.mean(niqe_list)), 3)
-                        params_patch = {"data_mode": "real_dataset", "data_used": read_ok, "read_ok": read_ok, "read_fail": read_fail}
+                        for metric_key, values in custom_metric_values.items():
+                            if values and metric_key in selected_metrics:
+                                metrics[metric_key] = _round_metric_value(metric_key, float(np.mean(values)))
+                        params_patch = {
+                            "data_mode": "real_dataset",
+                            "data_used": read_ok,
+                            "read_ok": read_ok,
+                            "read_fail": read_fail,
+                            "metric_elapsed_mean": round(float(np.mean(metric_elapsed_list)) if metric_elapsed_list else 0.0, 6),
+                            "metric_elapsed_sum": round(float(np.sum(metric_elapsed_list)) if metric_elapsed_list else 0.0, 6),
+                            "metric_psnr_ssim_elapsed_mean": round(float(np.mean(metric_psnr_ssim_elapsed_list)) if metric_psnr_ssim_elapsed_list else 0.0, 6),
+                            "metric_psnr_ssim_elapsed_sum": round(float(np.sum(metric_psnr_ssim_elapsed_list)) if metric_psnr_ssim_elapsed_list else 0.0, 6),
+                            "metric_niqe_elapsed_mean": round(float(np.mean(metric_niqe_elapsed_list)) if metric_niqe_elapsed_list else 0.0, 6),
+                            "metric_niqe_elapsed_sum": round(float(np.sum(metric_niqe_elapsed_list)) if metric_niqe_elapsed_list else 0.0, 6),
+                            "metric_custom_elapsed_mean": round(float(np.mean(metric_custom_elapsed_list)) if metric_custom_elapsed_list else 0.0, 6),
+                            "metric_custom_elapsed_sum": round(float(np.sum(metric_custom_elapsed_list)) if metric_custom_elapsed_list else 0.0, 6),
+                        }
                 else:
                     metrics, params_patch, samples = _compute_run_for_task_from_pairs(
                         pairs=pairs,
@@ -756,6 +914,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         check_cancel=check_cancel,
                         strict_validate=strict_validate,
                         selected_metrics=selected_metrics,
+                        metric_defs=metric_defs,
+                        task_type=task_type,
                     )
                 finished = time.time()
                 run["status"] = "done"
@@ -811,24 +971,21 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             m0 = time.time()
             metrics = {}
             sample = {"name": "synthetic"}
-            m_psnr_ssim = 0.0
-            m_niqe = 0.0
-            if "PSNR" in selected_metrics or "SSIM" in selected_metrics:
-                psnr, ssim = _compute_psnr_ssim(gt_u8, pred_u8)
-                m_psnr_ssim = time.time() - m0
-                if "PSNR" in selected_metrics:
-                    metrics["PSNR"] = round(float(psnr), 3)
-                if "SSIM" in selected_metrics:
-                    metrics["SSIM"] = round(float(ssim), 4)
-                sample["PSNR"] = round(float(psnr), 3)
-                sample["SSIM"] = round(float(ssim), 4)
-            if "NIQE" in selected_metrics:
-                m1 = time.time()
-                niqe = float(niqe_score(pred_u8))
-                m_niqe = time.time() - m1
-                metrics["NIQE"] = round(float(niqe), 3)
-                sample["NIQE"] = round(float(niqe), 3)
-            metric_elapsed = time.time() - m0
+            sample, custom_values, timings = _compute_metric_sample(
+                gt_u8=gt_u8,
+                pred_u8=pred_u8,
+                selected_metrics=selected_metrics,
+                metric_defs=metric_defs,
+                task_type=task_type,
+                sample_name="synthetic",
+            )
+            metrics = {k: v for k, v in sample.items() if k != "name"}
+            for metric_key, value in custom_values.items():
+                metrics[metric_key] = value
+            metric_elapsed = float(timings["metric_elapsed"])
+            m_psnr_ssim = float(timings["builtin_elapsed"])
+            m_niqe = float(timings["niqe_elapsed"])
+            m_custom = float(timings["custom_elapsed"])
 
             remain = min_demo_seconds - (time.time() - demo_start)
             if remain > 0:
@@ -854,6 +1011,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             params["metric_psnr_ssim_elapsed_sum"] = round(float(m_psnr_ssim), 6)
             params["metric_niqe_elapsed_mean"] = round(float(m_niqe), 6)
             params["metric_niqe_elapsed_sum"] = round(float(m_niqe), 6)
+            params["metric_custom_elapsed_mean"] = round(float(m_custom), 6)
+            params["metric_custom_elapsed_sum"] = round(float(m_custom), 6)
             params["data_used"] = 1
             params["real_algo"] = pick_impl_name()
             params["input_dir"] = input_dirname

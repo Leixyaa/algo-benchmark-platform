@@ -1,210 +1,210 @@
 <template>
   <div class="page">
-    <div class="header-section">
-      <div class="header-left">
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <div class="hero-kicker">Platform Recommender</div>
         <h2 class="page-title">平台算法智能推荐</h2>
-        <p class="page-subtitle">面向平台标准算法库的多维指标分析与 LinUCB 智能推荐，支持对比展示与结论导出</p>
-      </div>
-        <div class="header-right">
-          <el-button-group>
-            <el-button icon="Refresh" @click="store.fetchRuns()" :disabled="!store.user.isLoggedIn">同步数据</el-button>
-            <el-button type="danger" plain icon="Delete" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">重置配置</el-button>
-          </el-button-group>
+        <p class="page-subtitle">默认按平台内置指标综合分排序，也支持按任意已执行指标单独排序对比，适合快速筛选平台标准算法并生成汇报结果。</p>
+        <div class="hero-meta">
+          <div class="meta-pill">
+            <span class="meta-label">当前任务</span>
+            <strong>{{ selectedTaskSummary }}</strong>
+          </div>
+          <div class="meta-pill">
+            <span class="meta-label">当前数据集</span>
+            <strong>{{ selectedDatasetSummary }}</strong>
+          </div>
+          <div class="meta-pill">
+            <span class="meta-label">排序方式</span>
+            <strong>{{ selectedRankMetricLabel }}</strong>
+          </div>
+          <div class="meta-pill">
+            <span class="meta-label">真实结果</span>
+            <strong>{{ tableRows.length }} 条</strong>
+          </div>
         </div>
       </div>
+      <div class="header-actions">
+        <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">同步数据</el-button>
+        <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">重置配置</el-button>
+      </div>
+    </section>
 
     <div class="config-grid">
       <el-card shadow="never" class="config-card">
         <template #header>
-          <div class="card-header-small"><el-icon><Filter /></el-icon> 结果筛选</div>
+          <div class="card-header">
+            <div>
+              <div class="card-eyebrow">Filter</div>
+              <div class="card-title">结果筛选</div>
+            </div>
+            <p class="card-desc">先收窄任务、数据集和排序口径，再看推荐结论会更清楚。</p>
+          </div>
         </template>
         <div class="filter-form">
-          <div class="filter-row">
-            <el-select v-model="task" placeholder="任务类型" class="flex-1">
-              <el-option v-for="t in taskOptions" :key="t" :label="t" :value="t" />
-            </el-select>
-            <el-select v-model="datasetId" placeholder="评测数据集" class="flex-1">
-              <el-option v-for="d in store.datasets" :key="d.id" :label="d.name" :value="d.id" />
-            </el-select>
-          </div>
+          <el-select v-model="task" placeholder="任务类型" class="flex-item">
+            <el-option v-for="item in taskOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+          <el-select v-model="datasetId" placeholder="评测数据集" class="flex-item">
+            <el-option v-for="item in store.datasets" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+          <el-select v-model="chartMetric" placeholder="排序方式" class="flex-item">
+            <el-option v-for="item in availableRankMetrics" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
           <div class="filter-row-secondary">
             <el-checkbox v-model="onlyDone">仅显示已完成</el-checkbox>
-            <el-button link type="primary" @click="reset">重置全部条件</el-button>
+            <div class="filter-footer-actions">
+              <span class="inline-tip">当前满足筛选条件的真实结果：{{ tableRows.length }} 条</span>
+              <el-button plain class="ghost-btn" @click="reset">重置筛选</el-button>
+            </div>
           </div>
         </div>
       </el-card>
 
       <el-card shadow="never" class="config-card">
         <template #header>
-          <div class="card-header-small">
-            <el-icon><Compass /></el-icon> 评分权重
-            <div class="preset-links">
-              <el-link type="primary" :underline="false" @click="presetQuality">质量优先</el-link>
-              <el-divider direction="vertical" />
-              <el-link type="primary" :underline="false" @click="presetBalanced">均衡</el-link>
-              <el-divider direction="vertical" />
-              <el-link type="primary" :underline="false" @click="presetSpeed">速度优先</el-link>
+          <div class="card-header">
+            <div>
+              <div class="card-eyebrow">Weight</div>
+              <div class="card-title">综合分权重</div>
             </div>
+            <p class="card-desc">默认综合分只统计平台内置指标，自定义指标仍可单独参与排序。</p>
           </div>
         </template>
-        <div class="weight-inputs">
-          <div class="weight-item">
-            <span class="w-label">PSNR</span>
-            <el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
-          </div>
-          <div class="weight-item">
-            <span class="w-label">SSIM</span>
-            <el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
-          </div>
-          <div class="weight-item">
-            <span class="w-label">NIQE</span>
-            <el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
-          </div>
-          <div class="weight-item">
-            <span class="w-label">TIME</span>
-            <el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" size="small" controls-position="right" />
-          </div>
+        <div class="weight-note">默认综合分只使用平台内置指标：PSNR / SSIM / NIQE / 耗时。</div>
+        <div class="weight-grid">
+          <div class="weight-item"><span class="weight-label">PSNR</span><el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
+          <div class="weight-item"><span class="weight-label">SSIM</span><el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
+          <div class="weight-item"><span class="weight-label">NIQE</span><el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
+          <div class="weight-item"><span class="weight-label">TIME</span><el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
         </div>
-        <div class="weight-footer">
-          <span class="w-sum">权重总和: <strong>{{ weightSum.toFixed(2) }}</strong></span>
+        <div class="weight-actions">
+          <el-button plain class="preset-btn" @click="presetQuality">质量优先</el-button>
+          <el-button plain class="preset-btn" @click="presetBalanced">均衡方案</el-button>
+          <el-button plain class="preset-btn" @click="presetSpeed">速度优先</el-button>
+          <span class="weight-sum">权重总和：{{ weightSum.toFixed(2) }}</span>
+        </div>
+        <div class="weight-breakdown">
+          <span v-for="item in weightBreakdown" :key="item.key" class="weight-chip">{{ item.label }} {{ item.percent }}%</span>
         </div>
       </el-card>
     </div>
 
     <el-card shadow="never" class="tool-card">
-      <div class="tool-tabs">
-        <div class="tool-section">
-          <div class="tool-title"><el-icon><Cpu /></el-icon> 平台算法智能推荐（LinUCB）</div>
-          <div class="tool-actions">
-            <span class="tool-label">Top-K</span>
-            <el-input-number v-model="fastTopK" :min="1" :max="10" size="small" :disabled="!store.user.isLoggedIn" />
-            <span class="tool-label">探索系数</span>
-            <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.1" size="small" :disabled="!store.user.isLoggedIn" />
-            <el-button type="primary" icon="MagicStick" :loading="fastLoading" @click="runFastSelect" :disabled="!store.user.isLoggedIn">分析平台推荐</el-button>
-            <el-button type="warning" plain icon="VideoPlay" :disabled="!store.user.isLoggedIn || !fastRecommendations.length" @click="createRunsByFastSelect">按推荐创建平台任务</el-button>
-          </div>
+      <div class="tool-row">
+        <div>
+          <div class="card-eyebrow">LinUCB</div>
+          <div class="tool-title">平台标准算法推荐</div>
+          <div class="tool-desc">该推荐只面向平台标准算法库，推荐结果与当前真实评测最优允许不完全一致。</div>
         </div>
-        <el-divider direction="vertical" />
-        <div class="tool-section">
-          <div class="tool-title"><el-icon><List /></el-icon> 批量基线</div>
-          <div class="tool-actions">
-            <el-select v-model="bulkParamScheme" size="small" style="width: 100px" :disabled="!store.user.isLoggedIn">
-              <el-option label="默认" value="default" />
-              <el-option label="速度" value="speed" />
-              <el-option label="质量" value="quality" />
-            </el-select>
-            <el-button type="warning" icon="Files" :disabled="!store.user.isLoggedIn || bulkRunning" @click="bulkRunBaselines">批量运行</el-button>
-          </div>
-        </div>
+        <div class="tool-status">{{ platformAlgorithmSummary }}</div>
       </div>
+      <div class="tool-actions">
+        <div class="control-box">
+          <span class="control-label">Top-K</span>
+          <el-input-number v-model="fastTopK" :min="1" :max="10" size="small" :disabled="!store.user.isLoggedIn" />
+        </div>
+        <div class="control-box">
+          <span class="control-label">探索系数</span>
+          <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.1" size="small" :disabled="!store.user.isLoggedIn" />
+        </div>
+        <el-button type="primary" class="primary-btn" :loading="fastLoading" @click="runFastSelect" :disabled="!store.user.isLoggedIn || !canRunFastSelect">分析平台推荐</el-button>
+        <el-button type="warning" plain class="accent-btn" @click="createRunsByFastSelect" :disabled="!store.user.isLoggedIn || !fastRecommendations.length">按推荐创建平台任务</el-button>
+      </div>
+      <div v-if="fastSelectBlockedReason" class="tool-warning">{{ fastSelectBlockedReason }}</div>
 
       <div v-if="fastRecommendations.length" class="fast-res-container">
         <el-table :data="fastRecommendations" size="small" class="mini-table">
-          <el-table-column label="推荐排名" width="80" align="center">
-            <template #default="{ $index }">
-              <span class="rank-badge" :class="'rank-' + ($index + 1)">{{ $index + 1 }}</span>
-            </template>
+          <el-table-column label="推荐排名" width="90" align="center">
+            <template #default="{ $index }"><span class="rank-badge">第 {{ $index + 1 }} 名</span></template>
           </el-table-column>
           <el-table-column prop="algorithm_name" label="推荐算法" />
-          <el-table-column prop="algorithm_scope" label="算法范围" width="110" align="center" />
-          <el-table-column prop="score" label="UCB 得分" width="100" />
-          <el-table-column prop="mean_reward" label="历史均值" width="100" />
-          <el-table-column prop="sample_count" label="样本数" width="80" />
+          <el-table-column prop="algorithm_scope" label="算法范围" width="100" align="center" />
+          <el-table-column prop="score" label="UCB 得分" width="100" align="center" />
+          <el-table-column prop="mean_reward" label="历史均值" width="100" align="center" />
+          <el-table-column prop="sample_count" label="样本数" width="80" align="center" />
         </el-table>
-        <div class="fast-meta" v-if="fastContext">
-          基于 {{ fastContext.historical_run_count }} 组历史数据分析，当前 alpha={{ fastContext.alpha }}，候选范围：平台标准算法库
-        </div>
-        <div v-if="recommendationDifferenceText" class="fast-note">
-          {{ recommendationDifferenceText }}
+        <div class="fast-meta-row">
+          <div v-if="fastContext" class="fast-meta">基于 {{ fastContext.historical_run_count }} 条历史 Run 分析，候选范围为平台标准算法库，alpha={{ fastContext.alpha }}。</div>
+          <div v-if="recommendationDifferenceText" class="fast-note">{{ recommendationDifferenceText }}</div>
         </div>
       </div>
+      <div v-else class="tool-placeholder">选择任务与数据集后，可先点击“分析平台推荐”得到候选算法，再决定是否批量创建平台任务。</div>
     </el-card>
 
     <div class="results-layout">
-      <div class="recommendation-panel" v-if="bestResultRow">
-        <div class="recommend-card">
-          <div class="recommend-badge">当前真实评测最优</div>
-          <div class="recommend-content">
-            <h3 class="rec-algo">{{ bestResultRow?.algorithmName }}</h3>
-            <p class="rec-reason">{{ bestResultSummary }}</p>
-            <div class="rec-metrics">
-              <div class="rec-m-item">PSNR <span>{{ bestResultRow?.psnr }}</span></div>
-              <div class="rec-m-item">SSIM <span>{{ bestResultRow?.ssim }}</span></div>
-              <div class="rec-m-item">NIQE <span>{{ bestResultRow?.niqe }}</span></div>
-              <div class="rec-m-item score">综合评分 <span>{{ bestResultRow?.score }}</span></div>
-            </div>
-          </div>
-          <div class="export-actions">
-            <el-dropdown split-button type="success" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">
-              导出对比结论
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">导出对比 Excel</el-dropdown-item>
-                  <el-dropdown-item @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">导出对比 CSV</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
+      <div v-if="bestResultRow" class="recommend-card">
+        <div class="recommend-top">
+          <div class="recommend-badge">当前最优</div>
+          <div class="recommend-sort-tag">按 {{ selectedRankMetricLabel }} 排序</div>
+        </div>
+        <h3 class="rec-title">{{ bestResultRow.algorithmName }}</h3>
+        <p class="rec-summary">{{ bestResultSummary }}</p>
+        <div class="rec-metrics">
+          <div class="rec-metric"><span class="rec-metric-label">PSNR</span><strong>{{ bestResultRow.psnr ?? '-' }}</strong></div>
+          <div class="rec-metric"><span class="rec-metric-label">SSIM</span><strong>{{ bestResultRow.ssim ?? '-' }}</strong></div>
+          <div class="rec-metric"><span class="rec-metric-label">NIQE</span><strong>{{ bestResultRow.niqe ?? '-' }}</strong></div>
+          <div class="rec-metric"><span class="rec-metric-label">{{ selectedRankMetricLabel }}</span><strong>{{ formatSortableMetricValue(bestResultRow) }}</strong></div>
+        </div>
+        <div class="export-actions">
+          <el-button type="success" class="success-btn" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">导出结论 Markdown</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">导出对比 Excel</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">导出对比 CSV</el-button>
         </div>
       </div>
 
-      <el-card shadow="never" class="chart-card-wrapper" v-if="chartItems.length">
+      <el-card shadow="never" class="chart-card-wrapper">
         <template #header>
           <div class="chart-header">
-            <div class="chart-title-box">
-              <el-icon><Histogram /></el-icon>
-              <span>指标排行榜（Top {{ chartTopN }}）</span>
+            <div>
+              <div class="card-eyebrow">Chart</div>
+              <span class="chart-title">指标排行图（Top {{ chartTopN }}）</span>
             </div>
-            <div class="chart-controls">
-              <el-radio-group v-model="chartMetric" size="small" class="metric-radio" :disabled="!store.user.isLoggedIn">
-                <el-radio-button label="score">评分</el-radio-button>
-                <el-radio-button label="psnr">PSNR</el-radio-button>
-                <el-radio-button label="ssim">SSIM</el-radio-button>
-                <el-radio-button label="niqe">NIQE</el-radio-button>
-                <el-radio-button label="time">耗时</el-radio-button>
-              </el-radio-group>
-              <el-button size="small" icon="Camera" @click="exportChartPng" :disabled="!store.user.isLoggedIn">导出图表</el-button>
+            <div class="chart-actions">
+              <el-select v-model="chartTopN" size="small" class="topn-select">
+                <el-option :value="5" label="Top 5" />
+                <el-option :value="10" label="Top 10" />
+                <el-option :value="15" label="Top 15" />
+              </el-select>
+              <el-button plain class="soft-btn" size="small" @click="exportChartPng" :disabled="!store.user.isLoggedIn">导出图表</el-button>
             </div>
           </div>
         </template>
         <div class="chart-container">
           <canvas ref="chartCanvas" class="main-canvas" @mousemove="onChartMove" @mouseleave="onChartLeave"></canvas>
-          <div v-if="chartTip.visible" class="canvas-tooltip" :style="{ left: chartTip.x + 'px', top: chartTip.y + 'px' }">
-            {{ chartTip.text }}
-          </div>
+          <div v-if="chartTip.visible" class="canvas-tooltip" :style="{ left: chartTip.x + 'px', top: chartTip.y + 'px' }">{{ chartTip.text }}</div>
         </div>
       </el-card>
 
       <el-card shadow="never" class="table-card-wrapper">
         <template #header>
           <div class="table-header">
-            <span class="table-title">对比明细清单</span>
+            <div>
+              <div class="card-eyebrow">Details</div>
+              <span class="table-title">对比明细清单</span>
+            </div>
             <div class="table-actions">
-              <el-button size="small" icon="Download" @click="exportXlsx" :disabled="!store.user.isLoggedIn">原始数据 Excel</el-button>
+              <span class="sort-hint">当前排序：{{ selectedRankMetricLabel }}</span>
+              <el-button plain class="soft-btn" size="small" @click="exportXlsx" :disabled="!store.user.isLoggedIn">导出原始数据 Excel</el-button>
             </div>
           </div>
         </template>
+        <div class="table-note">默认综合分只统计平台内置指标，自定义指标可通过上方“排序方式”切换查看单指标结果。</div>
         <el-table :data="tableRows" stripe class="compare-table" height="500">
-          <el-table-column prop="algorithmName" label="算法名称" min-width="150" fixed="left" />
-          <el-table-column prop="score" label="综合分" width="100" sortable align="center">
-            <template #default="{ row }">
-              <span class="table-score">{{ row.score > -Infinity ? row.score : '-' }}</span>
-            </template>
+          <el-table-column prop="algorithmName" label="算法名称" min-width="160" fixed="left" />
+          <el-table-column :label="selectedRankMetricLabel" width="120" align="center">
+            <template #default="{ row }"><span class="table-score">{{ formatSortableMetricValue(row) }}</span></template>
           </el-table-column>
           <el-table-column prop="psnr" label="PSNR" width="90" align="center" />
           <el-table-column prop="ssim" label="SSIM" width="90" align="center" />
           <el-table-column prop="niqe" label="NIQE" width="90" align="center" />
           <el-table-column prop="elapsed" label="耗时" width="90" align="center" />
-          <el-table-column label="推荐分析" min-width="250">
-            <template #default="{ row }">
-              <span class="table-reason">{{ row.reason || '-' }}</span>
-            </template>
+          <el-table-column label="推荐分析" min-width="260">
+            <template #default="{ row }"><span class="table-reason">{{ row.reason || '-' }}</span></template>
           </el-table-column>
           <el-table-column prop="createdAt" label="运行时间" width="160" />
         </el-table>
-        <div v-if="tableRows.length === 0" class="empty-state">
-          <el-empty description="暂无符合条件的对比结果" />
-        </div>
+        <div v-if="tableRows.length === 0" class="empty-state"><el-empty description="暂无符合条件的对比结果" /></div>
       </el-card>
     </div>
   </div>
@@ -212,1024 +212,474 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { useAppStore } from "../stores/app";
-import { toTaskType } from "../stores/app";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { authFetch } from "../api/http";
+import { ElMessage } from "element-plus";
+import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
 import * as XLSX from "xlsx";
 
 const store = useAppStore();
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
-
 const task = ref("");
 const datasetId = ref("");
 const onlyDone = ref(true);
-const _LS_KEY = "compare_filters_v1";
-
+const chartMetric = ref("score");
+const chartTopN = ref(10);
 const wPSNR = ref(3.5);
 const wSSIM = ref(3.5);
 const wNIQE = ref(2.0);
 const wTIME = ref(1.0);
+const fastTopK = ref(3);
+const fastAlpha = ref(0.35);
+const fastLoading = ref(false);
+const fastRecommendations = ref([]);
+const fastContext = ref(null);
+const chartCanvas = ref(null);
+const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
+let chartHits = [];
+const CACHE_KEY = "compare_filters_v2";
+const PLATFORM_DEFAULT_METRICS = ["PSNR", "SSIM", "NIQE"];
 
-function clampNumber(v, min, max, fallback) {
-  const x = Number(v);
-  if (!Number.isFinite(x)) return fallback;
-  return Math.max(min, Math.min(max, x));
+const datasetMap = computed(() => new Map((store.datasets || []).map((item) => [item.id, item])));
+const taskOptions = computed(() => Array.from(new Set((store.algorithms || []).map((item) => item.task).filter(Boolean))));
+const availableRankMetrics = computed(() => {
+  const base = [
+    { value: "score", label: "默认综合分", direction: "higher_better" },
+    { value: "psnr", label: "PSNR", direction: "higher_better" },
+    { value: "ssim", label: "SSIM", direction: "higher_better" },
+    { value: "niqe", label: "NIQE", direction: "lower_better" },
+    { value: "time", label: "耗时", direction: "lower_better" },
+  ];
+  const seen = new Set(base.map((item) => item.value));
+  for (const item of store.metricsCatalog || []) {
+    const metricKey = String(item?.metricKey || "").trim();
+    if (!metricKey || PLATFORM_DEFAULT_METRICS.includes(metricKey.toUpperCase()) || seen.has(metricKey)) continue;
+    base.push({ value: metricKey, label: item.displayName || item.name || metricKey, direction: String(item.direction || "higher_better") });
+    seen.add(metricKey);
+  }
+  return base;
+});
+const selectedRankMetricMeta = computed(() => availableRankMetrics.value.find((item) => item.value === chartMetric.value) || availableRankMetrics.value[0]);
+const selectedRankMetricLabel = computed(() => selectedRankMetricMeta.value?.label || "默认综合分");
+const selectedTaskSummary = computed(() => task.value || "全部任务");
+const selectedDatasetSummary = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value)?.name || datasetId.value : "全部数据集");
+const selectedFastTaskLabel = computed(() => task.value || taskOptions.value?.[0] || "");
+const selectedFastTaskType = computed(() => mapTaskLabelToType(selectedFastTaskLabel.value));
+const selectedFastDataset = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value) || null : null);
+const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value) + Number(wTIME.value));
+const weightBreakdown = computed(() => {
+  const sum = weightSum.value > 0 ? weightSum.value : 1;
+  return [
+    { key: "psnr", label: "PSNR", percent: Math.round((Number(wPSNR.value) / sum) * 100) },
+    { key: "ssim", label: "SSIM", percent: Math.round((Number(wSSIM.value) / sum) * 100) },
+    { key: "niqe", label: "NIQE", percent: Math.round((Number(wNIQE.value) / sum) * 100) },
+    { key: "time", label: "TIME", percent: Math.round((Number(wTIME.value) / sum) * 100) },
+  ];
+});
+const platformAlgorithmSummary = computed(() => {
+  const taskLabel = selectedFastTaskLabel.value;
+  if (!taskLabel) return "请先选择任务类型";
+  const count = getPlatformAlgorithmsForTask(taskLabel, mapTaskLabelToType(taskLabel)).length;
+  return `当前候选平台算法 ${count} 个`;
+});
+function getDatasetPairCountForTask(dataset, taskType) {
+  const directMeta = dataset?.meta && typeof dataset.meta === "object" ? dataset.meta : null;
+  const rawMeta = dataset?.raw?.meta && typeof dataset.raw.meta === "object" ? dataset.raw.meta : null;
+  const meta = directMeta || rawMeta || {};
+  const pairsMap = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
+  return Number(pairsMap?.[taskType] ?? 0);
 }
-
+const selectedFastDatasetPairCount = computed(() => {
+  if (!selectedFastDataset.value || !selectedFastTaskType.value) return 0;
+  return getDatasetPairCountForTask(selectedFastDataset.value, selectedFastTaskType.value);
+});
+const fastSelectBlockedReason = computed(() => {
+  if (!selectedFastTaskLabel.value) return "请先选择任务类型后再分析平台推荐。";
+  if (!datasetId.value) return "请先选择一个数据集后再分析平台推荐。";
+  if (!selectedFastDataset.value) return "当前选中的数据集不存在，请重新选择。";
+  if (selectedFastDatasetPairCount.value <= 0) {
+    return `当前数据集未识别出“${selectedFastTaskLabel.value}”任务的可配对样本，暂不能执行平台推荐。`;
+  }
+  return "";
+});
+const canRunFastSelect = computed(() => !fastSelectBlockedReason.value);
 function loadCache() {
   try {
-    const raw = localStorage.getItem(_LS_KEY);
+    const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return;
-    const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== "object") return;
-
-    if (typeof obj.task === "string") task.value = obj.task;
-    if (typeof obj.datasetId === "string") datasetId.value = obj.datasetId;
-    if (typeof obj.onlyDone === "boolean") onlyDone.value = obj.onlyDone;
-
-    if (obj.wPSNR != null) wPSNR.value = clampNumber(obj.wPSNR, 0, 10, 3.5);
-    if (obj.wSSIM != null) wSSIM.value = clampNumber(obj.wSSIM, 0, 10, 3.5);
-    if (obj.wNIQE != null) wNIQE.value = clampNumber(obj.wNIQE, 0, 10, 2.0);
-    if (obj.wTIME != null) wTIME.value = clampNumber(obj.wTIME, 0, 10, 1.0);
-
-    if (obj.chartMetric != null) chartMetric.value = String(obj.chartMetric);
-    if (obj.chartTopN != null) chartTopN.value = clampNumber(obj.chartTopN, 1, 50, 10);
-  } catch {
-    return;
-  }
+    const data = JSON.parse(raw);
+    if (typeof data.task === "string") task.value = data.task;
+    if (typeof data.datasetId === "string") datasetId.value = data.datasetId;
+    if (typeof data.onlyDone === "boolean") onlyDone.value = data.onlyDone;
+    if (data.chartMetric != null) chartMetric.value = String(data.chartMetric);
+    if (data.chartTopN != null) chartTopN.value = Number(data.chartTopN) || 10;
+    if (data.wPSNR != null) wPSNR.value = Number(data.wPSNR) || 3.5;
+    if (data.wSSIM != null) wSSIM.value = Number(data.wSSIM) || 3.5;
+    if (data.wNIQE != null) wNIQE.value = Number(data.wNIQE) || 2.0;
+    if (data.wTIME != null) wTIME.value = Number(data.wTIME) || 1.0;
+  } catch {}
 }
 
 function saveCache() {
-  try {
-    const obj = {
-      task: task.value,
-      datasetId: datasetId.value,
-      onlyDone: onlyDone.value,
-      wPSNR: wPSNR.value,
-      wSSIM: wSSIM.value,
-      wNIQE: wNIQE.value,
-      wTIME: wTIME.value,
-      chartMetric: chartMetric.value,
-      chartTopN: chartTopN.value,
-    };
-    localStorage.setItem(_LS_KEY, JSON.stringify(obj));
-  } catch {
-    return;
-  }
-}
-
-function clearCache() {
-  try {
-    localStorage.removeItem(_LS_KEY);
-  } catch {
-    return;
-  }
-}
-
-function resetAllConfig() {
-  reset();
-  chartMetric.value = "score";
-  chartTopN.value = 10;
-  fastRecommendations.value = [];
-  fastContext.value = null;
-  clearCache();
-  saveCache();
-}
-
-function presetQuality() {
-  wPSNR.value = 4.0;
-  wSSIM.value = 4.0;
-  wNIQE.value = 1.5;
-  wTIME.value = 0.5;
-}
-
-function presetBalanced() {
-  wPSNR.value = 3.5;
-  wSSIM.value = 3.5;
-  wNIQE.value = 2.0;
-  wTIME.value = 1.0;
-}
-
-function presetSpeed() {
-  wPSNR.value = 2.5;
-  wSSIM.value = 2.5;
-  wNIQE.value = 1.5;
-  wTIME.value = 3.5;
-}
-
-
-const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value) + Number(wTIME.value));
-
-onMounted(async () => {
-  loadCache();
-  if (store.user.isLoggedIn && (!store.runs || store.runs.length === 0)) {
-    try {
-      await store.fetchRuns();
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-  sanitizeFilters();
-  sanitizeChart();
-  saveCache();
-});
-
-const taskOptions = computed(() => {
-  const s = new Set(store.algorithms.map((a) => a.task).filter(Boolean));
-  return Array.from(s);
-});
-
-watch([task, datasetId, onlyDone, wPSNR, wSSIM, wNIQE, wTIME], () => saveCache());
-
-function sanitizeFilters() {
-  const tasks = new Set(taskOptions.value || []);
-  if (task.value && !tasks.has(task.value)) task.value = "";
-
-  const dsIds = new Set((store.datasets || []).map((d) => d.id));
-  if (datasetId.value && !dsIds.has(datasetId.value)) datasetId.value = "";
-}
-
-watch([taskOptions, () => (store.datasets || []).length], () => {
-  sanitizeFilters();
-  saveCache();
-});
-
-function statusText(status) {
-  const s = String(status ?? "").trim().toLowerCase();
-  if (["done", "completed", "success", "已完成"].includes(s)) return "已完成";
-  if (["running", "运行中"].includes(s)) return "运行中";
-  if (["failed", "error", "失败"].includes(s)) return "失败";
-  if (["queued", "pending", "排队中"].includes(s)) return "排队中";
-  if (["canceling", "cancelling", "取消中"].includes(s)) return "取消中";
-  if (["canceled", "cancelled", "已取消"].includes(s)) return "已取消";
-  return status || "-";
-}
-
-function isDone(status) {
-  return statusText(status) === "已完成";
-}
-
-function statusTagType(status) {
-  const text = statusText(status);
-  if (text === "已完成") return "success";
-  if (text === "运行中") return "warning";
-  if (text === "失败") return "danger";
-  if (text === "排队中") return "info";
-  if (text === "取消中") return "warning";
-  if (text === "已取消") return "info";
-  return "info";
+  localStorage.setItem(CACHE_KEY, JSON.stringify({
+    task: task.value,
+    datasetId: datasetId.value,
+    onlyDone: onlyDone.value,
+    chartMetric: chartMetric.value,
+    chartTopN: chartTopN.value,
+    wPSNR: wPSNR.value,
+    wSSIM: wSSIM.value,
+    wNIQE: wNIQE.value,
+    wTIME: wTIME.value,
+  }));
 }
 
 function reset() {
   task.value = "";
   datasetId.value = "";
   onlyDone.value = true;
+  chartMetric.value = "score";
+}
+
+function resetAllConfig() {
+  reset();
+  chartTopN.value = 10;
   wPSNR.value = 3.5;
   wSSIM.value = 3.5;
   wNIQE.value = 2.0;
   wTIME.value = 1.0;
+  fastRecommendations.value = [];
+  fastContext.value = null;
+  saveCache();
 }
 
-function getRunDataMode(run) {
-  return String(run?.raw?.params?.data_mode || run?.raw?.record?.data_mode || "").trim();
+function presetQuality() { wPSNR.value = 4.0; wSSIM.value = 4.0; wNIQE.value = 1.5; wTIME.value = 0.5; }
+function presetBalanced() { wPSNR.value = 3.5; wSSIM.value = 3.5; wNIQE.value = 2.0; wTIME.value = 1.0; }
+function presetSpeed() { wPSNR.value = 2.5; wSSIM.value = 2.5; wNIQE.value = 1.5; wTIME.value = 3.5; }
+function refreshAll() { return Promise.allSettled([store.fetchRuns(), store.fetchAlgorithms(), store.fetchDatasets(), store.fetchMetricsCatalog()]); }
+
+function mapTaskLabelToType(taskLabel) {
+  const entry = Object.entries(TASK_LABEL_BY_TYPE).find(([, label]) => label === taskLabel);
+  return entry?.[0] || toTaskType(taskLabel || "");
 }
 
-function isRealComparableRun(run) {
-  const mode = getRunDataMode(run);
-  return mode === "real_dataset" || mode === "paired_images" || mode === "paired_videos";
+function isDone(status) {
+  const s = String(status || "").toLowerCase();
+  return ["done", "completed", "success", "已完成"].includes(s);
 }
 
-function compareAuthenticityLabel(run) {
-  const mode = getRunDataMode(run);
-  if (mode === "real_dataset") return "真实数据评测";
-  if (mode === "paired_images") return "真实图像配对";
-  if (mode === "paired_videos") return "真实视频配对";
-  if (mode === "synthetic_no_dataset") return "演示兜底结果";
-  if (mode === "dataset_read_failed_or_empty") return "读取失败兜底";
-  return "执行口径未标注";
-}
-
-function matchesTask(runOrAlg, taskLabel, taskType) {
-  const rawTask = String(runOrAlg?.task || "").trim();
-  const rawTaskType = String(runOrAlg?.taskType || "").trim();
-  return rawTask === taskLabel || rawTask === taskType || rawTaskType === taskType;
-}
-
-function getDatasetSupportInfo(dsId, taskType) {
-  const ds = (store.datasets || []).find((x) => String(x?.id || "") === String(dsId || ""));
-  const meta = ds?.raw?.meta && typeof ds.raw.meta === "object" ? ds.raw.meta : {};
-  const supported = Array.isArray(meta?.supported_task_types) ? meta.supported_task_types.map((x) => String(x || "")) : [];
-  const pairsByTask = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
-  const pairCount = Number(pairsByTask?.[taskType] ?? 0);
-  const supportedByList = supported.includes(taskType);
-  return {
-    ok: supportedByList || pairCount > 0,
-    pairCount,
-    datasetName: ds?.name || dsId || "-",
-  };
-}
-
-function isPlatformAlgorithm(alg) {
-  return String(alg?.uploaderId || "") === "system";
-}
-
-const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
-  "alg_dn_cnn_light",
-  "alg_dn_cnn_strong",
-  "alg_denoise_bilateral_soft",
-  "alg_denoise_bilateral_strong",
-  "alg_denoise_gaussian_light",
-  "alg_denoise_gaussian_strong",
-  "alg_denoise_median_light",
-  "alg_denoise_median_strong",
-  "alg_dehaze_dcp_fast",
-  "alg_dehaze_dcp_strong",
-  "alg_dehaze_clahe_mild",
-  "alg_dehaze_clahe_strong",
-  "alg_dehaze_gamma_mild",
-  "alg_dehaze_gamma_strong",
-  "alg_deblur_unsharp_light",
-  "alg_deblur_unsharp_strong",
-  "alg_deblur_laplacian_light",
-  "alg_deblur_laplacian_strong",
-  "alg_sr_nearest",
-  "alg_sr_linear",
-  "alg_sr_bicubic_sharp",
-  "alg_sr_lanczos_sharp",
-  "alg_lowlight_gamma_soft",
-  "alg_lowlight_gamma_strong",
-  "alg_lowlight_clahe_soft",
-  "alg_lowlight_clahe_strong",
-  "alg_video_denoise_gaussian_light",
-  "alg_video_denoise_gaussian_strong",
-  "alg_video_denoise_median_light",
-  "alg_video_denoise_median_strong",
-  "alg_video_sr_nearest",
-  "alg_video_sr_linear",
-  "alg_video_sr_bicubic_sharp",
-  "alg_video_sr_lanczos_sharp",
-]);
-
-function isVisiblePlatformAlgorithm(alg) {
-  if (!isPlatformAlgorithm(alg)) return false;
-  if (alg?.raw?.is_active === false) return false;
-  const hasCommunitySource = String(alg?.sourceUploaderId || "").trim() || String(alg?.sourceAlgorithmId || "").trim();
-  if (hasCommunitySource) return true;
-  return !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(alg?.id || ""));
-}
-
-function getPlatformAlgorithmsForTask(taskLabel, taskType) {
-  return (store.algorithms || []).filter(
-    (a) => isVisiblePlatformAlgorithm(a) && matchesTask(a, taskLabel, taskType)
-  );
-}
-
-const bulkRunning = ref(false);
-const bulkStrictValidate = ref(true);
-const bulkOnlyBaselines = ref(true);
-const bulkParamScheme = ref("default");
-const fastTopK = ref(2);
-const fastAlpha = ref(0.35);
-const fastLoading = ref(false);
-const fastCreateRunning = ref(false);
-const fastContext = ref(null);
-const fastRecommendations = ref([]);
-
-const BASELINE_IDS_BY_TASK_TYPE = {
-  denoise: [
-    "alg_dn_cnn", "alg_dn_cnn_light", "alg_dn_cnn_strong",
-    "alg_denoise_bilateral", "alg_denoise_bilateral_soft", "alg_denoise_bilateral_strong",
-    "alg_denoise_gaussian", "alg_denoise_gaussian_light", "alg_denoise_gaussian_strong",
-    "alg_denoise_median", "alg_denoise_median_light", "alg_denoise_median_strong",
-  ],
-  dehaze: [
-    "alg_dehaze_dcp", "alg_dehaze_dcp_fast", "alg_dehaze_dcp_strong",
-    "alg_dehaze_clahe", "alg_dehaze_clahe_mild", "alg_dehaze_clahe_strong",
-    "alg_dehaze_gamma", "alg_dehaze_gamma_mild", "alg_dehaze_gamma_strong",
-  ],
-  deblur: [
-    "alg_deblur_unsharp", "alg_deblur_unsharp_light", "alg_deblur_unsharp_strong",
-    "alg_deblur_laplacian", "alg_deblur_laplacian_light", "alg_deblur_laplacian_strong",
-  ],
-  sr: [
-    "alg_sr_nearest", "alg_sr_linear", "alg_sr_bicubic",
-    "alg_sr_bicubic_sharp", "alg_sr_lanczos", "alg_sr_lanczos_sharp",
-  ],
-  lowlight: [
-    "alg_lowlight_gamma", "alg_lowlight_gamma_soft", "alg_lowlight_gamma_strong",
-    "alg_lowlight_clahe", "alg_lowlight_clahe_soft", "alg_lowlight_clahe_strong",
-    "alg_lowlight_hybrid",
-  ],
-  video_denoise: [
-    "alg_video_denoise_gaussian", "alg_video_denoise_gaussian_light", "alg_video_denoise_gaussian_strong",
-    "alg_video_denoise_median", "alg_video_denoise_median_light", "alg_video_denoise_median_strong",
-  ],
-  video_sr: [
-    "alg_video_sr_nearest", "alg_video_sr_linear", "alg_video_sr_bicubic",
-    "alg_video_sr_bicubic_sharp", "alg_video_sr_lanczos", "alg_video_sr_lanczos_sharp",
-  ],
-};
-
-const BASELINE_ID_SET = new Set(Object.values(BASELINE_IDS_BY_TASK_TYPE).flat());
-
-function isBaselineAlgorithmId(algorithmId) {
-  return BASELINE_ID_SET.has(String(algorithmId || ""));
-}
-
-function normalizeRunParams(params) {
-  const src = params && typeof params === "object" && !Array.isArray(params) ? params : {};
-  const out = {};
-  const ignoreKeys = new Set([
-    "batch_id",
-    "batch_name",
-    "source",
-    "fast_top_k",
-    "fast_alpha",
-    "metrics",
-    "real_algo",
-    "data_mode",
-    "data_used",
-    "read_ok",
-    "read_fail",
-    "input_dir",
-    "pair_total",
-    "pair_used",
-    "algo_elapsed_mean",
-    "algo_elapsed_sum",
-    "metric_elapsed_mean",
-    "metric_elapsed_sum",
-    "metric_psnr_ssim_elapsed_mean",
-    "metric_psnr_ssim_elapsed_sum",
-    "metric_niqe_elapsed_mean",
-    "metric_niqe_elapsed_sum",
-    "niqe_fallback",
-  ]);
-  for (const [key, value] of Object.entries(src)) {
-    if (ignoreKeys.has(key)) continue;
-    out[key] = value;
-  }
-  return out;
-}
-
-function stableStringify(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function buildRunFingerprint(taskType, datasetIdValue, algorithmId, params = {}) {
-  const normalized = normalizeRunParams(params);
-  return `${taskType}|${datasetIdValue}|${algorithmId}|${stableStringify(normalized)}`;
-}
-
-function existingRunFingerprints() {
-  return new Set(
-    (store.runs || []).map((r) =>
-      buildRunFingerprint(r?.taskType || "", r?.datasetId || "", r?.algorithmId || "", r?.raw?.params || {})
-    )
-  );
-}
-
-
-function mapTaskLabelToType(label) {
-  return toTaskType(label || "");
-}
-
-
-
-function buildExportQuery(fmt) {
-  const params = new URLSearchParams();
-  params.set("format", fmt);
-
-  if (onlyDone.value) params.set("status", "done");
-  if (task.value) params.set("task_type", mapTaskLabelToType(task.value));
-  if (datasetId.value) params.set("dataset_id", datasetId.value);
-
-  return params.toString();
-}
-
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function buildExportRows() {
-  return (tableRows.value || []).map((r) => ({
-    "创建时间": r.createdAt ?? "",
-    "任务": r.task ?? "",
-    "数据集": r.datasetName ?? "",
-    "算法": r.algorithmName ?? "",
-    "执行口径": compareAuthenticityLabel(r),
-    "data_mode": getRunDataMode(r),
-    "状态": statusText(r.status),
-    "PSNR": r.psnr ?? "",
-    "SSIM": r.ssim ?? "",
-    "NIQE": r.niqe ?? "",
-    "耗时": r.elapsed ?? "",
-    "综合分": Number.isFinite(r.score) ? r.score : "",
-    "实际算法": r.raw?.params?.real_algo ?? "",
-    "样本数": r.raw?.params?.data_used ?? "",
-    "读取成功": r.raw?.params?.read_ok ?? "",
-    "读取失败": r.raw?.params?.read_fail ?? "",
-    "推荐理由/备注": r.reason ?? "",
-    "RunID": r.id ?? "",
-  }));
-}
-
-
-function toNumber(v) {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : null;
-}
-
+function getRunDataMode(run) { return String(run?.raw?.params?.data_mode || run?.raw?.record?.data_mode || "").trim(); }
+function isRealComparableRun(run) { return getRunDataMode(run) === "real_dataset"; }
+function compareAuthenticityLabel(run) { return isRealComparableRun(run) ? "真实数据评测" : "非真实评测结果"; }
+function toNumber(v) { const x = Number(v); return Number.isFinite(x) ? x : null; }
 function parseElapsedSeconds(elapsed) {
   if (elapsed == null) return null;
   if (typeof elapsed === "number") return elapsed;
-  const s = String(elapsed);
-  const m = s.match(/([\d.]+)/);
+  const m = String(elapsed).match(/([\d.]+)/);
   if (!m) return null;
   const x = Number(m[1]);
   return Number.isFinite(x) ? x : null;
 }
-
 function minMax(values) {
   const nums = values.filter((x) => Number.isFinite(x));
-  if (nums.length === 0) return { min: null, max: null };
+  if (!nums.length) return { min: null, max: null };
   return { min: Math.min(...nums), max: Math.max(...nums) };
 }
-
+function comparableTaskKey(run) {
+  return String(run?.taskType || mapTaskLabelToType(run?.task) || run?.task || "").trim();
+}
+function comparableGroupKey(run) {
+  return `${comparableTaskKey(run)}::${String(run?.datasetId || "").trim()}`;
+}
+function buildScoringContext(runs, targetRun) {
+  const key = comparableGroupKey(targetRun);
+  const comparableRuns = (runs || []).filter((run) => comparableGroupKey(run) === key);
+  const psnrs = comparableRuns.map((run) => toNumber(run.psnr)).filter((x) => x != null);
+  const ssims = comparableRuns.map((run) => toNumber(run.ssim)).filter((x) => x != null);
+  const niqes = comparableRuns.map((run) => toNumber(run.niqe)).filter((x) => x != null);
+  const times = comparableRuns.map((run) => parseElapsedSeconds(run.elapsed)).filter((x) => x != null);
+  return {
+    mmPSNR: minMax(psnrs),
+    mmSSIM: minMax(ssims),
+    mmNIQE: minMax(niqes),
+    mmTIME: minMax(times),
+    sampleCount: comparableRuns.length,
+  };
+}
 function norm01(x, min, max) {
   if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null;
-  if (max === min) return 1.0;
+  if (max === min) return 1;
   return (x - min) / (max - min);
 }
+function metricDirection(metricKey) {
+  const found = availableRankMetrics.value.find((item) => item.value === metricKey);
+  return String(found?.direction || "higher_better");
+}
+function getCustomMetricValue(run, metricKey) {
+  const key = String(metricKey || "").trim().toUpperCase();
+  const list = Array.isArray(run?.customMetrics) ? run.customMetrics : [];
+  const found = list.find((item) => String(item?.key || "").trim().toUpperCase() === key);
+  return toNumber(found?.value);
+}
+function getSortMetricValue(run, metricKey) {
+  const key = String(metricKey || "");
+  if (key === "score") return Number.isFinite(run?.score) ? Number(run.score) : null;
+  if (key === "psnr") return toNumber(run?.psnr);
+  if (key === "ssim") return toNumber(run?.ssim);
+  if (key === "niqe") return toNumber(run?.niqe);
+  if (key === "time") return parseElapsedSeconds(run?.elapsed);
+  return getCustomMetricValue(run, key);
+}
+function formatSortMetricValue(value, metricKey) {
+  if (!Number.isFinite(value)) return "-";
+  if (metricKey === "time") return `${Number(value).toFixed(3)}s`;
+  if (metricKey === "ssim") return Number(value).toFixed(4);
+  return Number(value).toFixed(4);
+}
+function formatSortableMetricValue(row) { return formatSortMetricValue(row?.sortMetricValue, chartMetric.value); }
 
 const tableRows = computed(() => {
-  const dsMap = new Map(store.datasets.map((d) => [d.id, d]));
-  const algMap = new Map(store.algorithms.map((a) => [a.id, a]));
-
-  let runs = store.runs.slice();
-
+  const dsMap = datasetMap.value;
+  const algMap = new Map((store.algorithms || []).map((item) => [item.id, item]));
+  let runs = [...(store.runs || [])];
   if (task.value) {
     const taskType = mapTaskLabelToType(task.value);
-    runs = runs.filter((r) => matchesTask(r, task.value, taskType));
+    runs = runs.filter((run) => String(run.task || "") === task.value || String(run.taskType || "") === taskType);
   }
-  if (datasetId.value) runs = runs.filter((r) => r.datasetId === datasetId.value);
-  if (onlyDone.value) runs = runs.filter((r) => isDone(r.status));
-  runs = runs.filter((r) => isRealComparableRun(r));
-
-  const psnrs = runs.map((r) => toNumber(r.psnr)).filter((x) => x != null);
-  const ssims = runs.map((r) => toNumber(r.ssim)).filter((x) => x != null);
-  const niqes = runs.map((r) => toNumber(r.niqe)).filter((x) => x != null);
-  const times = runs.map((r) => parseElapsedSeconds(r.elapsed)).filter((x) => x != null);
-
-  const mmPSNR = minMax(psnrs);
-  const mmSSIM = minMax(ssims);
-  const mmNIQE = minMax(niqes);
-  const mmTIME = minMax(times);
+  if (datasetId.value) runs = runs.filter((run) => run.datasetId === datasetId.value);
+  if (onlyDone.value) runs = runs.filter((run) => isDone(run.status));
+  runs = runs.filter((run) => isRealComparableRun(run));
 
   const sum = weightSum.value > 0 ? weightSum.value : 1;
-  const W = {
-    psnr: Number(wPSNR.value) / sum,
-    ssim: Number(wSSIM.value) / sum,
-    niqe: Number(wNIQE.value) / sum,
-    time: Number(wTIME.value) / sum,
-  };
+  const W = { psnr: Number(wPSNR.value) / sum, ssim: Number(wSSIM.value) / sum, niqe: Number(wNIQE.value) / sum, time: Number(wTIME.value) / sum };
+  const ctxCache = new Map();
 
-  function rankBy(key, betterHigh = true) {
-    const arr = runs
-      .map((r) => {
-        let v = null;
-        if (key === "psnr") v = toNumber(r.psnr);
-        if (key === "ssim") v = toNumber(r.ssim);
-        if (key === "niqe") v = toNumber(r.niqe);
-        if (key === "time") v = parseElapsedSeconds(r.elapsed);
-        return { id: r.id, v };
-      })
-      .filter((x) => x.v != null);
-
-    arr.sort((a, b) => (betterHigh ? b.v - a.v : a.v - b.v));
-    const pos = new Map();
-    arr.forEach((x, i) => pos.set(x.id, i + 1));
-    return pos;
-  }
-
-  const rankPSNR = rankBy("psnr", true);
-  const rankSSIM = rankBy("ssim", true);
-  const rankNIQE = rankBy("niqe", false);
-  const rankTIME = rankBy("time", false);
-
-  const rows = runs.map((r) => {
-    const ds = dsMap.get(r.datasetId);
-    const alg = algMap.get(r.algorithmId);
-
-    const psnr = toNumber(r.psnr);
-    const ssim = toNumber(r.ssim);
-    const niqe = toNumber(r.niqe);
-    const tsec = parseElapsedSeconds(r.elapsed);
-
-    const nPSNR = norm01(psnr, mmPSNR.min, mmPSNR.max);
-    const nSSIM = norm01(ssim, mmSSIM.min, mmSSIM.max);
-    const nNIQE = norm01(niqe, mmNIQE.min, mmNIQE.max);
-    const nTIME = norm01(tsec, mmTIME.min, mmTIME.max);
-
+  const rows = runs.map((run) => {
+    const ds = dsMap.get(run.datasetId);
+    const alg = algMap.get(run.algorithmId);
+    const groupKey = comparableGroupKey(run);
+    if (!ctxCache.has(groupKey)) ctxCache.set(groupKey, buildScoringContext(runs, run));
+    const ctx = ctxCache.get(groupKey);
+    const psnr = toNumber(run.psnr);
+    const ssim = toNumber(run.ssim);
+    const niqe = toNumber(run.niqe);
+    const time = parseElapsedSeconds(run.elapsed);
+    const nPSNR = norm01(psnr, ctx.mmPSNR.min, ctx.mmPSNR.max);
+    const nSSIM = norm01(ssim, ctx.mmSSIM.min, ctx.mmSSIM.max);
+    const nNIQE = norm01(niqe, ctx.mmNIQE.min, ctx.mmNIQE.max);
+    const nTIME = norm01(time, ctx.mmTIME.min, ctx.mmTIME.max);
     const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
-
-    let score = -Infinity;
-    if (okAll) {
-      const s =
-        W.psnr * nPSNR +
-        W.ssim * nSSIM +
-        W.niqe * (1 - nNIQE) +
-        W.time * (1 - nTIME);
-      score = Number(s.toFixed(4));
-    }
-
-    let reason = "";
-    if (okAll) {
-      const parts = [];
-
-      const r1 = rankPSNR.get(r.id);
-      const r2 = rankSSIM.get(r.id);
-      const r3 = rankNIQE.get(r.id);
-      const r4 = rankTIME.get(r.id);
-
-      if (r1 === 1) parts.push("PSNR 表现最佳");
-      else if (r1 === 2) parts.push("PSNR 表现靠前");
-      if (r2 === 1) parts.push("SSIM 表现最佳");
-      else if (r2 === 2) parts.push("SSIM 表现靠前");
-      if (r3 === 1) parts.push("NIQE 表现最佳（越低越好）");
-      else if (r3 === 2) parts.push("NIQE 表现靠前");
-      if (r4 === 1) parts.push("耗时表现最佳");
-      else if (r4 === 2) parts.push("耗时表现靠前");
-
-      if (parts.length === 0) {
-        parts.push("综合表现均衡");
-      }
-
-      const main = [
-        { k: "PSNR", w: W.psnr },
-        { k: "SSIM", w: W.ssim },
-        { k: "NIQE", w: W.niqe },
-        { k: "耗时", w: W.time },
-      ].sort((a, b) => b.w - a.w);
-
-      reason = `${parts.join("，")}；主要权重为 ${main[0].k}(${(main[0].w * 100).toFixed(
-        0
-      )}%) 和 ${main[1].k}(${(main[1].w * 100).toFixed(0)}%)`;
-    }
-    if (!reason) {
-      const errText = r.errorText || r.error || "";
-      if (errText) reason = errText;
-    }
-
+    let score = null;
+    if (okAll) score = Number((W.psnr * nPSNR + W.ssim * nSSIM + W.niqe * (1 - nNIQE) + W.time * (1 - nTIME)).toFixed(4));
     return {
-      ...r,
-      datasetName: ds ? ds.name : r.datasetId,
-      algorithmName: alg ? alg.name : r.algorithmId,
+      ...run,
+      datasetName: ds?.name || run.datasetId,
+      algorithmName: alg?.name || run.algorithmId,
       score,
-      reason,
+      comparableSampleCount: ctx.sampleCount || 0,
+      legacyReason: okAll
+        ? `平台内置综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% + 耗时 ${Math.round(W.time * 100)}% 计算。`
+        : "平台内置指标不完整，当前不参与默认综合分排名。",
+      reason: okAll
+        ? `平台内置综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% + 耗时 ${Math.round(W.time * 100)}% 计算；评分范围为同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）。`
+        : "同任务同数据集下平台内置指标不完整，当前不参与默认综合分排名。",
     };
   });
 
-  rows.sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
+  const currentMetric = String(chartMetric.value || "score");
+  const betterHigh = !["niqe", "time"].includes(currentMetric) && metricDirection(currentMetric) !== "lower_better";
+  rows.forEach((row) => { row.sortMetricValue = getSortMetricValue(row, currentMetric); });
+  rows.sort((a, b) => {
+    const av = a.sortMetricValue;
+    const bv = b.sortMetricValue;
+    const aOk = Number.isFinite(av);
+    const bOk = Number.isFinite(bv);
+    if (aOk && bOk) return betterHigh ? bv - av : av - bv;
+    if (aOk) return -1;
+    if (bOk) return 1;
+    return String(a.algorithmName || "").localeCompare(String(b.algorithmName || ""), "zh-Hans-CN-u-co-pinyin");
+  });
   return rows;
 });
 
 const bestResultRow = computed(() => (tableRows.value.length ? tableRows.value[0] : null));
-
 const bestResultSummary = computed(() => {
   const top = bestResultRow.value;
   if (!top) return "";
-  return `这是当前筛选条件下基于真实评测结果计算得到的综合最优方案。${top.reason ? ` ${top.reason}` : ""}`;
+  if (chartMetric.value === "score") return `这是当前筛选条件下基于平台内置指标综合分计算得到的默认最优方案。${top.reason ? ` ${top.reason}` : ""}`;
+  return `这是当前筛选条件下按“${selectedRankMetricLabel.value}”排序得到的当前最优方案。${top.reason ? ` ${top.reason}` : ""}`;
 });
-
 const recommendationDifferenceText = computed(() => {
   const fastTop = fastRecommendations.value?.[0];
   const best = bestResultRow.value;
   if (!fastTop || !best) return "";
-  if (String(fastTop.algorithm_name || "") === String(best.algorithmName || "")) {
-    return "当前平台算法推荐第一与真实评测最优一致。";
-  }
-  return `当前平台算法推荐第一为 ${fastTop.algorithm_name}，但当前真实评测最优为 ${best.algorithmName}。前者基于历史反馈与探索项，后者基于当前真实评测综合结果。`;
+  if (String(fastTop.algorithm_name || "") === String(best.algorithmName || "")) return "当前平台算法推荐第一名与真实评测最优一致。";
+  return `当前平台算法推荐第一名为 ${fastTop.algorithm_name}，但当前真实评测最优为 ${best.algorithmName}。前者基于历史反馈推荐，后者基于当前真实评测结果。`;
 });
-
 const recommendText = computed(() => {
-  if (tableRows.value.length === 0) return "";
+  if (!tableRows.value.length) return "";
   const top = tableRows.value[0];
-  if (!Number.isFinite(top.score)) return "";
-
+  const currentValue = getSortMetricValue(top, chartMetric.value);
+  if (!Number.isFinite(currentValue)) return "";
   return [
     `推荐算法：${top.algorithmName}`,
-    `推荐理由：${top.reason}`,
+    `当前排序：${selectedRankMetricLabel.value}=${formatSortMetricValue(currentValue, chartMetric.value)}`,
+    `推荐理由：${top.reason || '-'}`,
     `结论口径：${compareAuthenticityLabel(top)}`,
-    `指标摘要：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || "-"}`,
+    `指标摘要：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || '-'}`,
   ].join(" ");
 });
-
-const chartCanvas = ref(null);
-const chartMetric = ref("score");
-const chartTopN = ref(10);
-
-let _chartHit = [];
-const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
-
-function _fmtValue(v) {
-  if (!Number.isFinite(v)) return "-";
-  if (chartMetric.value === "ssim") return v.toFixed(4);
-  if (chartMetric.value === "time") return `${v.toFixed(3)}s`;
-  if (chartMetric.value === "score") return v.toFixed(3);
-  return v.toFixed(3);
-}
-
-function onChartLeave() {
-  chartTip.value = { ...chartTip.value, visible: false };
-}
-
-function onChartMove(e) {
-  const canvas = chartCanvas.value;
-  if (!canvas) return;
-  const wrap = canvas.parentElement;
-  if (!wrap) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-
-  const hit = (_chartHit || []).find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
-  if (!hit) return onChartLeave();
-
-  const wRect = wrap.getBoundingClientRect();
-  const lx = Math.max(8, Math.min(wRect.width - 8, x + 12));
-  const ly = Math.max(8, Math.min(wRect.height - 8, y + 12));
-  chartTip.value = {
-    visible: true,
-    x: lx,
-    y: ly,
-    text: `${hit.name}：${hit.valueTxt}`,
-  };
-}
-
-function sanitizeChart() {
-  const allowed = new Set(["score", "psnr", "ssim", "niqe", "time"]);
-  if (!allowed.has(chartMetric.value)) chartMetric.value = "score";
-  const n = Number(chartTopN.value);
-  if (![5, 10, 15].includes(n)) chartTopN.value = 10;
-}
-
-watch([chartMetric, chartTopN], () => saveCache());
-
 const chartItems = computed(() => {
   const n = Math.max(1, Number(chartTopN.value) || 10);
-  const rows = tableRows.value || [];
-
-  const betterHigh = chartMetric.value === "niqe" || chartMetric.value === "time" ? false : true;
-
-  const items = rows
-    .map((r) => {
-      const baseName = String(r.algorithmName ?? r.algorithmId ?? r.id ?? "");
-      const id4 = String(r.id ?? "").slice(-4);
-      const name = id4 ? `${baseName} #${id4}` : baseName;
-      let v = null;
-      if (chartMetric.value === "score") v = Number.isFinite(r.score) ? Number(r.score) : null;
-      if (chartMetric.value === "psnr") v = toNumber(r.psnr);
-      if (chartMetric.value === "ssim") v = toNumber(r.ssim);
-      if (chartMetric.value === "niqe") v = toNumber(r.niqe);
-      if (chartMetric.value === "time") v = parseElapsedSeconds(r.elapsed);
-      return { name, value: v, raw: r };
-    })
-    .filter((x) => x.value != null);
-
-  items.sort((a, b) => (betterHigh ? b.value - a.value : a.value - b.value));
-  return items.slice(0, n);
+  const metricKey = String(chartMetric.value || "score");
+  const betterHigh = !["niqe", "time"].includes(metricKey) && metricDirection(metricKey) !== "lower_better";
+  return [...tableRows.value]
+    .map((row) => ({ name: row.algorithmName, value: getSortMetricValue(row, metricKey), raw: row }))
+    .filter((item) => item.value != null)
+    .sort((a, b) => (betterHigh ? b.value - a.value : a.value - b.value))
+    .slice(0, n);
 });
 
-function downloadDataUrl(dataUrl, filename) {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+function onChartLeave() { chartTip.value = { ...chartTip.value, visible: false }; }
 
+function onChartMove(event) {
+  const canvas = chartCanvas.value;
+  if (!canvas || !chartHits.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const hit = chartHits.find((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
+  if (!hit) return onChartLeave();
+  chartTip.value = { visible: true, x: Math.max(8, Math.min(rect.width - 8, x + 12)), y: Math.max(8, Math.min(rect.height - 8, y + 12)), text: `${hit.name}：${hit.text}` };
+}
 
 function drawChart() {
   const canvas = chartCanvas.value;
   if (!canvas) return;
-
   const items = chartItems.value || [];
   const wrap = canvas.parentElement;
-  const cssW = Math.max(320, Math.floor(wrap?.clientWidth || 680));
-  const cssH = items.length >= 10 ? 340 : 310;
-
+  const cssW = Math.max(320, Math.floor(wrap?.clientWidth || 720));
+  const cssH = items.length >= 10 ? 360 : 320;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(cssW * dpr);
   canvas.height = Math.floor(cssH * dpr);
   canvas.style.width = `${cssW}px`;
   canvas.style.height = `${cssH}px`;
-
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
   ctx.clearRect(0, 0, cssW, cssH);
-
-  const padL = 56;
-  const padR = 14;
-  const padT = 18;
-  const padB = 86;
-  const plotW = cssW - padL - padR;
-  const plotH = cssH - padT - padB;
-
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, cssW, cssH);
 
+  const padL = 56, padR = 16, padT = 24, padB = 88;
+  const plotW = cssW - padL - padR;
+  const plotH = cssH - padT - padB;
   ctx.strokeStyle = "#e5e7eb";
-  ctx.lineWidth = 1;
   ctx.strokeRect(padL, padT, plotW, plotH);
 
-  const values = items.map((x) => x.value).filter((x) => Number.isFinite(x));
-  const useUnitScale = chartMetric.value === "score" || chartMetric.value === "ssim";
+  const values = items.map((item) => Number(item.value)).filter((x) => Number.isFinite(x));
+  const metricKey = String(chartMetric.value || "score");
+  const useUnitScale = metricKey === "score" || metricKey === "ssim";
   const maxV = useUnitScale ? 1 : values.length ? Math.max(...values) : 1;
   const minV = useUnitScale ? 0 : values.length ? Math.min(...values) : 0;
   const span = maxV - minV || 1;
 
-  const grid = 4;
   ctx.font = "12px var(--el-font-family, system-ui)";
   ctx.fillStyle = "#6b7280";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  for (let i = 0; i <= grid; i++) {
-    const t = i / grid;
+  for (let i = 0; i <= 4; i += 1) {
+    const t = i / 4;
     const y = padT + plotH - t * plotH;
     ctx.strokeStyle = i === 0 ? "#e5e7eb" : "#f3f4f6";
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(padL + plotW, y);
     ctx.stroke();
-
     const v = minV + t * span;
-    const txt = useUnitScale ? v.toFixed(2) : chartMetric.value === "ssim" ? v.toFixed(3) : v.toFixed(2);
-    ctx.fillText(txt, padL - 6, y);
+    ctx.fillText(useUnitScale ? v.toFixed(2) : v.toFixed(3), padL - 6, y);
   }
 
   if (!items.length) {
-    ctx.fillStyle = "#9ca3af";
+    ctx.fillStyle = "#94a3b8";
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
     ctx.fillText("暂无图表数据", cssW / 2, cssH / 2);
+    chartHits = [];
     return;
   }
 
-  const n = items.length;
-  const gap = n >= 12 ? 6 : 10;
-  const bw = Math.max(10, Math.floor((plotW - gap * (n - 1)) / n));
-  const totalBarsW = bw * n + gap * (n - 1);
+  const gap = items.length >= 12 ? 6 : 10;
+  const bw = Math.max(12, Math.floor((plotW - gap * (items.length - 1)) / items.length));
+  const totalBarsW = bw * items.length + gap * (items.length - 1);
   const startX = padL + Math.max(0, Math.floor((plotW - totalBarsW) / 2));
-
-  _chartHit = [];
-
+  chartHits = [];
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillStyle = "#374151";
   ctx.font = "11px var(--el-font-family, system-ui)";
 
-  for (let i = 0; i < n; i++) {
-    const it = items[i];
-    const x = startX + i * (bw + gap);
-    const v = Number(it.value);
-    const clamped = Math.max(minV, Math.min(maxV, v));
-    const nv = (clamped - minV) / span;
+  items.forEach((item, index) => {
+    const x = startX + index * (bw + gap);
+    const value = Number(item.value);
+    const nv = (Math.max(minV, Math.min(maxV, value)) - minV) / span;
     const h = Math.max(1, Math.round(nv * plotH));
     const y = padT + plotH - h;
-
-    const r = Math.min(6, Math.floor(bw / 3), Math.floor(h / 3));
     ctx.fillStyle = "#3b82f6";
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + bw - r, y);
-    ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
-    ctx.lineTo(x + bw, y + h);
-    ctx.lineTo(x, y + h);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-    ctx.fill();
-
-    const valueTxt = _fmtValue(v);
-    _chartHit.push({ x, y, w: bw, h, name: String(it.name || ""), valueTxt });
-    if (bw >= 26 && h >= 16) {
-      ctx.fillStyle = h >= 30 ? "#ffffff" : "#111827";
-      ctx.textBaseline = h >= 30 ? "middle" : "bottom";
-      ctx.font = "11px var(--el-font-family, system-ui)";
-      const vy = h >= 30 ? y + 12 : y - 4;
-      ctx.fillText(valueTxt, x + bw / 2, vy);
-    }
-
-    ctx.fillStyle = "#374151";
-    ctx.textBaseline = "top";
-    ctx.font = "10px var(--el-font-family, system-ui)";
-    const label = String(it.name || "").slice(0, 18);
-    const lx = x + bw / 2;
-    const ly = padT + plotH + 12;
+    ctx.fillRect(x, y, bw, h);
+    ctx.fillStyle = "#1f2937";
+    const label = item.name.length > 12 ? `${item.name.slice(0, 12)}…` : item.name;
     ctx.save();
-    ctx.translate(lx, ly);
-    ctx.rotate(-Math.PI / 4);
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
+    ctx.translate(x + bw / 2, padT + plotH + 8);
+    ctx.rotate(-Math.PI / 5);
     ctx.fillText(label, 0, 0);
     ctx.restore();
-  }
+    chartHits.push({ x, y, w: bw, h, name: item.name, text: formatSortMetricValue(value, metricKey) });
+  });
 
-  ctx.fillStyle = "#111827";
+  ctx.fillStyle = "#1f2937";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.font = "12px var(--el-font-family, system-ui)";
-  const titleMap = {
-    score: "综合评分",
-    psnr: "PSNR",
-    ssim: "SSIM",
-    niqe: "NIQE",
-    time: "耗时",
-  };
-  const extra = chartMetric.value === "score" ? "（0~1，越高越好）" : "";
-  ctx.fillText(`图表指标：${titleMap[chartMetric.value] || chartMetric.value}${extra}`, padL, 0);
+  const extra = metricKey === "score" ? "（平台内置综合分）" : "";
+  ctx.fillText(`图表指标：${selectedRankMetricLabel.value}${extra}`, padL, 0);
 }
 
-watch([tableRows, chartMetric, chartTopN], async () => {
-  await nextTick();
-  drawChart();
-});
-
-onMounted(async () => {
-  await nextTick();
-  drawChart();
-});
-
-async function bulkRunBaselines() {
-  const taskLabel = task.value || taskOptions.value?.[0] || "";
-  const dsId = datasetId.value || store.datasets?.[0]?.id || "";
-  if (!taskLabel) return ElMessage.warning("请先选择任务类型");
-  if (!dsId) return ElMessage.warning("请先选择数据集");
-
-  const taskType = mapTaskLabelToType(taskLabel);
-  if (!taskType) return ElMessage.error("当前任务类型无法映射到 task_type");
-  const support = getDatasetSupportInfo(dsId, taskType);
-  if (!support.ok) {
-    return ElMessage.warning(`数据集“${support.datasetName}”当前未扫描出任务“${taskLabel}”可用配对，建议先回到数据集页扫描确认`);
-  }
-
-  const baselineIdSet = new Set(BASELINE_IDS_BY_TASK_TYPE[taskType] || []);
-  let algs = (store.algorithms || []).filter((a) => matchesTask(a, taskLabel, taskType));
-  if (bulkOnlyBaselines.value) {
-    algs = algs.filter((a) => baselineIdSet.has(a.id));
-  }
-  if (!algs.length) return ElMessage.warning("当前任务没有可创建的算法");
-
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const batchId = `batch_${taskType}_${dsId}_${ts}_${Math.random().toString(16).slice(2, 6)}`;
-  const batchName = `${taskLabel}-${dsId}-${bulkParamScheme.value}-${ts}`;
-
-  try {
-    await ElMessageBox.confirm(
-      `将为任务“${taskLabel}”、数据集“${dsId}”创建 ${algs.length} 个 Run。\n参数方案：${bulkParamScheme.value}；严格校验：${bulkStrictValidate.value ? "开启" : "关闭"}；仅基线：${bulkOnlyBaselines.value ? "是" : "否"}。\n批次 ID：${batchId}`,
-      "批量运行确认",
-      { type: "warning", confirmButtonText: "开始创建", cancelButtonText: "取消" }
-    );
-  } catch {
-    return;
-  }
-
-  task.value = taskLabel;
-  datasetId.value = dsId;
-
-  if (bulkRunning.value) return;
-  bulkRunning.value = true;
-  const failed = [];
-  const skipped = [];
-  const created = [];
-  const existing = existingRunFingerprints();
-
-  for (const a of algs) {
-    try {
-      const params = {};
-      const scheme = bulkParamScheme.value;
-      const algDefault =
-        a?.defaultParams && typeof a.defaultParams === "object" && !Array.isArray(a.defaultParams) ? a.defaultParams : {};
-      const algPresets =
-        a?.paramPresets && typeof a.paramPresets === "object" && !Array.isArray(a.paramPresets) ? a.paramPresets : {};
-      const picked =
-        scheme === "speed" || scheme === "quality"
-          ? algPresets?.[scheme] && typeof algPresets[scheme] === "object"
-            ? algPresets[scheme]
-            : {}
-          : algDefault;
-      Object.assign(params, picked);
-      params.batch_id = batchId;
-      params.batch_name = batchName;
-      params.param_scheme = scheme;
-
-      const fingerprint = buildRunFingerprint(taskType, dsId, a.id, params);
-      if (existing.has(fingerprint)) {
-        skipped.push(`${a?.name || a?.id}`);
-        continue;
-      }
-
-      await store.createRun({
-        task: taskLabel,
-        datasetId: dsId,
-        algorithmId: a.id,
-        metrics: ["PSNR", "SSIM", "NIQE"],
-        params,
-        strictValidate: bulkStrictValidate.value,
-      });
-      existing.add(fingerprint);
-      created.push(`${a?.name || a?.id}`);
-    } catch (e) {
-      failed.push(`${a?.name || a?.id}: ${e?.message || e}`);
-    }
-  }
-
-  bulkRunning.value = false;
-  const parts = [];
-  if (created.length) parts.push(`已创建 ${created.length} 个`);
-  if (skipped.length) parts.push(`跳过重复 ${skipped.length} 个`);
-  if (failed.length) parts.push(`失败 ${failed.length} 个`);
-  if (failed.length) {
-    await ElMessageBox.alert(`${parts.join("，")}\n\n失败详情：\n${failed.join("\n")}`, "批量运行结果", { type: "error" });
-    return;
-  }
-  ElMessage.success(`${parts.join("，")}，批次 ID：${batchId}`);
+function getPlatformAlgorithmsForTask(taskLabel, taskType) {
+  return (store.algorithms || []).filter((item) => {
+    const isSystem = String(item?.raw?.owner_id || "") === "system";
+    const active = item?.raw?.is_active !== false;
+    const taskMatched = String(item?.task || "") === String(taskLabel || "") || String(item?.taskType || "") === String(taskType || "");
+    return isSystem && active && taskMatched;
+  });
 }
 
 async function runFastSelect() {
-  const taskLabel = task.value || taskOptions.value?.[0] || "";
-  const dsId = datasetId.value || store.datasets?.[0]?.id || "";
-  if (!taskLabel) return ElMessage.warning("请先选择任务类型");
-  if (!dsId) return ElMessage.warning("请先选择数据集");
+  const taskLabel = selectedFastTaskLabel.value;
+  const dsId = datasetId.value || "";
+  if (fastSelectBlockedReason.value) return ElMessage.warning(fastSelectBlockedReason.value);
   const taskType = mapTaskLabelToType(taskLabel);
-  if (!taskType) return ElMessage.error("当前任务类型无法映射到 task_type");
-  const support = getDatasetSupportInfo(dsId, taskType);
-  if (!support.ok) {
-    return ElMessage.warning(`数据集“${support.datasetName}”当前未扫描出任务“${taskLabel}”可用配对，无法进行正式推荐`);
-  }
-
-  const algs = getPlatformAlgorithmsForTask(taskLabel, taskType);
-  if (!algs.length) return ElMessage.warning("当前任务下暂无可推荐的平台算法");
-
-  const topK = Math.max(1, Math.min(Number(fastTopK.value) || 2, 10));
-  const alpha = Math.max(0, Math.min(Number(fastAlpha.value) || 0.35, 2));
-  fastTopK.value = topK;
-  fastAlpha.value = alpha;
-  task.value = taskLabel;
-  datasetId.value = dsId;
-
+  const algorithms = getPlatformAlgorithmsForTask(taskLabel, taskType);
+  if (!algorithms.length) return ElMessage.warning("当前任务下暂无可推荐的平台算法");
+  fastLoading.value = true;
   try {
-    fastLoading.value = true;
-    const out = await store.fastSelect({
-      task: taskLabel,
-      datasetId: dsId,
-      candidateAlgorithmIds: algs.map((x) => x.id),
-      topK,
-      alpha,
-    });
-    const list = Array.isArray(out?.recommendations) ? out.recommendations : [];
-    const algById = new Map((store.algorithms || []).map((a) => [a.id, a]));
-    fastRecommendations.value = list.map((x) => {
-      const aid = String(x?.algorithm_id || "");
-      const alg = algById.get(aid);
-      return {
-        algorithm_id: aid,
-        algorithm_name: alg?.name || aid,
-        algorithm_scope: "平台算法",
-        score: Number(x?.score ?? 0).toFixed(4),
-        mean_reward: Number(x?.mean_reward ?? 0).toFixed(4),
-        uncertainty: Number(x?.uncertainty ?? 0).toFixed(4),
-        sample_count: Number(x?.sample_count ?? 0),
-      };
-    });
-    fastContext.value = out?.context && typeof out.context === "object" ? out.context : null;
-    if (!fastRecommendations.value.length) {
-      ElMessage.warning("平台算法推荐已执行，但当前没有返回推荐结果");
-    }
-  } catch (e) {
+    const out = await store.fastSelect({ task_type: taskType, dataset_id: dsId, candidate_algorithm_ids: algorithms.map((item) => item.id), top_k: fastTopK.value, alpha: fastAlpha.value });
+    const recs = Array.isArray(out?.recommendations) ? out.recommendations : [];
+    const algMap = new Map(algorithms.map((item) => [item.id, item]));
+    fastRecommendations.value = recs.map((item) => ({
+      algorithm_id: String(item.algorithm_id || ""),
+      algorithm_name: algMap.get(String(item.algorithm_id || ""))?.name || String(item.algorithm_id || ""),
+      algorithm_scope: "平台算法",
+      score: Number(item.score ?? 0).toFixed(4),
+      mean_reward: Number(item.mean_reward ?? 0).toFixed(4),
+      sample_count: Number(item.sample_count ?? 0),
+    }));
+    fastContext.value = out?.context || null;
+    if (!fastRecommendations.value.length) ElMessage.warning("当前没有返回推荐结果");
+  } catch (error) {
     fastRecommendations.value = [];
     fastContext.value = null;
-    ElMessage.error(`平台算法推荐失败：${e?.message || e}`);
+    const errorCode = String(error?.detail?.error_code || error?.data?.detail?.error_code || "");
+    if (errorCode === "E_DATASET_NO_PAIR") {
+      ElMessage.warning(fastSelectBlockedReason.value || "当前任务与数据集没有可用配对样本，无法执行平台推荐。");
+      return;
+    }
+    ElMessage.error(`平台算法推荐失败：${error?.message || error}`);
   } finally {
     fastLoading.value = false;
   }
@@ -1240,522 +690,648 @@ async function createRunsByFastSelect() {
   const dsId = datasetId.value || store.datasets?.[0]?.id || "";
   if (!taskLabel || !dsId) return ElMessage.warning("请先选择任务和数据集");
   if (!fastRecommendations.value.length) return ElMessage.warning("请先执行平台算法推荐");
-  if (fastCreateRunning.value) return;
-
-  const taskType = mapTaskLabelToType(taskLabel);
-  const support = getDatasetSupportInfo(dsId, taskType);
-  if (!support.ok) {
-    return ElMessage.warning(`数据集“${support.datasetName}”当前未扫描出任务“${taskLabel}”可用配对，无法创建正式推荐任务`);
-  }
-  await store.fetchRuns().catch(() => {});
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const batchId = `batch_fast_${taskType}_${dsId}_${ts}_${Math.random().toString(16).slice(2, 6)}`;
-    const batchName = `platform-recommend-${taskLabel}-${dsId}-${ts}`;
-  const existing = existingRunFingerprints();
-
-  fastCreateRunning.value = true;
-  const failed = [];
-  let skipped = 0;
   let created = 0;
-  for (const rec of fastRecommendations.value) {
-    const aid = rec.algorithm_id;
-    const params = {
-      batch_id: batchId,
-      batch_name: batchName,
-      source: "fast_select",
-      fast_top_k: fastTopK.value,
-      fast_alpha: fastAlpha.value,
-    };
-    const fingerprint = buildRunFingerprint(taskType, dsId, aid, params);
-    if (existing.has(fingerprint)) {
-      skipped += 1;
-      continue;
-    }
-    try {
-      await store.createRun({
-        task: taskLabel,
-        datasetId: dsId,
-        algorithmId: aid,
-        metrics: ["PSNR", "SSIM", "NIQE"],
-        params,
-        strictValidate: bulkStrictValidate.value,
-      });
-      existing.add(fingerprint);
-      created += 1;
-    } catch (e) {
-      failed.push(`${aid}: ${e?.message || e}`);
-    }
+  for (const item of fastRecommendations.value) {
+    await store.createRun({ task: taskLabel, datasetId: dsId, algorithmId: item.algorithm_id, metrics: [...PLATFORM_DEFAULT_METRICS], params: { source: "fast_select", fast_top_k: fastTopK.value, fast_alpha: fastAlpha.value }, strictValidate: true });
+    created += 1;
   }
-  fastCreateRunning.value = false;
-  if (failed.length) {
-    await ElMessageBox.alert(`已创建 ${created} 个平台推荐 Run，跳过重复 ${skipped} 个，失败 ${failed.length} 个。\n\n${failed.join("\n")}`, "平台推荐创建结果", {
-      type: "error",
-    });
-    return;
-  }
-  ElMessage.success(`已按平台推荐结果创建 ${created} 个 Run，跳过重复 ${skipped} 个，批次 ID：${batchId}`);
+  await store.fetchRuns();
+  ElMessage.success(`已创建 ${created} 个平台推荐任务`);
+}
+function buildExportRows() {
+  return (tableRows.value || []).map((row) => ({
+    创建时间: row.createdAt ?? "",
+    任务: row.task ?? "",
+    数据集: row.datasetName ?? "",
+    算法: row.algorithmName ?? "",
+    排序指标: selectedRankMetricLabel.value,
+    排序值: formatSortableMetricValue(row),
+    PSNR: row.psnr ?? "",
+    SSIM: row.ssim ?? "",
+    NIQE: row.niqe ?? "",
+    耗时: row.elapsed ?? "",
+    综合分: Number.isFinite(row.score) ? row.score : "",
+    推荐分析: row.reason ?? "",
+    RunID: row.id ?? "",
+  }));
 }
 
-async function exportRawRuns(fmt, filename) {
-  const res = await authFetch(`/runs/export?${buildExportQuery(fmt)}`);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `导出失败(${res.status})`);
-  }
-  const blob = await res.blob();
-  downloadBlob(blob, filename);
-}
-
-async function exportCsv() {
-  try {
-    await exportRawRuns("csv", "runs_export.csv");
-  } catch (e) {
-    ElMessage.error(`导出失败：${e?.message || e}`);
-  }
-}
-
-async function exportXlsx() {
-  try {
-    await exportRawRuns("xlsx", "runs_export.xlsx");
-  } catch (e) {
-    ElMessage.error(`导出失败：${e?.message || e}`);
-  }
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function exportRecommendCsv() {
   const rows = buildExportRows();
-  if (!rows.length) return ElMessage.warning("当前没有可导出的推荐结果");
-
-  const headers = Object.keys(rows[0]);
-  const escape = (v) => {
-    const s = String(v ?? "");
-    if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-
-  const lines = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ];
-  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  downloadBlob(blob, `compare_recommend_${ts}.csv`);
+  const headers = Object.keys(rows[0] || {});
+  const csv = [headers.join(",")]
+    .concat(rows.map((row) => headers.map((key) => `"${String(row[key] ?? "").replaceAll('"', '""')}"`).join(",")))
+    .join("\n");
+  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `compare_${Date.now()}.csv`);
 }
 
 function exportRecommendXlsx() {
   const rows = buildExportRows();
-  if (!rows.length) return ElMessage.warning("当前没有可导出的推荐结果");
-
-  const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "compare");
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([out], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  downloadBlob(blob, `compare_recommend_${ts}.xlsx`);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "Compare");
+  XLSX.writeFile(wb, `compare_${Date.now()}.xlsx`);
 }
 
-function exportConclusionMd() {
-  const rows = buildExportRows();
-  if (!rows.length) return ElMessage.warning("当前没有可导出的推荐结果");
+function exportXlsx() { exportRecommendXlsx(); }
 
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const mdLines = [];
-  mdLines.push(`# 对比推荐结论 ${ts}`);
-  mdLines.push("");
-  mdLines.push(`- 任务：${task.value || "-"}`);
-  mdLines.push(`- 数据集：${datasetId.value || "-"}`);
-  mdLines.push(`- 仅已完成：${onlyDone.value ? "是" : "否"}`);
-  mdLines.push(`- 推荐口径：仅纳入真实配对数据评测结果（已排除演示兜底与读取失败兜底）`);
-  mdLines.push(`- 说明：平台算法推荐结果反映历史反馈推荐；当前真实评测最优反映本次筛选结果，两者允许不完全一致。`);
-  mdLines.push(`- 权重：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}，耗时=${wTIME.value}`);
-  mdLines.push("");
-  if (fastRecommendations.value.length) {
-    mdLines.push("## 平台算法推荐结果");
-    for (const [i, item] of fastRecommendations.value.entries()) {
-      mdLines.push(`${i + 1}. ${item.algorithm_name}（${item.algorithm_scope}，UCB=${item.score}，样本数=${item.sample_count}）`);
-    }
-    mdLines.push("");
-  }
+function exportConclusionMd() {
+  const lines = [
+    "# 平台算法对比结论",
+    "",
+    `- 排序方式：${selectedRankMetricLabel.value}`,
+    `- 默认综合分口径：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}，耗时=${wTIME.value}`,
+    "",
+  ];
   if (bestResultRow.value) {
-    mdLines.push("## 当前真实评测最优");
-    mdLines.push(`${bestResultRow.value.algorithmName}：${bestResultSummary.value}`);
-    mdLines.push("");
+    lines.push("## 当前最优");
+    lines.push(bestResultSummary.value);
+    lines.push("");
   }
   if (recommendText.value) {
-    mdLines.push("## 平台推荐说明");
-    mdLines.push(recommendText.value);
-    mdLines.push("");
+    lines.push("## 推荐说明");
+    lines.push(recommendText.value);
+    lines.push("");
   }
-  mdLines.push("## 对比结果明细");
-  mdLines.push("");
-  const headers = Object.keys(rows[0]);
-  mdLines.push(`| ${headers.join(" | ")} |`);
-  mdLines.push(`| ${headers.map(() => "---").join(" | ")} |`);
-  for (const row of rows) {
-    mdLines.push(`| ${headers.map((h) => String(row[h] ?? "").replace(/\|/g, "\\|")).join(" | ")} |`);
+  for (const row of tableRows.value) {
+    lines.push(`- ${row.algorithmName}：${selectedRankMetricLabel.value}=${formatSortableMetricValue(row)}；${row.reason || '-'}`);
   }
-  const blob = new Blob([mdLines.join("\n")], { type: "text/markdown;charset=utf-8;" });
-  downloadBlob(blob, `compare_conclusion_${ts}.md`);
+  downloadBlob(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8;" }), `compare_${Date.now()}.md`);
 }
 
 function exportChartPng() {
-  const c = chartCanvas.value;
-  if (!c) return ElMessage.warning("当前没有可导出的图表画布");
-  const dataUrl = c.toDataURL("image/png");
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  downloadDataUrl(dataUrl, `compare_chart_${chartMetric.value}_${ts}.png`);
+  const canvas = chartCanvas.value;
+  if (!canvas) return;
+  const url = canvas.toDataURL("image/png");
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `compare_chart_${chartMetric.value}_${Date.now()}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
+
+watch([task, datasetId, onlyDone, chartMetric, chartTopN, wPSNR, wSSIM, wNIQE, wTIME], saveCache, { deep: true });
+watch([tableRows, chartMetric, chartTopN], async () => { await nextTick(); drawChart(); });
+watch(availableRankMetrics, () => {
+  const allowed = new Set(availableRankMetrics.value.map((item) => item.value));
+  if (!allowed.has(chartMetric.value)) chartMetric.value = "score";
+});
+
+onMounted(async () => {
+  loadCache();
+  await refreshAll();
+  await nextTick();
+  drawChart();
+});
 </script>
 
 <style scoped>
 .page {
-  padding: 24px;
-  background-color: #f5f7fb;
+  --page-bg: linear-gradient(180deg, #f4f8fd 0%, #eef4fb 100%);
+  --card-bg: rgba(255, 255, 255, 0.94);
+  --card-border: #dce7f5;
+  --card-shadow: 0 18px 40px rgba(148, 163, 184, 0.12);
+  --text-main: #17315a;
+  --text-soft: #60728f;
+  --text-muted: #7c8ca6;
+  --accent: #2563eb;
+  --accent-deep: #1747c7;
+  --accent-soft: #eff5ff;
+  padding: 28px;
   min-height: 100%;
+  background: var(--page-bg);
 }
 
-/* Header */
-.header-section {
+.hero-panel,
+.header-actions,
+.hero-meta,
+.card-header,
+.filter-row-secondary,
+.filter-footer-actions,
+.weight-actions,
+.tool-row,
+.tool-actions,
+.fast-meta-row,
+.recommend-top,
+.export-actions,
+.table-header,
+.table-actions,
+.chart-header,
+.chart-actions {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-panel,
+.tool-row,
+.table-header,
+.chart-header,
+.filter-row-secondary {
+  justify-content: space-between;
+}
+
+.hero-panel {
+  padding: 28px 30px;
+  margin-bottom: 18px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 34%),
+    radial-gradient(circle at right center, rgba(59, 130, 246, 0.08), transparent 28%),
+    rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(220, 231, 245, 0.95);
+  box-shadow: var(--card-shadow);
+}
+
+.hero-copy {
+  max-width: 980px;
+}
+
+.hero-kicker,
+.card-eyebrow {
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .page-title {
   margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  color: #1a2f62;
+  color: var(--text-main);
+  font-size: 36px;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.page-subtitle,
+.card-desc,
+.tool-desc,
+.weight-note,
+.fast-meta,
+.fast-note,
+.sort-hint,
+.table-reason,
+.table-note,
+.inline-tip {
+  color: var(--text-soft);
 }
 
 .page-subtitle {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 14px;
+  max-width: 860px;
+  margin: 14px 0 0;
+  font-size: 16px;
+  line-height: 1.8;
 }
 
-/* Config Grid */
-.config-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
+.hero-meta {
+  margin-top: 20px;
 }
 
-.config-card {
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
+.meta-pill {
+  min-width: 150px;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(219, 234, 254, 0.9);
 }
 
-.card-header-small {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
+.meta-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.meta-pill strong {
+  color: var(--text-main);
+  font-size: 15px;
   font-weight: 700;
-  color: #475569;
 }
 
-.filter-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.filter-row {
-  display: flex;
-  gap: 12px;
-}
-
-.flex-1 { flex: 1; }
-
-.filter-row-secondary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.preset-links {
-  margin-left: auto;
-  font-weight: normal;
-}
-
-.weight-inputs {
+.config-grid,
+.results-layout {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.config-card,
+.tool-card,
+.chart-card-wrapper,
+.table-card-wrapper,
+.recommend-card {
+  border: 1px solid var(--card-border);
+  border-radius: 24px;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+
+.card-header {
+  align-items: flex-start;
+}
+
+.card-title,
+.tool-title,
+.table-title,
+.chart-title {
+  color: var(--text-main);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.card-title {
+  font-size: 22px;
+}
+
+.tool-title,
+.table-title,
+.chart-title {
+  font-size: 20px;
+}
+
+.card-desc {
+  max-width: 280px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: right;
+}
+
+.filter-form,
+.weight-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.flex-item {
+  width: 100%;
+}
+
+.topn-select {
+  width: 108px;
+}
+
+.filter-footer-actions {
+  justify-content: flex-end;
+}
+
+.weight-note,
+.table-note,
+.tool-placeholder {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #f8fbff;
+  border: 1px solid #e2ebf7;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.tool-warning {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #ffe1c2;
+  background: #fff6eb;
+  color: #9a5b18;
+  line-height: 1.7;
+}
+
+.weight-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .weight-item {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  background: #f8fafc;
-  padding: 6px 10px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background: #fbfdff;
+  border: 1px solid #e2ebf7;
 }
 
-.w-label { font-size: 12px; color: #64748b; font-weight: 600; }
-
-.weight-footer {
-  margin-top: 12px;
-  text-align: right;
-  font-size: 13px;
-  color: #64748b;
+.weight-label {
+  color: var(--text-main);
+  font-size: 18px;
+  font-weight: 800;
 }
 
-/* Tool Card */
-.tool-card {
-  margin-bottom: 20px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
+.weight-sum {
+  color: var(--accent);
+  font-weight: 800;
 }
 
-.tool-tabs {
+.weight-breakdown {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.weight-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 20px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #315ea8;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.tool-section {
-  flex: 1;
+.tool-card,
+.table-card-wrapper {
+  margin-bottom: 18px;
 }
 
-.tool-title {
+.tool-row {
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.tool-status {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 13px;
   font-weight: 700;
-  color: #475569;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
-.tool-actions {
-  display: flex;
+.control-box {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fbfdff;
+  border: 1px solid #e2ebf7;
 }
 
-.tool-label { font-size: 12px; color: #94a3b8; }
-
-.tool-actions :deep(.el-checkbox) {
-  margin-right: 2px;
-}
-
-.fast-res-container {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid #f1f5f9;
-}
-
-.mini-table {
-  border: 1px solid #f1f5f9;
-  border-radius: 8px;
-}
-
-.rank-badge {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  line-height: 20px;
-  border-radius: 4px;
-  background: #f1f5f9;
-  font-size: 11px;
+.control-label {
+  color: var(--text-main);
+  font-size: 13px;
   font-weight: 700;
-  color: #64748b;
 }
 
-.rank-1 { background: #fef3c7; color: #92400e; }
-.rank-2 { background: #e2e8f0; color: #475569; }
-
-.fast-meta {
-  margin-top: 8px;
-  font-size: 11px;
-  color: #94a3b8;
-  text-align: right;
-}
-
-.fast-note {
-  margin-top: 8px;
+.rank-badge,
+.recommend-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e8fff1;
+  color: #15803d;
+  padding: 6px 12px;
   font-size: 12px;
-  color: #64748b;
-  line-height: 1.6;
+  font-weight: 800;
 }
 
-/* Results Layout */
-.results-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.recommend-sort-tag {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #315ea8;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.recommendation-panel {
-  width: 100%;
+.fast-res-container,
+.recommend-card {
+  margin-top: 16px;
+}
+
+.fast-meta-row {
+  justify-content: space-between;
+  margin-top: 14px;
 }
 
 .recommend-card {
-  background: #ffffff;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
   padding: 24px;
-  color: #1f2937;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
-.recommend-badge {
-  position: absolute;
-  top: 0;
-  left: 0;
-  background: #2f6bff;
-  color: white;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 12px;
-  border-bottom-right-radius: 12px;
-  text-transform: uppercase;
+.rec-title {
+  margin: 14px 0 10px;
+  color: var(--text-main);
+  font-size: 34px;
+  line-height: 1.15;
+  font-weight: 800;
 }
 
-.rec-algo {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.rec-reason {
-  margin: 8px 0 16px;
-  font-size: 14px;
-  color: #64748b;
-  max-width: 600px;
+.rec-summary {
+  margin: 0 0 20px;
+  color: #4b5d79;
+  font-size: 15px;
+  line-height: 1.8;
 }
 
 .rec-metrics {
-  display: flex;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
-.rec-m-item {
+.rec-metric {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f8fbff;
+  border: 1px solid #e2ebf7;
   display: flex;
   flex-direction: column;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.rec-m-item span {
-  font-size: 18px;
-  font-weight: 700;
-  color: #1f2937;
-  margin-top: 4px;
-}
-
-.rec-m-item.score span {
-  color: #2f6bff;
-}
-
-/* Chart */
-.chart-card-wrapper {
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.chart-title-box {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-weight: 700;
-  color: #1e293b;
 }
 
-.chart-controls {
-  display: flex;
-  gap: 16px;
-  align-items: center;
+.rec-metric-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rec-metric strong,
+.table-score {
+  color: var(--accent);
+  font-weight: 800;
 }
 
 .chart-container {
   position: relative;
-  width: 100%;
-  padding: 10px 0;
 }
 
 .main-canvas {
   width: 100%;
-  height: 320px;
-  cursor: crosshair;
+  display: block;
 }
 
 .canvas-tooltip {
   position: absolute;
-  background: rgba(15, 23, 42, 0.9);
-  color: white;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
   pointer-events: none;
-  z-index: 10;
-  white-space: nowrap;
-}
-
-/* Table */
-.table-card-wrapper {
+  z-index: 2;
+  padding: 8px 10px;
   border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.table-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.table-title { font-weight: 700; color: #1e293b; }
-
-.table-score {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  color: #2563eb;
-}
-
-.table-reason {
-  font-size: 13px;
-  color: #64748b;
-  line-height: 1.4;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font-size: 12px;
+  transform: translateY(-100%);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
 }
 
 .empty-state {
-  padding: 40px 0;
+  padding-top: 16px;
+}
+
+.soft-btn,
+.danger-soft-btn,
+.ghost-btn,
+.preset-btn,
+.success-btn,
+.primary-btn,
+.accent-btn {
+  min-height: 40px;
+  border-radius: 999px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.soft-btn,
+.ghost-btn,
+.preset-btn {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #d8e3f4;
+}
+
+.danger-soft-btn {
+  color: #c2410c;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.primary-btn {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+}
+
+.accent-btn {
+  color: #b45309;
+  border-color: #f5d3a5;
+  background: #fff5e8;
+}
+
+.success-btn {
+  border-color: #22c55e;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
 }
 
 :deep(.el-card__header) {
-  padding: 12px 20px;
-  background-color: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 20px 22px;
+  border-bottom: 1px solid #edf2f8;
 }
 
-:deep(.el-input__wrapper),
+:deep(.el-card__body) {
+  padding: 22px;
+}
+
 :deep(.el-select__wrapper) {
-  border-radius: 8px;
+  min-height: 44px;
+  border-radius: 14px;
+  box-shadow: none;
+  background: #fbfdff;
 }
 
-@media (max-width: 1024px) {
-  .config-grid { grid-template-columns: 1fr; }
-  .recommend-card { flex-direction: column; align-items: flex-start; gap: 20px; }
-  .export-actions { width: 100%; }
+:deep(.el-input-number) {
+  width: 144px;
+}
+
+:deep(.el-input-number .el-input__wrapper) {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+:deep(.el-table) {
+  --el-table-header-bg-color: #f8fbff;
+  --el-table-row-hover-bg-color: #f5f9ff;
+  --el-table-border-color: #e4ecf7;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+:deep(.el-table th.el-table__cell) {
+  color: var(--text-main);
+  font-weight: 800;
+}
+
+@media (max-width: 1200px) {
+  .config-grid,
+  .results-layout,
+  .weight-grid,
+  .rec-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .card-desc {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+
+  .hero-panel,
+  .recommend-card {
+    padding: 20px;
+  }
+
+  .page-title {
+    font-size: 28px;
+  }
+
+  .rec-title {
+    font-size: 28px;
+  }
+
+  .header-actions,
+  .tool-actions,
+  .table-actions,
+  .chart-actions,
+  .export-actions {
+    width: 100%;
+  }
+
+  .control-box,
+  .soft-btn,
+  .danger-soft-btn,
+  .ghost-btn,
+  .preset-btn,
+  .success-btn,
+  .primary-btn,
+  .accent-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  :deep(.el-input-number) {
+    width: 100%;
+  }
 }
 </style>

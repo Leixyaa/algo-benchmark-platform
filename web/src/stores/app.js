@@ -8,6 +8,7 @@ import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
+import { metricsApi } from "../api/metrics";
 import { presetsApi } from "../api/presets";
 import http from "../api/http";
 
@@ -424,6 +425,45 @@ function mapAlgorithmOut(x) {
   };
 }
 
+function mapMetricOut(x) {
+  return {
+    id: x.metric_id,
+    metricKey: String(x.metric_key || ""),
+    name: String(x.name || ""),
+    displayName: String(x.display_name || x.name || x.metric_key || ""),
+    description: String(x.description || ""),
+    taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
+    direction: String(x.direction || "higher_better"),
+    requiresReference: Boolean(x.requires_reference),
+    implementationType: String(x.implementation_type || "builtin"),
+    formulaText: String(x.formula_text || ""),
+    codeText: String(x.code_text || ""),
+    codeFilename: String(x.code_filename || ""),
+    uploaderId: String(x.owner_id || ""),
+    status: String(x.status || "pending"),
+    runtimeReady: Boolean(x.runtime_ready),
+    reviewNote: String(x.review_note || ""),
+    reviewedBy: String(x.reviewed_by || ""),
+    reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "-",
+    createdAt: formatTs(x.created_at),
+    raw: x,
+  };
+}
+
+function formatMetricDisplayName(metricKey, metricsCatalog = []) {
+  const key = String(metricKey || "").trim();
+  if (!key) return "";
+  const catalogItem = (metricsCatalog || []).find(
+    (item) => String(item?.metricKey || "").trim().toUpperCase() === key.toUpperCase()
+  );
+  if (catalogItem?.displayName) return catalogItem.displayName;
+  if (catalogItem?.name) return catalogItem.name;
+  if (key.toUpperCase() === "PSNR") return "PSNR";
+  if (key.toUpperCase() === "SSIM") return "SSIM";
+  if (key.toUpperCase() === "NIQE") return "NIQE";
+  return key;
+}
+
 function isTerminal(statusCN) {
   return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
@@ -448,11 +488,12 @@ export const useAppStore = defineStore("app", {
         // 数据资产
         datasets: (loaded?.datasets?.length ? loaded.datasets : []),
         algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
-      presets: loaded?.presets || [],
-      runs: loaded?.runs || [],
-      // 全局控制
-      loading: false,
-    };
+        metricsCatalog: loaded?.metricsCatalog || [],
+        presets: loaded?.presets || [],
+        runs: loaded?.runs || [],
+        // 全局控制
+        loading: false,
+      };
   },
 
   actions: {
@@ -463,6 +504,7 @@ export const useAppStore = defineStore("app", {
         this.stopPollingAll();
         this.datasets = [];
         this.algorithms = [];
+        this.metricsCatalog = [];
         this.presets = [];
         this.runs = [];
         this.user.username = res.username;
@@ -473,11 +515,13 @@ export const useAppStore = defineStore("app", {
         const loaded = loadState(res.username) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
           await Promise.all([
             this.fetchDatasets(),
             this.fetchAlgorithms(),
+            this.fetchMetrics(),
           ]);
           await this.fetchUnreadNotices();
           return true;
@@ -499,6 +543,7 @@ export const useAppStore = defineStore("app", {
         this.stopPollingAll();
         this.datasets = [];
         this.algorithms = [];
+        this.metricsCatalog = [];
         this.presets = [];
         this.runs = [];
         this.user.username = res.username;
@@ -509,11 +554,13 @@ export const useAppStore = defineStore("app", {
         const loaded = loadState(res.username) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
           await Promise.all([
             this.fetchDatasets(),
             this.fetchAlgorithms(),
+            this.fetchMetrics(),
           ]);
           await this.fetchUnreadNotices();
           return true;
@@ -532,6 +579,7 @@ export const useAppStore = defineStore("app", {
         const loaded = loadState(GUEST_SCOPE) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
+        this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
       },
@@ -573,6 +621,14 @@ export const useAppStore = defineStore("app", {
       this.algorithms = ensureBaselineAlgorithms(mapped);
       saveState({ algorithms: this.algorithms });
       return this.algorithms;
+    },
+
+    async fetchMetrics(limit = 500, query = {}) {
+      const list = await metricsApi.listMetrics({ limit, ...query });
+      const mapped = (list ?? []).map((x) => mapMetricOut(x));
+      this.metricsCatalog = mapped;
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return this.metricsCatalog;
     },
 
     async fetchPresets(limit = 200) {
@@ -689,6 +745,27 @@ export const useAppStore = defineStore("app", {
       return alg;
     },
 
+    async createMetric(payload) {
+      const out = await metricsApi.createMetric({
+        metric_key: payload?.metricKey,
+        name: payload?.name,
+        display_name: payload?.displayName,
+        description: payload?.description,
+        task_types: Array.isArray(payload?.taskTypes) ? payload.taskTypes : [],
+        direction: payload?.direction,
+        requires_reference: payload?.requiresReference,
+        implementation_type: payload?.implementationType,
+        formula_text: payload?.formulaText,
+        code_text: payload?.codeText,
+      });
+      const metric = mapMetricOut(out);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === metric.id);
+      if (idx === -1) this.metricsCatalog.unshift(metric);
+      else this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return metric;
+    },
+
     async createPreset(payload) {
       const out = await presetsApi.createPreset({
         preset_id: payload?.id,
@@ -746,12 +823,40 @@ export const useAppStore = defineStore("app", {
       return alg;
     },
 
+    async updateMetric(id, patch) {
+      const out = await metricsApi.patchMetric(id, {
+        metric_key: patch?.metricKey,
+        name: patch?.name,
+        display_name: patch?.displayName,
+        description: patch?.description,
+        task_types: patch?.taskTypes,
+        direction: patch?.direction,
+        requires_reference: patch?.requiresReference,
+        implementation_type: patch?.implementationType,
+        formula_text: patch?.formulaText,
+        code_text: patch?.codeText,
+      });
+      const metric = mapMetricOut(out);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === id);
+      if (idx >= 0) this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
+      else this.metricsCatalog.unshift(metric);
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return metric;
+    },
+
     async removeAlgorithm(id) {
       await algorithmsApi.deleteAlgorithm(id);
       const idx = this.algorithms.findIndex((a) => a.id === id);
       if (idx >= 0) this.algorithms.splice(idx, 1);
       this.algorithms = ensureBaselineAlgorithms(this.algorithms);
       saveState({ algorithms: this.algorithms });
+    },
+
+    async removeMetric(id) {
+      await metricsApi.deleteMetric(id);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === id);
+      if (idx >= 0) this.metricsCatalog.splice(idx, 1);
+      saveState({ metricsCatalog: this.metricsCatalog });
     },
 
     async resetUserAlgorithms() {
@@ -923,6 +1028,13 @@ export const useAppStore = defineStore("app", {
     _mapRunOut(out) {
       const statusCN = normalizeStatusCN(out?.status);
       const metrics = out?.metrics ?? {};
+      const customMetrics = Object.entries(metrics)
+        .filter(([key]) => !["PSNR", "SSIM", "NIQE"].includes(String(key || "").toUpperCase()))
+        .map(([key, value]) => ({
+          key: String(key || ""),
+          label: formatMetricDisplayName(key, this.metricsCatalog),
+          value,
+        }));
 
       const taskType = String(out?.task_type ?? "");
       const rawParams =
@@ -952,6 +1064,7 @@ export const useAppStore = defineStore("app", {
         psnr: metrics.PSNR ?? metrics.psnr ?? null,
         ssim: metrics.SSIM ?? metrics.ssim ?? null,
         niqe: metrics.NIQE ?? metrics.niqe ?? null,
+        customMetrics,
         elapsed: out.elapsed != null ? `${out.elapsed}s` : "-",
 
         error: out?.error ?? null,

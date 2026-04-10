@@ -28,11 +28,16 @@
           </div>
 
           <div class="links">
-            <router-link to="/register" class="reg-link">&#27809;&#26377;&#36134;&#21495;&#65311;&#27880;&#20876;&#26032;&#29992;&#25143;</router-link>
-            <div class="link-actions">
-              <router-link to="/admin-login" class="admin-link">&#31649;&#29702;&#21592;&#30331;&#24405;</router-link>
-              <el-button type="text" @click="continueAsGuest" class="guest-btn">&#20197;&#28216;&#23458;&#36523;&#20221;&#35775;&#38382;</el-button>
-            </div>
+            <router-link to="/register" class="link-item link-item-primary">
+              <span class="link-prefix">&#27809;&#26377;&#36134;&#21495;&#65311;</span>
+              <span class="link-text">&#27880;&#20876;&#26032;&#29992;&#25143;</span>
+            </router-link>
+            <router-link to="/admin-login" class="link-item">
+              <span class="link-text">&#31649;&#29702;&#21592;&#30331;&#24405;</span>
+            </router-link>
+            <button type="button" @click="continueAsGuest" class="link-item link-item-button">
+              <span class="link-text">&#20197;&#28216;&#23458;&#36523;&#20221;&#35775;&#38382;</span>
+            </button>
           </div>
         </div>
       </el-form>
@@ -194,23 +199,55 @@ function continueAsGuest() {
   gap: 12px;
 }
 
-.link-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.reg-link {
-  color: #409eff;
+.link-item {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
   text-decoration: none;
-}
-
-.admin-link {
   color: #1f2f57;
-  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  transition: color 0.2s ease;
 }
 
-.guest-btn {
-  color: #64748b;
+.link-item:hover {
+  color: #2f6bff;
+}
+
+.link-item-primary {
+  color: #2f6bff;
+}
+
+.link-item-button {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-prefix {
+  font-size: 14px;
+  font-weight: 500;
+  color: #7b8db3;
+}
+
+.link-text {
+  display: inline-block;
+}
+
+@media (max-width: 640px) {
+  .login-card {
+    width: min(460px, calc(100vw - 24px));
+  }
+
+  .links {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

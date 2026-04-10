@@ -247,6 +247,106 @@ class FastSelectResponse(BaseModel):
     recommendations: List[FastSelectItem] = Field(default_factory=list)
 
 
+class MetricCreate(BaseModel):
+    metric_key: Optional[str] = None
+    name: str
+    display_name: Optional[str] = None
+    description: str = ""
+    task_types: List[str] = Field(default_factory=list)
+    direction: str = "higher_better"
+    requires_reference: bool = True
+    implementation_type: str = "python"
+    formula_text: str = ""
+    code_text: str = ""
+    code_filename: str = ""
+
+
+class MetricPatch(BaseModel):
+    metric_key: Optional[str] = None
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    task_types: Optional[List[str]] = None
+    direction: Optional[str] = None
+    requires_reference: Optional[bool] = None
+    implementation_type: Optional[str] = None
+    formula_text: Optional[str] = None
+    code_text: Optional[str] = None
+    code_filename: Optional[str] = None
+
+
+class MetricReview(BaseModel):
+    status: str
+    review_note: str = ""
+    runtime_ready: bool = False
+
+
+class MetricOut(BaseModel):
+    metric_id: str
+    metric_key: str
+    name: str
+    display_name: str = ""
+    description: str = ""
+    task_types: List[str] = Field(default_factory=list)
+    direction: str = "higher_better"
+    requires_reference: bool = True
+    implementation_type: str = "builtin"
+    formula_text: str = ""
+    code_text: str = ""
+    code_filename: str = ""
+    owner_id: Optional[str] = "system"
+    status: str = "approved"
+    runtime_ready: bool = False
+    review_note: str = ""
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[float] = None
+    created_at: float
+
+
+class AlgorithmSubmissionCreate(BaseModel):
+    task_type: str
+    name: str
+    version: str = "v1"
+    description: str = ""
+    dependency_text: str = ""
+    entry_text: str = ""
+    archive_filename: str
+    archive_b64: str
+
+
+class AlgorithmSubmissionReview(BaseModel):
+    status: str
+    review_note: str = ""
+    collect_to_platform: bool = True
+
+
+class AlgorithmSubmissionPublish(BaseModel):
+    community_description: str = ""
+
+
+class AlgorithmSubmissionOut(BaseModel):
+    submission_id: str
+    task_type: str
+    task_label: str = ""
+    name: str
+    version: str = "v1"
+    description: str = ""
+    dependency_text: str = ""
+    entry_text: str = ""
+    archive_filename: str = ""
+    archive_size: int = 0
+    archive_sha256: str = ""
+    owner_id: Optional[str] = "system"
+    status: str = "pending"
+    review_note: str = ""
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[float] = None
+    created_at: float
+    platform_algorithm_id: Optional[str] = None
+    community_algorithm_id: Optional[str] = None
+    community_published_at: Optional[float] = None
+
+
 class UserCreate(BaseModel):
     username: str
     password: str
