@@ -18,6 +18,7 @@ from .store import make_redis, load_run, save_run, load_dataset, load_algorithm,
 from . import errors as err
 from .selector import online_update_model_with_run
 from .metric_runtime import execute_python_metric
+from .algorithm_runtime import AlgorithmRuntimeError, UserAlgorithmImageRunner
 
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
@@ -53,6 +54,21 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
 
 
 BUILTIN_METRICS = ("PSNR", "SSIM", "NIQE")
+
+
+def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict | None:
+    if not isinstance(algorithm, dict):
+        return algorithm
+    item = dict(algorithm)
+    impl = str(item.get("impl") or "").strip().lower()
+    owner_id = str(item.get("owner_id") or "system").strip() or "system"
+    if impl == "userpackage" and owner_id == "system":
+        allow_use = bool(item.get("allow_use", False))
+        if item.get("runtime_ready") is None:
+            item["runtime_ready"] = allow_use
+        if item.get("is_active") is None:
+            item["is_active"] = allow_use
+    return item
 
 
 def _normalize_selected_metrics(params: dict[str, Any] | None) -> list[str]:
@@ -594,7 +610,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             "size": ds.get("size"),
             "meta": ds.get("meta") if isinstance(ds.get("meta"), dict) else {},
         }
-    alg = load_algorithm(r, algorithm_id) if algorithm_id else None
+    alg = _normalize_algorithm_runtime_state(load_algorithm(r, algorithm_id) if algorithm_id else None)
     if isinstance(alg, dict):
         record["algorithm"] = {
             "algorithm_id": algorithm_id,
@@ -602,9 +618,14 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             "name": alg.get("name"),
             "impl": alg.get("impl"),
             "version": alg.get("version"),
+            "runtime_ready": bool(alg.get("runtime_ready")),
+            "allow_use": bool(alg.get("allow_use")),
+            "is_active": alg.get("is_active", True),
         }
     run["record"] = record
     save_run(r, run_id, run)
+
+    user_algorithm_runner: UserAlgorithmImageRunner | None = None
 
     try:
         def check_cancel():
@@ -619,6 +640,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             from .vision.dataset_access import find_paired_images, find_paired_videos, count_paired_images, count_paired_videos
 
             algorithm_id = (algorithm_id or "").lower()
+            algorithm_impl = str((alg or {}).get("impl") or "").strip()
+            is_user_package = algorithm_impl.lower() == "userpackage"
+            user_runtime_details: list[dict[str, Any]] = []
             algo_params = run.get("params") if isinstance(run.get("params"), dict) else {}
             selected_metrics = _normalize_selected_metrics(algo_params)
             metric_defs = _load_runnable_metric_defs(r, task_type, selected_metrics)
@@ -677,6 +701,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             save_run(r, run_id, run)
 
             def pick_impl_name() -> str:
+                if is_user_package:
+                    return "UserPackage"
                 if task_type == "dehaze":
                     if algorithm_id.startswith("alg_dehaze_clahe"):
                         return "CLAHE"
@@ -728,6 +754,50 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 return "Baseline"
 
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
+                nonlocal user_algorithm_runner
+                if is_user_package:
+                    if is_video_task:
+                        raise RunFailed(
+                            err.E_ALGORITHM_RUNTIME,
+                            "algorithm_package_video_not_supported",
+                            {"algorithm_id": algorithm_id, "task_type": task_type},
+                        )
+                    algorithm_owner_id = str((alg or {}).get("owner_id") or "system").strip() or "system"
+                    run_owner_id = str(run.get("owner_id") or "").strip()
+                    is_owner_package = algorithm_owner_id == run_owner_id
+                    if algorithm_owner_id not in {"system", run_owner_id}:
+                        raise RunFailed(
+                            err.E_HTTP,
+                            "forbidden_access",
+                            {"algorithm_id": algorithm_id},
+                        )
+                    if (
+                        not alg
+                        or alg.get("is_active") is False
+                        or not bool(alg.get("runtime_ready"))
+                        or (not is_owner_package and not bool(alg.get("allow_use")))
+                    ):
+                        raise RunFailed(
+                            err.E_ALGORITHM_RUNTIME,
+                            "algorithm_package_not_runtime_ready",
+                            {
+                                "algorithm_id": algorithm_id,
+                                "runtime_ready": bool((alg or {}).get("runtime_ready")),
+                                "is_active": (alg or {}).get("is_active", True),
+                                "allow_use": bool((alg or {}).get("allow_use")),
+                                "owner_package": is_owner_package,
+                            },
+                        )
+                    sample_name = getattr(pair, "name", None) or ""
+                    timeout_s = _get_num(algo_params, "user_algorithm_timeout_s", 30.0, 1.0, 300.0)
+                    try:
+                        if user_algorithm_runner is None:
+                            user_algorithm_runner = UserAlgorithmImageRunner(alg, timeout_s=timeout_s)
+                        result = user_algorithm_runner.run(inp_u8, sample_name=sample_name)
+                    except AlgorithmRuntimeError as exc:
+                        raise RunFailed(err.E_ALGORITHM_RUNTIME, exc.message, exc.detail) from exc
+                    user_runtime_details.append(result.detail)
+                    return result.image_bgr_u8
                 if task_type == "dehaze":
                     if algorithm_id.startswith("alg_dehaze_clahe"):
                         clip = _get_num(algo_params, "clahe_clip_limit", 2.0, 0.1, 40.0)
@@ -947,6 +1017,12 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     "read_fail": params.get("read_fail"),
                     "data_used": params.get("data_used"),
                 }
+                if user_runtime_details:
+                    record["algorithm_runtime"] = {
+                        "mode": "subprocess",
+                        "sample_count": len(user_runtime_details),
+                        "last": user_runtime_details[-1],
+                    }
                 run["record"] = record
                 _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
                 check_cancel()
@@ -1034,6 +1110,12 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 "read_fail": None,
                 "data_used": params.get("data_used"),
             }
+            if user_runtime_details:
+                record["algorithm_runtime"] = {
+                    "mode": "subprocess",
+                    "sample_count": len(user_runtime_details),
+                    "last": user_runtime_details[-1],
+                }
             run["record"] = record
             _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
             check_cancel()
@@ -1163,3 +1245,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         save_run(r, run_id, run)
         r.delete(cancel_key)
         return {"ok": False, "run_id": run_id, "error": run["error"]}
+    finally:
+        if user_algorithm_runner is not None:
+            try:
+                user_algorithm_runner.close()
+            except Exception:
+                pass

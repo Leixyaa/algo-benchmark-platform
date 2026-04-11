@@ -183,6 +183,11 @@
           <el-table-column prop="uploaderId" label="提交人" width="140" />
           <el-table-column prop="archiveFilename" label="代码包" min-width="180" show-overflow-tooltip />
           <el-table-column prop="version" label="版本" width="100" />
+          <el-table-column label="运行链路" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.runtimeReady ? 'success' : 'info'">{{ row.runtimeReady ? "已接入" : "未接入" }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="createdAt" label="提交时间" width="180" />
           <el-table-column label="操作" width="190">
             <template #default="{ row }">
@@ -257,10 +262,33 @@
           <el-table-column prop="archiveFilename" label="代码包" min-width="170" show-overflow-tooltip />
           <el-table-column prop="statusLabel" label="状态" width="100" />
           <el-table-column prop="resolution" label="审核说明" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="platformAlgorithmId" label="平台留档" min-width="170" />
+          <el-table-column label="运行接入" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.runtimeReady" type="success">已接入</el-tag>
+              <el-tag v-else type="info">未接入</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="platformAlgorithmId" label="平台算法" min-width="170" />
           <el-table-column prop="resolvedBy" label="审核人" width="120" />
           <el-table-column prop="resolvedAt" label="审核时间" width="180" />
           <el-table-column prop="createdAt" label="提交时间" width="180" />
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.canPromoteToPlatform"
+                size="small"
+                type="primary"
+                plain
+                @click="promoteAlgorithmSubmission(row)"
+                :loading="promotingSubmissionIds.has(row.id)"
+              >
+                收录为平台算法
+              </el-button>
+              <el-tag v-else-if="row.platformAlgorithmRawId" type="success">已收录</el-tag>
+              <el-tag v-else-if="row.status === 'approved'" type="info">仅留档</el-tag>
+              <span v-else class="empty-text">-</span>
+            </template>
+          </el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -533,9 +561,15 @@
               <el-option label="驳回" value="rejected" />
             </el-select>
           </el-form-item>
-          <el-form-item label="收录为平台留档算法">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            title="审核通过只保存申请留档与运行接入状态；进入平台算法库需在接入日志中单独收录。"
+          />
+          <el-form-item label="接入运行链路">
             <el-switch
-              v-model="submissionReviewCollect"
+              v-model="submissionReviewRuntimeReady"
               :disabled="submissionReviewStatus !== 'approved'"
             />
           </el-form-item>
@@ -584,6 +618,7 @@ const loadingDatasetIds = ref(new Set());
 const deletingCommentIds = ref(new Set());
 const resolvingReportIds = ref(new Set());
 const promotingAlgorithmIds = ref(new Set());
+const promotingSubmissionIds = ref(new Set());
 const clearingReports = ref(false);
 const reviewingMetricIds = ref(new Set());
 const reviewingSubmissionIds = ref(new Set());
@@ -609,7 +644,7 @@ const metricReviewSubmitting = ref(false);
 const submissionReviewVisible = ref(false);
 const activeSubmission = ref(null);
 const submissionReviewStatus = ref("approved");
-const submissionReviewCollect = ref(true);
+const submissionReviewRuntimeReady = ref(false);
 const submissionReviewNote = ref("");
 const submissionReviewSubmitting = ref(false);
 const screeningTask = ref("");
@@ -645,6 +680,10 @@ function mapAlgorithm(x) {
     task: x.task,
     description: x.description || "",
     uploaderId: String(x.owner_id || ""),
+    sourceSubmissionId: String(x.source_submission_id || ""),
+    sourceUploaderId: String(x.source_owner_id || ""),
+    sourceAlgorithmId: String(x.source_algorithm_id || ""),
+    packageRole: String(x.package_role || ""),
     downloadCount: Number(x.download_count || 0),
     createdAt: formatTs(x.created_at),
     storagePath: "",
@@ -708,6 +747,8 @@ function mapAlgorithmSubmission(x) {
     reviewedBy: String(x.reviewed_by || ""),
     reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "",
     createdAt: formatTs(x.created_at),
+    runtimeReady: Boolean(x.runtime_ready),
+    ownerAlgorithmId: String(x.owner_algorithm_id || ""),
     platformAlgorithmId: String(x.platform_algorithm_id || ""),
   };
 }
@@ -832,17 +873,31 @@ const handledAlgorithmSubmissionLogs = computed(() =>
     (item) =>
       String(item.status || "") !== "pending" &&
       includesKeyword(
-        [item.name, item.taskLabel, item.uploaderId, item.archiveFilename, item.reviewNote, item.reviewedBy, item.platformAlgorithmId],
+        [
+          item.name,
+          item.taskLabel,
+          item.uploaderId,
+          item.archiveFilename,
+          item.reviewNote,
+          item.reviewedBy,
+          item.platformAlgorithmId,
+          item.runtimeReady ? "已接入" : "未接入",
+        ],
         algorithmSubmissionLogKeyword.value
       )
   ).map((item) => ({
+    id: item.id,
+    status: item.status,
     name: item.name,
     taskLabel: item.taskLabel,
     submitterId: item.uploaderId,
     archiveFilename: item.archiveFilename || "-",
     statusLabel: metricStatusLabel(item.status),
     resolution: item.reviewNote || "-",
+    runtimeReady: item.runtimeReady,
+    platformAlgorithmRawId: item.platformAlgorithmId,
     platformAlgorithmId: item.platformAlgorithmId || "-",
+    canPromoteToPlatform: item.status === "approved" && item.runtimeReady && !item.platformAlgorithmId,
     resolvedBy: item.reviewedBy || "-",
     resolvedAt: item.reviewedAt || "-",
     createdAt: item.createdAt,
@@ -1021,6 +1076,22 @@ async function promoteAlgorithm(row) {
   }
 }
 
+async function promoteAlgorithmSubmission(row) {
+  try {
+    setLoading(promotingSubmissionIds, row.id, true);
+    const out = await adminApi.promoteAlgorithmSubmission(row.id);
+    algorithmSubmissions.value = (algorithmSubmissions.value || []).map((item) =>
+      item.id === row.id ? mapAlgorithmSubmission(out) : item
+    );
+    await store.fetchAlgorithms();
+    ElMessage.success("已收录为平台算法");
+  } catch (e) {
+    ElMessage.error(e?.message || "收录失败");
+  } finally {
+    setLoading(promotingSubmissionIds, row.id, false);
+  }
+}
+
 async function downloadAlgorithmSubmission(row) {
   try {
     await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
@@ -1049,7 +1120,7 @@ function metricStatusTagType(status) {
 function openAlgorithmSubmissionReview(row) {
   activeSubmission.value = row;
   submissionReviewStatus.value = row.status === "rejected" ? "rejected" : "approved";
-  submissionReviewCollect.value = !row.platformAlgorithmId;
+  submissionReviewRuntimeReady.value = Boolean(row.runtimeReady);
   submissionReviewNote.value = String(row.reviewNote || "");
   submissionReviewVisible.value = true;
 }
@@ -1058,7 +1129,7 @@ function closeAlgorithmSubmissionReview() {
   submissionReviewVisible.value = false;
   activeSubmission.value = null;
   submissionReviewStatus.value = "approved";
-  submissionReviewCollect.value = true;
+  submissionReviewRuntimeReady.value = false;
   submissionReviewNote.value = "";
 }
 
@@ -1071,14 +1142,12 @@ async function submitAlgorithmSubmissionReview() {
     const out = await adminApi.reviewAlgorithmSubmission(row.id, {
       status: submissionReviewStatus.value,
       review_note: submissionReviewNote.value,
-      collect_to_platform: submissionReviewStatus.value === "approved" ? submissionReviewCollect.value : false,
+      collect_to_platform: false,
+      runtime_ready: submissionReviewStatus.value === "approved" ? submissionReviewRuntimeReady.value : false,
     });
     algorithmSubmissions.value = (algorithmSubmissions.value || []).map((item) =>
       item.id === row.id ? mapAlgorithmSubmission(out) : item
     );
-    if (submissionReviewStatus.value === "approved" && submissionReviewCollect.value) {
-      await store.fetchAlgorithms();
-    }
     ElMessage.success("算法接入审核结果已保存");
     closeAlgorithmSubmissionReview();
   } catch (e) {

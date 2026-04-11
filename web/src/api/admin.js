@@ -60,4 +60,7 @@ export const adminApi = {
       body: payload,
     });
   },
+  promoteAlgorithmSubmission(submissionId) {
+    return request(`/admin/algorithm-submissions/${submissionId}/promote-platform`, { method: "POST" });
+  },
 };

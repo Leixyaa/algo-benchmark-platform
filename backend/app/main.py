@@ -875,6 +875,95 @@ def _algorithm_submission_to_out(item: dict) -> dict:
     return AlgorithmSubmissionOut(**data).model_dump()
 
 
+def _infer_user_package_role(algorithm: dict | None) -> str:
+    if not isinstance(algorithm, dict):
+        return ""
+    explicit = str(algorithm.get("package_role") or "").strip().lower()
+    if explicit:
+        return explicit
+    impl = str(algorithm.get("impl") or "").strip().lower()
+    if impl != "userpackage":
+        return ""
+    owner_id = str(algorithm.get("owner_id") or "system").strip() or "system"
+    visibility = str(algorithm.get("visibility") or "private").strip().lower()
+    source_algorithm_id = str(algorithm.get("source_algorithm_id") or "").strip()
+    source_submission_id = str(algorithm.get("source_submission_id") or "").strip()
+    if owner_id == "system":
+        return "platform"
+    if source_algorithm_id:
+        return "downloaded_community"
+    if visibility == "public" and source_submission_id:
+        return "community"
+    if source_submission_id:
+        return "owner_runtime"
+    return ""
+
+
+def _is_submission_owner_runtime_algorithm(algorithm: dict | None, submission_id: str, owner_id: str) -> bool:
+    if not isinstance(algorithm, dict):
+        return False
+    if str(algorithm.get("owner_id") or "").strip() != str(owner_id or "").strip():
+        return False
+    if str(algorithm.get("source_submission_id") or "").strip() != str(submission_id or "").strip():
+        return False
+    role = _infer_user_package_role(algorithm)
+    if role == "owner_runtime":
+        return True
+    visibility = str(algorithm.get("visibility") or "private").strip().lower()
+    return visibility != "public" and not bool(algorithm.get("allow_download")) and not str(algorithm.get("source_algorithm_id") or "").strip()
+
+
+def _is_submission_community_algorithm(algorithm: dict | None, submission_id: str, owner_id: str) -> bool:
+    if not isinstance(algorithm, dict):
+        return False
+    if str(algorithm.get("owner_id") or "").strip() != str(owner_id or "").strip():
+        return False
+    if str(algorithm.get("source_submission_id") or "").strip() != str(submission_id or "").strip():
+        return False
+    role = _infer_user_package_role(algorithm)
+    if role == "community":
+        return True
+    return str(algorithm.get("visibility") or "").strip().lower() == "public" and not str(algorithm.get("source_algorithm_id") or "").strip()
+
+
+def _ensure_submission_owner_algorithm_synced(r, submission: dict) -> dict:
+    cur = dict(submission or {})
+    submission_id = str(cur.get("submission_id") or "").strip()
+    owner_id = str(cur.get("owner_id") or "").strip()
+    status = str(cur.get("status") or "").strip().lower()
+    if not submission_id or not owner_id:
+        return cur
+
+    changed = False
+    owner_algorithm_id = str(cur.get("owner_algorithm_id") or "").strip()
+    owner_algorithm = load_algorithm(r, owner_algorithm_id) if owner_algorithm_id else None
+    if not _is_submission_owner_runtime_algorithm(owner_algorithm, submission_id, owner_id):
+        owner_algorithm = None
+        owner_algorithm_id = ""
+        for item in list_algorithms(r, limit=5000, owner_id=owner_id, include_public=True) or []:
+            if not _is_submission_owner_runtime_algorithm(item, submission_id, owner_id):
+                continue
+            owner_algorithm = item
+            owner_algorithm_id = str(item.get("algorithm_id") or "").strip()
+            break
+        if str(cur.get("owner_algorithm_id") or "").strip() != owner_algorithm_id:
+            cur["owner_algorithm_id"] = owner_algorithm_id or None
+            changed = True
+
+    if status == "approved":
+        expected_runtime_ready = bool(cur.get("runtime_ready"))
+        new_owner_algorithm_id = _upsert_algorithm_submission_owner_algorithm(r, cur, runtime_ready=expected_runtime_ready)
+        if new_owner_algorithm_id != str(cur.get("owner_algorithm_id") or "").strip():
+            cur["owner_algorithm_id"] = new_owner_algorithm_id
+            changed = True
+    elif owner_algorithm_id:
+        _set_platform_algorithm_runtime_state(r, owner_algorithm_id, False)
+
+    if changed:
+        save_algorithm_submission(r, submission_id, cur)
+    return cur
+
+
 def _decode_algorithm_submission_archive(data_b64: str) -> bytes:
     raw = str(data_b64 or "").strip()
     if not raw:
@@ -934,9 +1023,21 @@ def _resolve_algorithm_archive_response(r, algorithm: dict):
     return None
 
 
-def _promote_algorithm_submission_to_platform(r, submission: dict) -> str:
+def _set_platform_algorithm_runtime_state(r, algorithm_id: str, runtime_ready: bool) -> None:
+    cur = load_algorithm(r, algorithm_id)
+    if not cur:
+        return
+    ready = bool(runtime_ready)
+    cur["runtime_ready"] = ready
+    cur["is_active"] = ready
+    cur["allow_use"] = ready
+    save_algorithm(r, algorithm_id, cur)
+
+
+def _promote_algorithm_submission_to_platform(r, submission: dict, runtime_ready: bool = False) -> str:
     existing_id = str(submission.get("platform_algorithm_id") or "").strip()
     if existing_id and load_algorithm(r, existing_id):
+        _set_platform_algorithm_runtime_state(r, existing_id, runtime_ready)
         return existing_id
     submission_id = str(submission.get("submission_id") or "").strip()
     source_owner = str(submission.get("owner_id") or "").strip() or "system"
@@ -964,12 +1065,13 @@ def _promote_algorithm_submission_to_platform(r, submission: dict) -> str:
         "default_params": {},
         "param_presets": {},
         "visibility": "private",
-        "allow_use": False,
+        "allow_use": bool(runtime_ready),
         "allow_download": False,
-        "is_active": False,
-        "runtime_ready": False,
+        "is_active": bool(runtime_ready),
+        "runtime_ready": bool(runtime_ready),
         "source_submission_id": submission_id,
         "source_owner_id": source_owner,
+        "package_role": "platform",
         "dependency_text": dependency_text,
         "entry_text": entry_text,
         "archive_filename": str(submission.get("archive_filename") or ""),
@@ -978,6 +1080,82 @@ def _promote_algorithm_submission_to_platform(r, submission: dict) -> str:
     }
     save_algorithm(r, platform_id, data)
     return platform_id
+
+
+def _upsert_algorithm_submission_owner_algorithm(r, submission: dict, runtime_ready: bool = False) -> str:
+    submission_id = str(submission.get("submission_id") or "").strip()
+    if not submission_id:
+        err.api_error(400, err.E_HTTP, "submission_id_required")
+    owner_id = str(submission.get("owner_id") or "").strip()
+    if not owner_id:
+        err.api_error(400, err.E_HTTP, "submission_owner_required", submission_id=submission_id)
+    existing_id = str(submission.get("owner_algorithm_id") or "").strip()
+    task_type = str(submission.get("task_type") or "").strip().lower()
+    ready = bool(runtime_ready)
+    dependency_text = str(submission.get("dependency_text") or "").strip()
+    entry_text = str(submission.get("entry_text") or "").strip()
+    archive_filename = str(submission.get("archive_filename") or "")
+    archive_sha256 = str(submission.get("archive_sha256") or "")
+    archive_path = str(submission.get("archive_path") or "")
+
+    if existing_id:
+        existing = load_algorithm(r, existing_id)
+        if existing and _is_submission_owner_runtime_algorithm(existing, submission_id, owner_id):
+            existing["task"] = TASK_LABEL_BY_TYPE.get(task_type, existing.get("task"))
+            existing["name"] = _make_owner_unique_algorithm_name(
+                r,
+                owner_id,
+                str(submission.get("name") or existing.get("name") or existing_id).strip() or existing_id,
+                exclude_id=existing_id,
+            )
+            existing["impl"] = "UserPackage"
+            existing["version"] = str(submission.get("version") or existing.get("version") or "v1").strip() or "v1"
+            existing["description"] = str(submission.get("description") or existing.get("description") or "")
+            existing["visibility"] = "private"
+            existing["allow_use"] = ready
+            existing["allow_download"] = False
+            existing["is_active"] = ready
+            existing["runtime_ready"] = ready
+            existing["source_submission_id"] = submission_id
+            existing["source_owner_id"] = owner_id
+            existing["package_role"] = "owner_runtime"
+            existing["dependency_text"] = dependency_text
+            existing["entry_text"] = entry_text
+            existing["archive_filename"] = archive_filename
+            existing["archive_sha256"] = archive_sha256
+            existing["archive_path"] = archive_path
+            save_algorithm(r, existing_id, existing)
+            return existing_id
+
+    algorithm_id = _make_unique_algorithm_id(r, f"submission_{submission_id}", owner_id)
+    data = {
+        "algorithm_id": algorithm_id,
+        "task": TASK_LABEL_BY_TYPE.get(task_type, ""),
+        "name": _make_owner_unique_algorithm_name(r, owner_id, str(submission.get("name") or submission_id).strip() or submission_id),
+        "impl": "UserPackage",
+        "version": str(submission.get("version") or "v1").strip() or "v1",
+        "description": str(submission.get("description") or ""),
+        "owner_id": owner_id,
+        "created_at": time.time(),
+        "default_params": {},
+        "param_presets": {},
+        "visibility": "private",
+        "allow_use": ready,
+        "allow_download": False,
+        "is_active": ready,
+        "runtime_ready": ready,
+        "download_count": 0,
+        "source_submission_id": submission_id,
+        "source_owner_id": owner_id,
+        "package_role": "owner_runtime",
+        "dependency_text": dependency_text,
+        "entry_text": entry_text,
+        "archive_filename": archive_filename,
+        "archive_sha256": archive_sha256,
+        "archive_path": archive_path,
+    }
+    save_algorithm(r, algorithm_id, data)
+    return algorithm_id
 
 
 def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: str, community_description: str = "") -> str:
@@ -993,7 +1171,7 @@ def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: st
 
     if existing_id:
         existing = load_algorithm(r, existing_id)
-        if existing and str(existing.get("owner_id") or "") == owner_id:
+        if existing and _is_submission_community_algorithm(existing, submission_id, owner_id):
             existing["task"] = TASK_LABEL_BY_TYPE.get(str(submission.get("task_type") or "").strip().lower(), existing.get("task"))
             existing["name"] = _make_owner_unique_algorithm_name(
                 r,
@@ -1005,9 +1183,13 @@ def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: st
             existing["version"] = str(submission.get("version") or existing.get("version") or "v1").strip() or "v1"
             existing["description"] = final_description
             existing["visibility"] = "public"
-            existing["allow_use"] = True
+            existing["allow_use"] = False
             existing["allow_download"] = True
+            existing["is_active"] = True
+            existing["runtime_ready"] = False
             existing["source_submission_id"] = submission_id
+            existing["source_owner_id"] = owner_id
+            existing["package_role"] = "community"
             existing["dependency_text"] = dependency_text
             existing["entry_text"] = entry_text
             existing["archive_filename"] = str(submission.get("archive_filename") or "")
@@ -1031,10 +1213,14 @@ def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: st
         "default_params": {},
         "param_presets": {},
         "visibility": "public",
-        "allow_use": True,
+        "allow_use": False,
         "allow_download": True,
+        "is_active": True,
+        "runtime_ready": False,
         "download_count": 0,
         "source_submission_id": submission_id,
+        "source_owner_id": owner_id,
+        "package_role": "community",
         "dependency_text": dependency_text,
         "entry_text": entry_text,
         "archive_filename": str(submission.get("archive_filename") or ""),
@@ -1754,7 +1940,118 @@ def _require_admin(current_user: dict) -> None:
 def _is_algorithm_active(algorithm: dict | None) -> bool:
     if not isinstance(algorithm, dict):
         return True
-    return bool(algorithm.get("is_active", True))
+    return algorithm.get("is_active") is not False
+
+
+def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict:
+    if not isinstance(algorithm, dict):
+        return {}
+    item = dict(algorithm)
+    impl = str(item.get("impl") or "").strip().lower()
+    owner_id = str(item.get("owner_id") or "system").strip() or "system"
+    if impl == "userpackage":
+        role = _infer_user_package_role(item)
+        if role:
+            item["package_role"] = role
+        allow_use = bool(item.get("allow_use", False))
+        if role == "platform" or owner_id == "system":
+            if item.get("runtime_ready") is None:
+                item["runtime_ready"] = allow_use
+            if item.get("is_active") is None:
+                item["is_active"] = allow_use
+            item["package_role"] = "platform"
+        elif role == "owner_runtime":
+            if item.get("runtime_ready") is None:
+                item["runtime_ready"] = allow_use
+            if item.get("is_active") is None:
+                item["is_active"] = bool(item.get("runtime_ready"))
+            item["visibility"] = "private"
+            item["allow_download"] = False
+            item["package_role"] = "owner_runtime"
+            if not str(item.get("source_owner_id") or "").strip():
+                item["source_owner_id"] = owner_id
+        elif role == "community":
+            item["runtime_ready"] = False
+            if item.get("is_active") is None:
+                item["is_active"] = True
+            item["allow_use"] = False
+            item["allow_download"] = True
+            item["package_role"] = "community"
+            if not str(item.get("source_owner_id") or "").strip():
+                item["source_owner_id"] = owner_id
+        elif role == "downloaded_community":
+            item["runtime_ready"] = False
+            if item.get("is_active") is None:
+                item["is_active"] = True
+            item["package_role"] = "downloaded_community"
+    return item
+
+
+FAST_SELECT_HIDDEN_PLATFORM_ALGORITHM_IDS = {
+    "alg_dn_cnn_light",
+    "alg_dn_cnn_strong",
+    "alg_denoise_bilateral_soft",
+    "alg_denoise_bilateral_strong",
+    "alg_denoise_gaussian_light",
+    "alg_denoise_gaussian_strong",
+    "alg_denoise_median_light",
+    "alg_denoise_median_strong",
+    "alg_dehaze_dcp_fast",
+    "alg_dehaze_dcp_strong",
+    "alg_dehaze_clahe_mild",
+    "alg_dehaze_clahe_strong",
+    "alg_dehaze_gamma_mild",
+    "alg_dehaze_gamma_strong",
+    "alg_deblur_unsharp_light",
+    "alg_deblur_unsharp_strong",
+    "alg_deblur_laplacian_light",
+    "alg_deblur_laplacian_strong",
+    "alg_sr_nearest",
+    "alg_sr_linear",
+    "alg_sr_bicubic_sharp",
+    "alg_sr_lanczos_sharp",
+    "alg_lowlight_gamma_soft",
+    "alg_lowlight_gamma_strong",
+    "alg_lowlight_clahe_soft",
+    "alg_lowlight_clahe_strong",
+    "alg_video_denoise_gaussian_light",
+    "alg_video_denoise_gaussian_strong",
+    "alg_video_denoise_median_light",
+    "alg_video_denoise_median_strong",
+    "alg_video_sr_nearest",
+    "alg_video_sr_linear",
+    "alg_video_sr_bicubic_sharp",
+    "alg_video_sr_lanczos_sharp",
+}
+
+
+def _is_fast_select_platform_algorithm(algorithm: dict | None, *, task_label: str, task_type: str) -> bool:
+    if not isinstance(algorithm, dict):
+        return False
+    if str(algorithm.get("owner_id") or "system").strip() != "system":
+        return False
+    if str(algorithm.get("task") or "").strip() != str(task_label or "").strip():
+        return False
+    if not _is_algorithm_active(algorithm):
+        return False
+
+    algorithm_id = str(algorithm.get("algorithm_id") or "").strip()
+    impl = str(algorithm.get("impl") or "").strip().lower()
+    has_community_source = bool(
+        str(algorithm.get("source_owner_id") or "").strip()
+        or str(algorithm.get("source_algorithm_id") or "").strip()
+    )
+    if not has_community_source and algorithm_id in FAST_SELECT_HIDDEN_PLATFORM_ALGORITHM_IDS:
+        return False
+
+    if impl == "userpackage":
+        if str(task_type or "").startswith("video_"):
+            return False
+        runtime_ready = algorithm.get("runtime_ready")
+        runtime_ok = bool(runtime_ready) if runtime_ready is not None else bool(algorithm.get("allow_use", False))
+        return runtime_ok and bool(algorithm.get("allow_use", False))
+
+    return True
 
 
 def _assert_algorithm_manage_access(algorithm: dict, current_user: dict) -> None:
@@ -2535,10 +2832,18 @@ def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user:
     presets_by_id = {x["algorithm_id"]: dict(x.get("param_presets") or {}) for x in catalog}
 
     _repair_submission_community_algorithm_names(r, owner_id=owner_id if not include_public else None)
+    if owner_id and not include_public:
+        for submission in _list_all_algorithm_submissions(r):
+            if str(submission.get("owner_id") or "").strip() != owner_id:
+                continue
+            _ensure_submission_owner_algorithm_synced(r, submission)
     items = list_algorithms(r, limit=limit, owner_id=owner_id, include_public=include_public) or []
     out = []
-    for x in items:
+    for raw_item in items:
+        x = _normalize_algorithm_runtime_state(raw_item)
         alg_id = x.get("algorithm_id")
+        if isinstance(alg_id, str) and x != raw_item:
+            save_algorithm(r, alg_id, x)
         if isinstance(alg_id, str):
             dp = x.get("default_params")
             if not isinstance(dp, dict) or not dp:
@@ -2686,7 +2991,46 @@ def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
         delete_algorithm(r, algorithm_id)
         return {"ok": True, "algorithm_id": algorithm_id, "archived": False}
 
-    delete_algorithm(r, algorithm_id)
+    submission_id = str(cur.get("source_submission_id") or "").strip()
+    if submission_id:
+        submission = load_algorithm_submission(r, submission_id)
+        if (
+            submission
+            and str(submission.get("owner_id") or "").strip() == owner_id
+            and str(submission.get("owner_algorithm_id") or "").strip() == algorithm_id
+        ):
+            community_algorithm_id = str(submission.get("community_algorithm_id") or "").strip()
+            if community_algorithm_id and community_algorithm_id != algorithm_id:
+                community_algorithm = load_algorithm(r, community_algorithm_id)
+                if community_algorithm and str(community_algorithm.get("owner_id") or "").strip() == owner_id:
+                    _delete_algorithm_record_with_related_state(r, community_algorithm)
+
+            delete_algorithm_submission(r, submission_id)
+
+            has_archive_reference = False
+            for key in r.scan_iter(match="algorithm:*", count=1000):
+                try:
+                    raw = r.get(key)
+                    if not raw:
+                        continue
+                    data = json.loads(raw)
+                    if not isinstance(data, dict):
+                        continue
+                    if str(data.get("algorithm_id") or "").strip() == algorithm_id:
+                        continue
+                    if str(data.get("source_submission_id") or "").strip() == submission_id:
+                        has_archive_reference = True
+                        break
+                except Exception:
+                    continue
+
+            if not str(submission.get("platform_algorithm_id") or "").strip() and not has_archive_reference:
+                try:
+                    shutil.rmtree(_algorithm_submission_dir(owner_id, submission_id), ignore_errors=True)
+                except Exception:
+                    pass
+
+    _delete_algorithm_record_with_related_state(r, cur)
     return {"ok": True, "algorithm_id": algorithm_id, "archived": False}
 
 
@@ -2733,7 +3077,7 @@ def list_algorithm_submissions_for_current_user(current_user: dict = Depends(get
     r = make_redis()
     username = _username_of(current_user)
     items = [
-        _algorithm_submission_to_out(item)
+        _algorithm_submission_to_out(_ensure_submission_owner_algorithm_synced(r, item))
         for item in _list_all_algorithm_submissions(r)
         if str(item.get("owner_id") or "") == username
     ]
@@ -2817,6 +3161,11 @@ def delete_algorithm_submission_for_current_user(submission_id: str, current_use
         community_algorithm = load_algorithm(r, community_algorithm_id)
         if community_algorithm and str(community_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
             _delete_algorithm_record_with_related_state(r, community_algorithm)
+    owner_algorithm_id = str(cur.get("owner_algorithm_id") or "").strip()
+    if owner_algorithm_id:
+        owner_algorithm = load_algorithm(r, owner_algorithm_id)
+        if owner_algorithm and str(owner_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
+            _delete_algorithm_record_with_related_state(r, owner_algorithm)
 
     delete_algorithm_submission(r, submission_id)
     has_archive_reference = False
@@ -2879,7 +3228,7 @@ def admin_list_algorithm_submissions(
         item_status = str(item.get("status") or "").strip().lower()
         if status_value and item_status != status_value:
             continue
-        items.append(_algorithm_submission_to_out(item))
+        items.append(_algorithm_submission_to_out(_ensure_submission_owner_algorithm_synced(r, item)))
     return items
 
 
@@ -2899,8 +3248,16 @@ def admin_review_algorithm_submission(
     cur["review_note"] = _validate_text_encoding(payload.review_note or "", "algorithm_submission.review_note")
     cur["reviewed_by"] = _username_of(current_user)
     cur["reviewed_at"] = time.time()
-    if status == "approved" and bool(payload.collect_to_platform):
-        cur["platform_algorithm_id"] = _promote_algorithm_submission_to_platform(r, cur)
+    runtime_ready = status == "approved" and bool(payload.runtime_ready)
+    cur["runtime_ready"] = runtime_ready
+    owner_algorithm_id = str(cur.get("owner_algorithm_id") or "").strip()
+    if status == "approved":
+        cur["owner_algorithm_id"] = _upsert_algorithm_submission_owner_algorithm(r, cur, runtime_ready=runtime_ready)
+    elif owner_algorithm_id:
+        _set_platform_algorithm_runtime_state(r, owner_algorithm_id, False)
+    platform_algorithm_id = str(cur.get("platform_algorithm_id") or "").strip()
+    if platform_algorithm_id:
+        _set_platform_algorithm_runtime_state(r, platform_algorithm_id, runtime_ready)
     save_algorithm_submission(r, submission_id, cur)
     owner_id = str(cur.get("owner_id") or "").strip()
     if owner_id:
@@ -2917,6 +3274,38 @@ def admin_review_algorithm_submission(
             if cur.get("review_note"):
                 note = f"{note} 审核说明：{cur['review_note']}"
             _create_notice(r, owner_id, "算法代码接入申请未通过", note, kind="warning")
+    return _algorithm_submission_to_out(cur)
+
+
+@app.post("/admin/algorithm-submissions/{submission_id}/promote-platform", response_model=AlgorithmSubmissionOut)
+def admin_promote_algorithm_submission_to_platform(
+    submission_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    r = make_redis()
+    cur = load_algorithm_submission(r, submission_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_not_found", submission_id=submission_id)
+    if str(cur.get("status") or "").strip().lower() != "approved":
+        err.api_error(409, err.E_HTTP, "algorithm_submission_not_approved", submission_id=submission_id)
+    if not bool(cur.get("runtime_ready")):
+        err.api_error(409, err.E_HTTP, "algorithm_submission_not_runtime_ready", submission_id=submission_id)
+
+    cur["platform_algorithm_id"] = _promote_algorithm_submission_to_platform(r, cur, runtime_ready=True)
+    cur["promoted_by"] = _username_of(current_user)
+    cur["promoted_at"] = time.time()
+    save_algorithm_submission(r, submission_id, cur)
+
+    owner_id = str(cur.get("owner_id") or "").strip()
+    if owner_id:
+        _create_notice(
+            r,
+            owner_id,
+            "算法已被收录为平台算法",
+            f"你提交的算法代码包“{cur.get('name') or submission_id}”已由管理员收录为平台算法：{cur['platform_algorithm_id']}。",
+            kind="success",
+        )
     return _algorithm_submission_to_out(cur)
 
 
@@ -3206,10 +3595,14 @@ def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = D
     copied["visibility"] = "private"
     copied["allow_use"] = False
     copied["allow_download"] = False
+    copied["runtime_ready"] = False
+    copied["is_active"] = True
     source["download_count"] = int(source.get("download_count") or 0) + 1
     save_algorithm(r, algorithm_id, source)
     copied["source_algorithm_id"] = algorithm_id
     copied["source_owner_id"] = source_owner
+    if str(copied.get("impl") or "").strip().lower() == "userpackage":
+        copied["package_role"] = "downloaded_community"
     save_algorithm(r, target_algorithm_id, copied)
     return AlgorithmOut(**copied)
 
@@ -3351,6 +3744,10 @@ def admin_list_community_algorithms(current_user: dict = Depends(get_current_use
       visibility = str(item.get("visibility") or "private").lower()
       if owner_id == "system":
           continue
+      item = _normalize_algorithm_runtime_state(item)
+      item_id = str(item.get("algorithm_id") or "").strip()
+      if item_id:
+          save_algorithm(r, item_id, item)
       if not _is_algorithm_active(item):
           continue
       if visibility != "public":
@@ -3481,7 +3878,9 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
             restored["allow_use"] = True
             restored["allow_download"] = True
             restored["is_active"] = True
+            restored["runtime_ready"] = True
             restored["updated_at"] = time.time()
+            restored["package_role"] = "platform"
             save_algorithm(r, str(existing.get("algorithm_id") or ""), restored)
             return AlgorithmOut(**restored)
 
@@ -3494,8 +3893,10 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
     promoted["allow_use"] = True
     promoted["allow_download"] = True
     promoted["is_active"] = True
+    promoted["runtime_ready"] = True
     promoted["source_algorithm_id"] = algorithm_id
     promoted["source_owner_id"] = source_owner
+    promoted["package_role"] = "platform"
     save_algorithm(r, promoted["algorithm_id"], promoted)
 
     if source_owner:
@@ -3756,6 +4157,7 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
             )
 
     task_label = TASK_LABEL_BY_TYPE.get(task_type, "")
+    explicit_candidate_ids = bool(payload.candidate_algorithm_ids)
     if payload.candidate_algorithm_ids:
         candidate_ids = []
         for x in payload.candidate_algorithm_ids:
@@ -3763,8 +4165,12 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
             if aid:
                 candidate_ids.append(aid)
     else:
-        all_algs = list_algorithms(r, limit=2000, owner_id=(username or None)) or []
-        candidate_ids = [str(x.get("algorithm_id") or "") for x in all_algs if str((x.get("task") or "")).strip() == task_label]
+        all_algs = list_algorithms(r, limit=5000, owner_id=None, include_public=True) or []
+        candidate_ids = [
+            str(x.get("algorithm_id") or "")
+            for x in all_algs
+            if _is_fast_select_platform_algorithm(x, task_label=task_label, task_type=task_type)
+        ]
 
     def _normalize_effective_params(params: dict | None) -> dict:
         src = params if isinstance(params, dict) else {}
@@ -3778,6 +4184,7 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
 
     def _scheme_base_name(name: str) -> str:
         n = str(name or "").strip()
+        n = re.sub(r"\s+#\d+\s*$", "", n).strip()
         if n.endswith("）"):
             i = n.rfind("（")
             if i > 0:
@@ -3794,8 +4201,9 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
         tokens: set[str] = set()
         for raw in (
             _scheme_base_name(str(alg.get("name") or "")),
-            str(alg.get("impl") or ""),
             str(alg.get("algorithm_id") or ""),
+            str(alg.get("source_submission_id") or ""),
+            str(alg.get("source_algorithm_id") or ""),
         ):
             text = str(raw or "").strip().lower()
             if not text:
@@ -3864,6 +4272,11 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
                 task_type=task_type,
                 task_label=task_label,
             )
+        if explicit_candidate_ids and is_admin:
+            if not _is_algorithm_active(alg):
+                continue
+        elif not _is_fast_select_platform_algorithm(alg, task_label=task_label, task_type=task_type):
+            continue
         valid_ids.append(aid)
         alg_by_id[aid] = alg
         candidate_defaults[aid] = _normalize_effective_params(alg.get("default_params") if isinstance(alg.get("default_params"), dict) else {})
@@ -3891,7 +4304,8 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
     )
     model = load_online_model(r, task_type)
     historical_done_count = 0
-    if (not is_admin) and model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
+    force_historical_selection = bool(is_admin and explicit_candidate_ids)
+    if (not force_historical_selection) and model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
         arm_stats = fast_select_algorithms_online(
             task_type=task_type,
             candidate_algorithm_ids=valid_ids,
@@ -3926,9 +4340,17 @@ def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dic
                 cand_base = _scheme_base_name(str(cand_alg.get("name") or ""))
                 cand_family = _algorithm_family_tokens(cand_alg)
                 cand_eff = candidate_defaults.get(aid) or {}
+                same_submission = bool(
+                    str(cand_alg.get("source_submission_id") or "").strip()
+                    and str(cand_alg.get("source_submission_id") or "").strip() == str(run_alg.get("source_submission_id") or "").strip()
+                )
+                same_source_algorithm = bool(
+                    str(cand_alg.get("source_algorithm_id") or "").strip()
+                    and str(cand_alg.get("source_algorithm_id") or "").strip() == run_alg_id
+                )
                 same_base = bool(cand_base and run_base and cand_base == run_base)
                 same_family = bool(cand_family and run_family and (cand_family & run_family))
-                if not same_base and not same_family:
+                if not same_submission and not same_source_algorithm and not same_base and not same_family:
                     continue
                 if run_eff and cand_eff and run_eff != cand_eff:
                     continue
@@ -4019,6 +4441,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
     alg = load_algorithm(r, algorithm_id)
     if not alg:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "\u7b97\u6cd5\u4e0d\u5b58\u5728", algorithm_id=algorithm_id)
+    alg = _normalize_algorithm_runtime_state(alg)
     _assert_resource_access(alg, current_user, allow_system=True)
 
     requested_params = dict(payload.params or {})
@@ -4047,6 +4470,24 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
             expected_algorithm_task=expected_task,
             algorithm_task=(alg.get("task") or "").strip(),
         )
+    if str(alg.get("impl") or "").strip().lower() == "userpackage":
+        algorithm_owner_id = str(alg.get("owner_id") or "system").strip() or "system"
+        is_owner_package = algorithm_owner_id == owner_id
+        if algorithm_owner_id not in {"system", owner_id}:
+            err.api_error(403, err.E_HTTP, "forbidden_access")
+        if task_type.startswith("video_"):
+            err.api_error(409, err.E_ALGORITHM_RUNTIME, "algorithm_package_video_not_supported", algorithm_id=algorithm_id, task_type=task_type)
+        if alg.get("is_active") is False or not bool(alg.get("runtime_ready")) or (not is_owner_package and not bool(alg.get("allow_use"))):
+            err.api_error(
+                409,
+                err.E_ALGORITHM_RUNTIME,
+                "algorithm_package_not_runtime_ready",
+                algorithm_id=algorithm_id,
+                runtime_ready=bool(alg.get("runtime_ready")),
+                is_active=alg.get("is_active", True),
+                allow_use=bool(alg.get("allow_use")),
+                owner_package=is_owner_package,
+            )
 
     from .vision.dataset_access import count_paired_images, count_paired_videos
 

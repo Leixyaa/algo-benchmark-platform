@@ -121,6 +121,7 @@ class AlgorithmOut(BaseModel):
     archive_filename: str = ""
     archive_sha256: str = ""
     source_submission_id: Optional[str] = None
+    package_role: Optional[str] = None
     download_count: int = 0
     owner_id: Optional[str] = "system"
     source_owner_id: Optional[str] = None
@@ -131,6 +132,8 @@ class AlgorithmOut(BaseModel):
     visibility: str = "private"
     allow_use: bool = False
     allow_download: bool = False
+    is_active: bool = True
+    runtime_ready: bool = False
 
 
 class ResourceCommentCreate(BaseModel):
@@ -328,7 +331,8 @@ class AlgorithmSubmissionCreate(BaseModel):
 class AlgorithmSubmissionReview(BaseModel):
     status: str
     review_note: str = ""
-    collect_to_platform: bool = True
+    collect_to_platform: bool = False
+    runtime_ready: bool = False
 
 
 class AlgorithmSubmissionPublish(BaseModel):
@@ -352,7 +356,9 @@ class AlgorithmSubmissionOut(BaseModel):
     review_note: str = ""
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[float] = None
+    runtime_ready: bool = False
     created_at: float
+    owner_algorithm_id: Optional[str] = None
     platform_algorithm_id: Optional[str] = None
     community_algorithm_id: Optional[str] = None
     community_published_at: Optional[float] = None

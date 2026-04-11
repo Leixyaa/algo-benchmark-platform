@@ -19,10 +19,12 @@
         />
 
         <div class="protocol-card">
-          <div class="protocol-title">提交说明</div>
-          <div class="protocol-line">1. 推荐上传 `.zip` 代码包，也支持单文件代码包。</div>
-          <div class="protocol-line">2. 请说明依赖环境、入口文件和启动方式，便于后续接入运行链路。</div>
-          <div class="protocol-line">3. 审核通过后会生成平台留档记录，但默认仍处于“待接入运行时”状态。</div>
+          <div class="protocol-title">算法运行接入协议</div>
+          <div class="protocol-line">1. 第一版仅支持图像任务：去噪、去模糊、去雾、超分、低光增强；暂不支持视频去噪 / 视频超分。</div>
+          <div class="protocol-line">2. 代码包只支持单个 `.py` 文件或 `.zip`；zip 内优先使用 `infer.py`，没有 `infer.py` 时必须只包含一个 `.py` 文件。</div>
+          <div class="protocol-line">3. 固定命令行协议：`python infer.py --input &lt;input_image&gt; --output &lt;output_image&gt;`。</div>
+          <div class="protocol-line">4. 代码必须从 `--input` 读取一张图片，并把处理后的图片写入 `--output` 指定的输出图片路径。</div>
+          <div class="protocol-line">5. 后端不会 import 用户代码，只会在管理员审核并勾选“接入运行链路”后，用 subprocess 隔离执行并设置超时。</div>
         </div>
 
         <el-form label-position="top" class="submit-form">
@@ -74,14 +76,14 @@
                 ref="archiveInput"
                 type="file"
                 class="hidden-file-input"
-                accept=".zip,.py,.txt,.rar,.7z"
+                accept=".zip,.py"
                 @change="handleArchiveChange"
               />
               <el-button plain @click="triggerArchiveSelect">选择文件</el-button>
               <span class="file-name">{{ form.archiveFilename || "未选择文件" }}</span>
               <el-button v-if="form.archiveFilename" text type="danger" @click="clearArchive">清除</el-button>
             </div>
-            <div class="file-tip">建议上传 zip 包，前端会按 Base64 发送到后端进行存档。</div>
+            <div class="file-tip">请上传 `.py` 或 `.zip`。若希望接入真实 Run，请按上方命令行协议提供入口脚本。</div>
           </el-form-item>
 
           <div class="form-actions">
@@ -108,9 +110,23 @@
           </el-table-column>
           <el-table-column prop="createdAt" label="提交时间" width="170" />
           <el-table-column prop="reviewNote" label="审核说明" min-width="220" show-overflow-tooltip />
-          <el-table-column label="平台留档" min-width="180">
+          <el-table-column label="用户算法" min-width="180">
             <template #default="{ row }">
-              {{ row.platformAlgorithmId || "待审核 / 未生成" }}
+              <el-tag v-if="row.ownerAlgorithmId" type="success">已生成</el-tag>
+              <span v-else-if="row.status === 'approved'">待生成</span>
+              <span v-else class="publish-placeholder">待审核</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="运行接入" min-width="140">
+            <template #default="{ row }">
+              <el-tag v-if="row.runtimeReady" type="success">已接入</el-tag>
+              <span v-else-if="row.status === 'approved'">未接入</span>
+              <span v-else class="publish-placeholder">待审核</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="平台收录" min-width="180">
+            <template #default="{ row }">
+              {{ row.platformAlgorithmId || "未收录" }}
             </template>
           </el-table-column>
           <el-table-column label="社区发布" min-width="180">
@@ -206,6 +222,8 @@ function mapSubmission(x) {
     reviewedBy: String(x.reviewed_by || ""),
     reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "",
     createdAt: formatTs(x.created_at),
+    runtimeReady: Boolean(x.runtime_ready),
+    ownerAlgorithmId: String(x.owner_algorithm_id || ""),
     platformAlgorithmId: String(x.platform_algorithm_id || ""),
     communityAlgorithmId: String(x.community_algorithm_id || ""),
     communityPublishedAt: x.community_published_at ? formatTs(x.community_published_at) : "",
@@ -245,6 +263,10 @@ async function loadSubmissions() {
   }
   const list = await algorithmSubmissionsApi.listMine();
   submissions.value = (list || []).map(mapSubmission);
+  try {
+    await store.fetchAlgorithms();
+  } catch {
+  }
 }
 
 function triggerArchiveSelect() {

@@ -61,9 +61,9 @@
           </el-table>
         </el-tab-pane>
 
-        <el-tab-pane label="&#21382;&#21490;&#35760;&#24405;" name="owned">
+        <el-tab-pane label="&#29992;&#25143;&#31639;&#27861;" name="owned">
           <div class="history-tip">
-            &#26032;&#30340;&#33258;&#23450;&#20041;&#31639;&#27861;&#35831;&#36890;&#36807;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#25552;&#20132;&#20195;&#30721;&#21253;&#12290;&#36825;&#37324;&#20445;&#30041;&#30340;&#26159;&#26089;&#26399;&#29992;&#25143;&#31639;&#27861;&#35760;&#24405;&#65292;&#20316;&#20026;&#21382;&#21490;&#31639;&#27861;&#31649;&#29702;&#19982;&#23548;&#20986;&#20837;&#21475;&#12290;
+            &#36825;&#37324;&#23637;&#31034;&#24403;&#21069;&#36134;&#21495;&#30340;&#31169;&#26377;&#31639;&#27861;&#12290;&#21253;&#25324;&#36890;&#36807;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#23457;&#26680;&#21518;&#29983;&#25104;&#30340; UserPackage &#31639;&#27861;&#65292;&#21487;&#29992;&#20110;&#26412;&#20154;&#21457;&#36215;&#27979;&#35797;&#12289;&#19979;&#36733;&#19982;&#21024;&#38500;&#12290;
           </div>
           <el-table :data="pagedOwnedAlgorithms" border stripe class="data-table">
             <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
@@ -79,6 +79,7 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
+                      <el-dropdown-item command="use">{{ TEXT.use }}</el-dropdown-item>
                       <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
                       <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
                     </el-dropdown-menu>
@@ -87,7 +88,7 @@
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty description="&#26242;&#26080;&#21382;&#21490;&#31639;&#27861;&#35760;&#24405;" />
+              <el-empty description="&#26242;&#26080;&#29992;&#25143;&#31639;&#27861;" />
             </template>
           </el-table>
 
@@ -312,6 +313,18 @@ const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
 function isPlatformAlgorithm(alg) {
   return String(alg?.raw?.owner_id || "") === "system";
 }
+function getPackageRole(alg) {
+  const explicit = String(alg?.packageRole || alg?.raw?.package_role || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
+  if (impl !== "userpackage") return "";
+  if (isPlatformAlgorithm(alg)) return "platform";
+  const visibility = String(alg?.visibility || alg?.raw?.visibility || "").trim().toLowerCase();
+  if (String(alg?.sourceAlgorithmId || alg?.raw?.source_algorithm_id || "").trim()) return "downloaded_community";
+  if (visibility === "public" && String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim()) return "community";
+  if (String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim()) return "owner_runtime";
+  return "";
+}
 function isVisiblePlatformAlgorithm(alg) {
   if (!isPlatformAlgorithm(alg)) return false;
   if (alg?.raw?.is_active === false) return false;
@@ -375,10 +388,18 @@ const filteredAlgorithms = computed(() => {
 });
 const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isVisiblePlatformAlgorithm(a)));
 const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isPlatformAlgorithm(a)));
+function isUserRuntimeAlgorithm(row) {
+  const role = getPackageRole(row);
+  if (role === "owner_runtime") return true;
+  if (role === "community" || role === "downloaded_community") return false;
+  return !hasAlgorithmCommunitySource(row);
+}
 function hasAlgorithmCommunitySource(row) {
+  const role = getPackageRole(row);
+  if (role === "community" || role === "downloaded_community") return true;
   return Boolean(String(row?.sourceUploaderId || "").trim() || String(row?.sourceAlgorithmId || "").trim());
 }
-const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => !hasAlgorithmCommunitySource(a)));
+const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => isUserRuntimeAlgorithm(a)));
 const filteredDownloadedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => hasAlgorithmCommunitySource(a)));
 
 function isSelfPublishedAlgorithm(row) {
@@ -1596,8 +1617,6 @@ async function resetToBuiltins() {
   margin-top: 4px;
 }
 </style>
-
-
 
 
 

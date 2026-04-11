@@ -68,20 +68,19 @@
               <div class="card-eyebrow">Weight</div>
               <div class="card-title">综合分权重</div>
             </div>
-            <p class="card-desc">默认综合分只统计平台内置指标，自定义指标仍可单独参与排序。</p>
+            <p class="card-desc">默认综合分只统计质量指标，自定义指标与耗时仍可单独参与排序。</p>
           </div>
         </template>
-        <div class="weight-note">默认综合分只使用平台内置指标：PSNR / SSIM / NIQE / 耗时。</div>
+        <div class="weight-note">默认综合分只使用质量指标：PSNR / SSIM / NIQE。耗时保留单独展示与单独排序。</div>
         <div class="weight-grid">
           <div class="weight-item"><span class="weight-label">PSNR</span><el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">SSIM</span><el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">NIQE</span><el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
-          <div class="weight-item"><span class="weight-label">TIME</span><el-input-number v-model="wTIME" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
         </div>
         <div class="weight-actions">
           <el-button plain class="preset-btn" @click="presetQuality">质量优先</el-button>
           <el-button plain class="preset-btn" @click="presetBalanced">均衡方案</el-button>
-          <el-button plain class="preset-btn" @click="presetSpeed">速度优先</el-button>
+          <el-button plain class="preset-btn" @click="presetPerception">感知优先</el-button>
           <span class="weight-sum">权重总和：{{ weightSum.toFixed(2) }}</span>
         </div>
         <div class="weight-breakdown">
@@ -189,7 +188,7 @@
             </div>
           </div>
         </template>
-        <div class="table-note">默认综合分只统计平台内置指标，自定义指标可通过上方“排序方式”切换查看单指标结果。</div>
+        <div class="table-note">默认综合分只统计质量指标 PSNR / SSIM / NIQE；耗时与自定义指标可通过上方“排序方式”切换查看。</div>
         <el-table :data="tableRows" stripe class="compare-table" height="500">
           <el-table-column prop="algorithmName" label="算法名称" min-width="160" fixed="left" />
           <el-table-column :label="selectedRankMetricLabel" width="120" align="center">
@@ -225,7 +224,6 @@ const chartTopN = ref(10);
 const wPSNR = ref(3.5);
 const wSSIM = ref(3.5);
 const wNIQE = ref(2.0);
-const wTIME = ref(1.0);
 const fastTopK = ref(3);
 const fastAlpha = ref(0.35);
 const fastLoading = ref(false);
@@ -236,6 +234,42 @@ const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
 let chartHits = [];
 const CACHE_KEY = "compare_filters_v2";
 const PLATFORM_DEFAULT_METRICS = ["PSNR", "SSIM", "NIQE"];
+const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
+  "alg_dn_cnn_light",
+  "alg_dn_cnn_strong",
+  "alg_denoise_bilateral_soft",
+  "alg_denoise_bilateral_strong",
+  "alg_denoise_gaussian_light",
+  "alg_denoise_gaussian_strong",
+  "alg_denoise_median_light",
+  "alg_denoise_median_strong",
+  "alg_dehaze_dcp_fast",
+  "alg_dehaze_dcp_strong",
+  "alg_dehaze_clahe_mild",
+  "alg_dehaze_clahe_strong",
+  "alg_dehaze_gamma_mild",
+  "alg_dehaze_gamma_strong",
+  "alg_deblur_unsharp_light",
+  "alg_deblur_unsharp_strong",
+  "alg_deblur_laplacian_light",
+  "alg_deblur_laplacian_strong",
+  "alg_sr_nearest",
+  "alg_sr_linear",
+  "alg_sr_bicubic_sharp",
+  "alg_sr_lanczos_sharp",
+  "alg_lowlight_gamma_soft",
+  "alg_lowlight_gamma_strong",
+  "alg_lowlight_clahe_soft",
+  "alg_lowlight_clahe_strong",
+  "alg_video_denoise_gaussian_light",
+  "alg_video_denoise_gaussian_strong",
+  "alg_video_denoise_median_light",
+  "alg_video_denoise_median_strong",
+  "alg_video_sr_nearest",
+  "alg_video_sr_linear",
+  "alg_video_sr_bicubic_sharp",
+  "alg_video_sr_lanczos_sharp",
+]);
 
 const datasetMap = computed(() => new Map((store.datasets || []).map((item) => [item.id, item])));
 const taskOptions = computed(() => Array.from(new Set((store.algorithms || []).map((item) => item.task).filter(Boolean))));
@@ -263,14 +297,13 @@ const selectedDatasetSummary = computed(() => datasetId.value ? datasetMap.value
 const selectedFastTaskLabel = computed(() => task.value || taskOptions.value?.[0] || "");
 const selectedFastTaskType = computed(() => mapTaskLabelToType(selectedFastTaskLabel.value));
 const selectedFastDataset = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value) || null : null);
-const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value) + Number(wTIME.value));
+const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value));
 const weightBreakdown = computed(() => {
   const sum = weightSum.value > 0 ? weightSum.value : 1;
   return [
     { key: "psnr", label: "PSNR", percent: Math.round((Number(wPSNR.value) / sum) * 100) },
     { key: "ssim", label: "SSIM", percent: Math.round((Number(wSSIM.value) / sum) * 100) },
     { key: "niqe", label: "NIQE", percent: Math.round((Number(wNIQE.value) / sum) * 100) },
-    { key: "time", label: "TIME", percent: Math.round((Number(wTIME.value) / sum) * 100) },
   ];
 });
 const platformAlgorithmSummary = computed(() => {
@@ -313,7 +346,6 @@ function loadCache() {
     if (data.wPSNR != null) wPSNR.value = Number(data.wPSNR) || 3.5;
     if (data.wSSIM != null) wSSIM.value = Number(data.wSSIM) || 3.5;
     if (data.wNIQE != null) wNIQE.value = Number(data.wNIQE) || 2.0;
-    if (data.wTIME != null) wTIME.value = Number(data.wTIME) || 1.0;
   } catch {}
 }
 
@@ -327,7 +359,6 @@ function saveCache() {
     wPSNR: wPSNR.value,
     wSSIM: wSSIM.value,
     wNIQE: wNIQE.value,
-    wTIME: wTIME.value,
   }));
 }
 
@@ -344,15 +375,14 @@ function resetAllConfig() {
   wPSNR.value = 3.5;
   wSSIM.value = 3.5;
   wNIQE.value = 2.0;
-  wTIME.value = 1.0;
   fastRecommendations.value = [];
   fastContext.value = null;
   saveCache();
 }
 
-function presetQuality() { wPSNR.value = 4.0; wSSIM.value = 4.0; wNIQE.value = 1.5; wTIME.value = 0.5; }
-function presetBalanced() { wPSNR.value = 3.5; wSSIM.value = 3.5; wNIQE.value = 2.0; wTIME.value = 1.0; }
-function presetSpeed() { wPSNR.value = 2.5; wSSIM.value = 2.5; wNIQE.value = 1.5; wTIME.value = 3.5; }
+function presetQuality() { wPSNR.value = 4.0; wSSIM.value = 3.8; wNIQE.value = 1.2; }
+function presetBalanced() { wPSNR.value = 3.5; wSSIM.value = 3.5; wNIQE.value = 2.0; }
+function presetPerception() { wPSNR.value = 2.8; wSSIM.value = 2.8; wNIQE.value = 4.2; }
 function refreshAll() { return Promise.allSettled([store.fetchRuns(), store.fetchAlgorithms(), store.fetchDatasets(), store.fetchMetricsCatalog()]); }
 
 function mapTaskLabelToType(taskLabel) {
@@ -394,12 +424,10 @@ function buildScoringContext(runs, targetRun) {
   const psnrs = comparableRuns.map((run) => toNumber(run.psnr)).filter((x) => x != null);
   const ssims = comparableRuns.map((run) => toNumber(run.ssim)).filter((x) => x != null);
   const niqes = comparableRuns.map((run) => toNumber(run.niqe)).filter((x) => x != null);
-  const times = comparableRuns.map((run) => parseElapsedSeconds(run.elapsed)).filter((x) => x != null);
   return {
     mmPSNR: minMax(psnrs),
     mmSSIM: minMax(ssims),
     mmNIQE: minMax(niqes),
-    mmTIME: minMax(times),
     sampleCount: comparableRuns.length,
   };
 }
@@ -448,7 +476,7 @@ const tableRows = computed(() => {
   runs = runs.filter((run) => isRealComparableRun(run));
 
   const sum = weightSum.value > 0 ? weightSum.value : 1;
-  const W = { psnr: Number(wPSNR.value) / sum, ssim: Number(wSSIM.value) / sum, niqe: Number(wNIQE.value) / sum, time: Number(wTIME.value) / sum };
+  const W = { psnr: Number(wPSNR.value) / sum, ssim: Number(wSSIM.value) / sum, niqe: Number(wNIQE.value) / sum };
   const ctxCache = new Map();
 
   const rows = runs.map((run) => {
@@ -460,14 +488,12 @@ const tableRows = computed(() => {
     const psnr = toNumber(run.psnr);
     const ssim = toNumber(run.ssim);
     const niqe = toNumber(run.niqe);
-    const time = parseElapsedSeconds(run.elapsed);
     const nPSNR = norm01(psnr, ctx.mmPSNR.min, ctx.mmPSNR.max);
     const nSSIM = norm01(ssim, ctx.mmSSIM.min, ctx.mmSSIM.max);
     const nNIQE = norm01(niqe, ctx.mmNIQE.min, ctx.mmNIQE.max);
-    const nTIME = norm01(time, ctx.mmTIME.min, ctx.mmTIME.max);
-    const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
+    const okAll = [nPSNR, nSSIM, nNIQE].every((x) => x != null);
     let score = null;
-    if (okAll) score = Number((W.psnr * nPSNR + W.ssim * nSSIM + W.niqe * (1 - nNIQE) + W.time * (1 - nTIME)).toFixed(4));
+    if (okAll) score = Number((W.psnr * nPSNR + W.ssim * nSSIM + W.niqe * (1 - nNIQE)).toFixed(4));
     return {
       ...run,
       datasetName: ds?.name || run.datasetId,
@@ -475,10 +501,10 @@ const tableRows = computed(() => {
       score,
       comparableSampleCount: ctx.sampleCount || 0,
       legacyReason: okAll
-        ? `平台内置综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% + 耗时 ${Math.round(W.time * 100)}% 计算。`
+        ? `默认质量综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% 计算。`
         : "平台内置指标不完整，当前不参与默认综合分排名。",
       reason: okAll
-        ? `平台内置综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% + 耗时 ${Math.round(W.time * 100)}% 计算；评分范围为同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）。`
+        ? `默认质量综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% 计算；评分范围为同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）。耗时请单独查看。`
         : "同任务同数据集下平台内置指标不完整，当前不参与默认综合分排名。",
     };
   });
@@ -503,7 +529,7 @@ const bestResultRow = computed(() => (tableRows.value.length ? tableRows.value[0
 const bestResultSummary = computed(() => {
   const top = bestResultRow.value;
   if (!top) return "";
-  if (chartMetric.value === "score") return `这是当前筛选条件下基于平台内置指标综合分计算得到的默认最优方案。${top.reason ? ` ${top.reason}` : ""}`;
+  if (chartMetric.value === "score") return `这是当前筛选条件下基于质量综合分计算得到的默认最优方案。${top.reason ? ` ${top.reason}` : ""}`;
   return `这是当前筛选条件下按“${selectedRankMetricLabel.value}”排序得到的当前最优方案。${top.reason ? ` ${top.reason}` : ""}`;
 });
 const recommendationDifferenceText = computed(() => {
@@ -553,9 +579,10 @@ function onChartMove(event) {
 function drawChart() {
   const canvas = chartCanvas.value;
   if (!canvas) return;
+  if (!canvas.isConnected) return;
   const items = chartItems.value || [];
   const wrap = canvas.parentElement;
-  const cssW = Math.max(320, Math.floor(wrap?.clientWidth || 720));
+  const cssW = Math.min(1600, Math.max(320, Math.floor(wrap?.clientWidth || 720)));
   const cssH = items.length >= 10 ? 360 : 320;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(cssW * dpr);
@@ -645,7 +672,17 @@ function getPlatformAlgorithmsForTask(taskLabel, taskType) {
     const isSystem = String(item?.raw?.owner_id || "") === "system";
     const active = item?.raw?.is_active !== false;
     const taskMatched = String(item?.task || "") === String(taskLabel || "") || String(item?.taskType || "") === String(taskType || "");
-    return isSystem && active && taskMatched;
+    const impl = String(item?.impl || item?.raw?.impl || "").trim().toLowerCase();
+    const hasCommunitySource = Boolean(String(item?.sourceUploaderId || "").trim() || String(item?.sourceAlgorithmId || "").trim());
+    const visiblePlatform = hasCommunitySource || !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(item?.id || ""));
+    const allowUse = Boolean(item?.allowUse || item?.raw?.allow_use);
+    const runtimeReadyRaw = item?.runtimeReady ?? item?.raw?.runtime_ready;
+    const runtimeOk =
+      impl !== "userpackage" ||
+      (!String(taskType || "").startsWith("video_") &&
+        allowUse &&
+        (isSystem ? true : (runtimeReadyRaw == null ? allowUse : Boolean(runtimeReadyRaw))));
+    return isSystem && active && taskMatched && visiblePlatform && runtimeOk;
   });
 }
 
@@ -653,6 +690,7 @@ async function runFastSelect() {
   const taskLabel = selectedFastTaskLabel.value;
   const dsId = datasetId.value || "";
   if (fastSelectBlockedReason.value) return ElMessage.warning(fastSelectBlockedReason.value);
+  await store.fetchAlgorithms();
   const taskType = mapTaskLabelToType(taskLabel);
   const algorithms = getPlatformAlgorithmsForTask(taskLabel, taskType);
   if (!algorithms.length) return ElMessage.warning("当前任务下暂无可推荐的平台算法");
@@ -689,6 +727,7 @@ async function createRunsByFastSelect() {
   const taskLabel = task.value || taskOptions.value?.[0] || "";
   const dsId = datasetId.value || store.datasets?.[0]?.id || "";
   if (!taskLabel || !dsId) return ElMessage.warning("请先选择任务和数据集");
+  await store.fetchAlgorithms();
   if (!fastRecommendations.value.length) return ElMessage.warning("请先执行平台算法推荐");
   let created = 0;
   for (const item of fastRecommendations.value) {
@@ -751,7 +790,7 @@ function exportConclusionMd() {
     "# 平台算法对比结论",
     "",
     `- 排序方式：${selectedRankMetricLabel.value}`,
-    `- 默认综合分口径：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}，耗时=${wTIME.value}`,
+    `- 默认综合分口径：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}（耗时单独展示，不计入默认综合分）`,
     "",
   ];
   if (bestResultRow.value) {
@@ -773,16 +812,13 @@ function exportConclusionMd() {
 function exportChartPng() {
   const canvas = chartCanvas.value;
   if (!canvas) return;
-  const url = canvas.toDataURL("image/png");
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `compare_chart_${chartMetric.value}_${Date.now()}.png`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    downloadBlob(blob, `compare_chart_${chartMetric.value}_${Date.now()}.png`);
+  }, "image/png");
 }
 
-watch([task, datasetId, onlyDone, chartMetric, chartTopN, wPSNR, wSSIM, wNIQE, wTIME], saveCache, { deep: true });
+watch([task, datasetId, onlyDone, chartMetric, chartTopN, wPSNR, wSSIM, wNIQE], saveCache, { deep: true });
 watch([tableRows, chartMetric, chartTopN], async () => { await nextTick(); drawChart(); });
 watch(availableRankMetrics, () => {
   const allowed = new Set(availableRankMetrics.value.map((item) => item.value));
@@ -1173,11 +1209,17 @@ onMounted(async () => {
 
 .chart-container {
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .main-canvas {
   width: 100%;
+  max-width: 100%;
+  height: 320px;
   display: block;
+  contain: strict;
 }
 
 .canvas-tooltip {

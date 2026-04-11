@@ -15,6 +15,7 @@ E_ALGORITHM_ID_REQUIRED = "E_ALGORITHM_ID_REQUIRED"
 E_DATASET_NOT_FOUND = "E_DATASET_NOT_FOUND"
 E_ALGORITHM_NOT_FOUND = "E_ALGORITHM_NOT_FOUND"
 E_ALGORITHM_TASK_MISMATCH = "E_ALGORITHM_TASK_MISMATCH"
+E_ALGORITHM_RUNTIME = "E_ALGORITHM_RUNTIME"
 E_DATASET_NO_PAIR = "E_DATASET_NO_PAIR"
 
 E_ZIP_PATH_TRAVERSAL = "E_ZIP_PATH_TRAVERSAL"
@@ -50,6 +51,7 @@ ERROR_DEFS: dict[str, ErrorDef] = {
     E_DATASET_NOT_FOUND: ErrorDef(E_DATASET_NOT_FOUND, "\u6570\u636e\u96c6\u4e0d\u5b58\u5728", retryable=False),
     E_ALGORITHM_NOT_FOUND: ErrorDef(E_ALGORITHM_NOT_FOUND, "\u7b97\u6cd5\u4e0d\u5b58\u5728", retryable=False),
     E_ALGORITHM_TASK_MISMATCH: ErrorDef(E_ALGORITHM_TASK_MISMATCH, "\u7b97\u6cd5\u4efb\u52a1\u4e0e\u4efb\u52a1\u7c7b\u578b\u4e0d\u5339\u914d", retryable=False),
+    E_ALGORITHM_RUNTIME: ErrorDef(E_ALGORITHM_RUNTIME, "algorithm_runtime_error", retryable=False),
     E_DATASET_NO_PAIR: ErrorDef(E_DATASET_NO_PAIR, "\u5f53\u524d\u4efb\u52a1\u65e0\u53ef\u7528\u914d\u5bf9\uff0c\u8bf7\u68c0\u67e5\u8f93\u5165\u76ee\u5f55\u4e0e gt/ \u540c\u540d\u6587\u4ef6\u5e76\u91cd\u65b0\u626b\u63cf", retryable=False),
     E_ZIP_PATH_TRAVERSAL: ErrorDef(E_ZIP_PATH_TRAVERSAL, "zip_path_traversal", retryable=False),
     E_BAD_BASE64: ErrorDef(E_BAD_BASE64, "bad_base64", retryable=False),

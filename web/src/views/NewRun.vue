@@ -108,7 +108,7 @@
                 multiple
                 collapse-tags
                 collapse-tags-tooltip
-                placeholder="请选择内置评测算法" 
+                placeholder="请选择可用评测算法"
                 class="full-width-select"
               >
                 <el-option
@@ -252,6 +252,8 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore, toTaskLabel, toTaskType } from "../stores/app";
 
 const NEWRUN_CACHE_KEY = "newrun_form_v2";
+const router = useRouter();
+const store = useAppStore();
 const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
   "alg_dn_cnn_light",
   "alg_dn_cnn_strong",
@@ -289,17 +291,82 @@ const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
   "alg_video_sr_lanczos_sharp",
 ]);
 function isPlatformAlgorithm(alg) {
-  return String(alg?.raw?.owner_id || "") === "system";
+  const ownerId = String(alg?.raw?.owner_id || "").trim();
+  return ownerId === "system";
+}
+function isCurrentUserAlgorithm(alg) {
+  const ownerId = String(alg?.raw?.owner_id || "").trim();
+  const currentUsername = String(store?.user?.username || "").trim();
+  return Boolean(currentUsername) && ownerId === currentUsername;
+}
+function getPackageRole(alg) {
+  const explicit = String(alg?.packageRole || alg?.raw?.package_role || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
+  if (impl !== "userpackage") return "";
+  if (isPlatformAlgorithm(alg)) return "platform";
+  const visibility = String(alg?.visibility || alg?.raw?.visibility || "").trim().toLowerCase();
+  if (String(alg?.sourceAlgorithmId || alg?.raw?.source_algorithm_id || "").trim()) return "downloaded_community";
+  if (visibility === "public" && String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim()) return "community";
+  if (String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim()) return "owner_runtime";
+  return "";
+}
+function getAlgorithmSourceKey(alg) {
+  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
+  if (impl !== "userpackage") return "";
+  const submissionId = String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim();
+  if (submissionId) return `submission:${submissionId}`;
+  const sourceAlgorithmId = String(alg?.sourceAlgorithmId || alg?.raw?.source_algorithm_id || "").trim();
+  if (sourceAlgorithmId) return `source:${sourceAlgorithmId}`;
+  return "";
+}
+function getAlgorithmBaseName(alg) {
+  return String(alg?.name || "")
+    .replace(/\s+#\d+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+function algorithmPreferenceScore(alg) {
+  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
+  const runtimeReady = Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready);
+  const allowUse = Boolean(alg?.allowUse || alg?.raw?.allow_use);
+  const isActive = alg?.raw?.is_active !== false;
+  const role = getPackageRole(alg);
+  if (impl !== "userpackage") return 0;
+  if (isCurrentUserAlgorithm(alg) && role === "owner_runtime" && runtimeReady && isActive) return 300;
+  if (isPlatformAlgorithm(alg) && role === "platform" && allowUse && isActive) return 200;
+  if (isCurrentUserAlgorithm(alg)) return 150;
+  if (isPlatformAlgorithm(alg)) return 100;
+  return 10;
 }
 function isVisiblePlatformAlgorithm(alg) {
-  if (!isPlatformAlgorithm(alg)) return false;
   if (alg?.raw?.is_active === false) return false;
+  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
+  const taskType = toTaskType(alg?.task || "");
+  const role = getPackageRole(alg);
+
+  if (isCurrentUserAlgorithm(alg)) {
+    if (impl === "userpackage") {
+      return role === "owner_runtime" && !String(taskType || "").startsWith("video_") && Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready);
+    }
+    return true;
+  }
+
+  if (!isPlatformAlgorithm(alg)) return false;
+
+  if (impl === "userpackage") {
+    return (
+      role === "platform" &&
+      !String(taskType || "").startsWith("video_") &&
+      Boolean(alg?.allowUse || alg?.raw?.allow_use) &&
+      (alg?.runtimeReady ?? alg?.raw?.runtime_ready) !== false
+    );
+  }
   const hasCommunitySource = String(alg?.sourceUploaderId || "").trim() || String(alg?.sourceAlgorithmId || "").trim();
   if (hasCommunitySource) return true;
   return !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(alg?.id || ""));
 }
-const router = useRouter();
-const store = useAppStore();
 const applyingPreset = ref(false);
 const activeStep = ref(0);
 
@@ -398,9 +465,48 @@ const taskTypeOptions = computed(() =>
   Object.entries(TASK_LABEL_BY_TYPE).map(([value, label]) => ({ value, label }))
 );
 
-const filteredAlgorithms = computed(() =>
-  store.algorithms.filter((a) => a.task === toTaskLabel(form.taskType) && isVisiblePlatformAlgorithm(a))
-);
+const filteredAlgorithms = computed(() => {
+  const taskLabel = toTaskLabel(form.taskType);
+  const currentUsername = String(store?.user?.username || "").trim();
+  const visible = store.algorithms.filter((a) => a.task === taskLabel && isVisiblePlatformAlgorithm(a));
+  const currentUserPackageNames = new Set(
+    visible
+      .filter((a) => {
+        const impl = String(a?.impl || a?.raw?.impl || "").trim().toLowerCase();
+        return impl === "userpackage" && getPackageRole(a) === "owner_runtime" && isCurrentUserAlgorithm(a) && Boolean(a?.runtimeReady || a?.raw?.runtime_ready);
+      })
+      .map((a) => getAlgorithmBaseName(a))
+      .filter(Boolean)
+  );
+  const scopedVisible = visible.filter((a) => {
+    const impl = String(a?.impl || a?.raw?.impl || "").trim().toLowerCase();
+    if (impl !== "userpackage" || !isPlatformAlgorithm(a) || !currentUsername) return true;
+    const sourceOwner = String(a?.sourceUploaderId || a?.raw?.source_owner_id || "").trim();
+    if (sourceOwner !== currentUsername) return true;
+    const baseName = getAlgorithmBaseName(a);
+    return !baseName || !currentUserPackageNames.has(baseName);
+  });
+  const deduped = [];
+  const dedupeIndexByKey = new Map();
+  for (const algorithm of scopedVisible) {
+    const sourceKey = getAlgorithmSourceKey(algorithm);
+    if (!sourceKey) {
+      deduped.push(algorithm);
+      continue;
+    }
+    const existingIndex = dedupeIndexByKey.get(sourceKey);
+    if (existingIndex === undefined) {
+      dedupeIndexByKey.set(sourceKey, deduped.length);
+      deduped.push(algorithm);
+      continue;
+    }
+    const existing = deduped[existingIndex];
+    if (algorithmPreferenceScore(algorithm) > algorithmPreferenceScore(existing)) {
+      deduped[existingIndex] = algorithm;
+    }
+  }
+  return deduped;
+});
 const isSingleAlgorithmMode = computed(() => form.algorithmIds.length === 1);
 const selectedAlgorithms = computed(() =>
   filteredAlgorithms.value.filter((a) => form.algorithmIds.includes(a.id))

@@ -540,14 +540,12 @@ function buildScoringContext(allRuns, targetRun) {
   const psnrs = realRuns.map((r) => toNumber(r.psnr)).filter((x) => x != null);
   const ssims = realRuns.map((r) => toNumber(r.ssim)).filter((x) => x != null);
   const niqes = realRuns.map((r) => toNumber(r.niqe)).filter((x) => x != null);
-  const times = realRuns.map((r) => parseElapsedSeconds(r.elapsed)).filter((x) => x != null);
   return {
     mmPSNR: minMax(psnrs),
     mmSSIM: minMax(ssims),
     mmNIQE: minMax(niqes),
-    mmTIME: minMax(times),
     sampleCount: realRuns.length,
-    W: { psnr: 0.35, ssim: 0.35, niqe: 0.2, time: 0.1 },
+    W: { psnr: 0.39, ssim: 0.39, niqe: 0.22 },
   };
 }
 
@@ -556,21 +554,18 @@ function scoreOne(run, ctx) {
   const psnr = toNumber(run.psnr);
   const ssim = toNumber(run.ssim);
   const niqe = toNumber(run.niqe);
-  const tsec = parseElapsedSeconds(run.elapsed);
   const nPSNR = norm01(psnr, ctx.mmPSNR.min, ctx.mmPSNR.max);
   const nSSIM = norm01(ssim, ctx.mmSSIM.min, ctx.mmSSIM.max);
   const nNIQE = norm01(niqe, ctx.mmNIQE.min, ctx.mmNIQE.max);
-  const nTIME = norm01(tsec, ctx.mmTIME.min, ctx.mmTIME.max);
-  const okAll = [nPSNR, nSSIM, nNIQE, nTIME].every((x) => x != null);
+  const okAll = [nPSNR, nSSIM, nNIQE].every((x) => x != null);
   if (!okAll) return { score: null, reason: "同任务同数据集下指标不完整，暂不评分" };
-  const score = ctx.W.psnr * nPSNR + ctx.W.ssim * nSSIM + ctx.W.niqe * (1 - nNIQE) + ctx.W.time * (1 - nTIME);
+  const score = ctx.W.psnr * nPSNR + ctx.W.ssim * nSSIM + ctx.W.niqe * (1 - nNIQE);
   const parts = [];
   if (nPSNR >= 0.8) parts.push("PSNR 表现优秀");
   if (nSSIM >= 0.8) parts.push("SSIM 表现优秀");
   if (nNIQE <= 0.2) parts.push("NIQE 表现优秀（越低越好）");
-  if (nTIME <= 0.2) parts.push("耗时表现较好");
   if (parts.length === 0) parts.push("综合表现均衡");
-  return { score: Number(score.toFixed(4)), reason: `${parts.join("；")}；评分范围：同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）；评分权重：PSNR 35% + SSIM 35% + NIQE 20% + 耗时 10%` };
+  return { score: Number(score.toFixed(4)), reason: `${parts.join("；")}；评分范围：同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）；评分权重：PSNR 39% + SSIM 39% + NIQE 22%；耗时请单独查看。` };
 }
 
 async function refresh() { try { await store.fetchRuns(); } catch (e) { ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` }); } }
