@@ -1229,7 +1229,8 @@ async function exportAlgorithmToLocal(row) {
     nextExporting.add(algorithmId);
     exportingAlgorithms.value = nextExporting;
     ElMessage({ type: "info", message: "正在准备下载算法，请稍候..." });
-    const result = await algorithmsApi.exportAlgorithm(algorithmId);
+    const fallbackFilename = row?.archiveFilename || row?.raw?.archive_filename || `${algorithmId}.json`;
+    const result = await algorithmsApi.exportAlgorithm(algorithmId, fallbackFilename);
     ElMessage({
       type: "success",
       message: result?.savedWithPicker ? "算法已保存到你选择的位置" : "算法已开始下载到本地",
@@ -1595,7 +1596,6 @@ async function resetToBuiltins() {
   margin-top: 4px;
 }
 </style>
-
 
 
 

@@ -14,6 +14,9 @@ export const algorithmSubmissionsApi = {
   downloadArchive(submissionId, filename = "algorithm_package.zip") {
     return downloadBinaryFile(`/algorithm-submissions/${submissionId}/download`, filename);
   },
+  deleteSubmission(submissionId) {
+    return request(`/algorithm-submissions/${submissionId}`, { method: "DELETE" });
+  },
   listAdmin(query = {}) {
     return request("/admin/algorithm-submissions", { method: "GET", query });
   },

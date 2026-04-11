@@ -116,6 +116,11 @@ class AlgorithmOut(BaseModel):
     impl: str
     version: str
     description: str = ""
+    dependency_text: str = ""
+    entry_text: str = ""
+    archive_filename: str = ""
+    archive_sha256: str = ""
+    source_submission_id: Optional[str] = None
     download_count: int = 0
     owner_id: Optional[str] = "system"
     source_owner_id: Optional[str] = None
@@ -300,6 +305,12 @@ class MetricOut(BaseModel):
     review_note: str = ""
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[float] = None
+    visibility: str = "private"
+    allow_download: bool = False
+    download_count: int = 0
+    source_owner_id: Optional[str] = None
+    source_metric_id: Optional[str] = None
+    community_published_at: Optional[float] = None
     created_at: float
 
 

@@ -173,10 +173,28 @@
             {{ row.codeFilename || "-" }}
           </template>
         </el-table-column>
-        <el-table-column prop="reviewNote" label="审核说明" min-width="220" show-overflow-tooltip />
-        <el-table-column label="操作" width="110">
+        <el-table-column label="社区发布" width="130">
           <template #default="{ row }">
-            <el-button size="small" type="danger" plain @click="removeMetric(row)" :disabled="row.uploaderId === 'system'">删除</el-button>
+            <el-tag v-if="row.visibility === 'public'" type="success">已发布</el-tag>
+            <el-tag v-else-if="row.sourceMetricId" type="info">社区副本</el-tag>
+            <span v-else class="muted-text">未发布</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reviewNote" label="审核说明" min-width="220" show-overflow-tooltip />
+        <el-table-column label="操作" width="210">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                @click="publishMetric(row)"
+                :disabled="!canPublishMetric(row)"
+              >
+                发布社区
+              </el-button>
+              <el-button size="small" type="danger" plain @click="removeMetric(row)" :disabled="row.uploaderId === 'system'">删除</el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -255,6 +273,15 @@ function statusTagType(status) {
   if (status === "approved") return "success";
   if (status === "rejected") return "danger";
   return "warning";
+}
+
+function canPublishMetric(row) {
+  if (!row || row.uploaderId === "system") return false;
+  if (row.sourceMetricId) return false;
+  if (row.visibility === "public") return false;
+  if (row.status !== "approved") return false;
+  if (row.implementationType === "python" && !row.runtimeReady) return false;
+  return true;
 }
 
 function triggerCodeFileSelect() {
@@ -341,6 +368,20 @@ async function removeMetric(row) {
     if (e !== "cancel") {
       ElMessage.error(e?.message || "删除指标失败");
     }
+  }
+}
+
+async function publishMetric(row) {
+  if (!canPublishMetric(row)) {
+    ElMessage.warning("只有已审核通过并接入运行链路的自有指标可以发布到社区");
+    return;
+  }
+  try {
+    await store.publishMetricToCommunity(row.id);
+    await store.fetchMetrics();
+    ElMessage.success("指标已发布到社区");
+  } catch (e) {
+    ElMessage.error(e?.message || "发布指标到社区失败");
   }
 }
 
@@ -440,6 +481,17 @@ onBeforeUnmount(() => {
 .form-actions {
   display: flex;
   gap: 12px;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.muted-text {
+  color: #7b89a8;
 }
 
 .file-upload-row {

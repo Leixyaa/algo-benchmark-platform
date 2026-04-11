@@ -119,19 +119,30 @@
               <span v-else class="publish-placeholder">未发布</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="300">
             <template #default="{ row }">
-              <el-button size="small" plain @click="downloadArchive(row)">下载代码包</el-button>
-              <el-button
-                v-if="row.status === 'approved'"
-                size="small"
-                type="primary"
-                plain
-                :disabled="Boolean(row.communityAlgorithmId)"
-                @click="publishToCommunity(row)"
-              >
-                {{ row.communityAlgorithmId ? "已发布社区" : "发布到社区" }}
-              </el-button>
+              <div class="table-actions">
+                <el-button size="small" plain @click="downloadArchive(row)">下载代码包</el-button>
+                <el-button
+                  v-if="row.status === 'approved'"
+                  size="small"
+                  type="primary"
+                  plain
+                  :disabled="Boolean(row.communityAlgorithmId)"
+                  @click="publishToCommunity(row)"
+                >
+                  {{ row.communityAlgorithmId ? "已发布社区" : "发布到社区" }}
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="deletingSubmissionIds.has(row.id)"
+                  @click="deleteSubmission(row)"
+                >
+                  删除
+                </el-button>
+              </div>
             </template>
           </el-table-column>
           <template #empty>
@@ -145,7 +156,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
 
@@ -153,6 +164,7 @@ const store = useAppStore();
 const submitting = ref(false);
 const archiveInput = ref(null);
 const submissions = ref([]);
+const deletingSubmissionIds = ref(new Set());
 
 const form = reactive({
   taskType: "denoise",
@@ -310,6 +322,13 @@ async function downloadArchive(row) {
   }
 }
 
+function setSubmissionDeleting(id, loading) {
+  const next = new Set(deletingSubmissionIds.value);
+  if (loading) next.add(String(id));
+  else next.delete(String(id));
+  deletingSubmissionIds.value = next;
+}
+
 async function publishToCommunity(row) {
   try {
     const out = await algorithmSubmissionsApi.publishToCommunity(row.id, {});
@@ -318,6 +337,32 @@ async function publishToCommunity(row) {
     ElMessage.success("已发布到社区算法");
   } catch (e) {
     ElMessage.error(e?.message || "发布到社区失败");
+  }
+}
+
+async function deleteSubmission(row) {
+  if (!row?.id) return;
+  try {
+    await ElMessageBox.confirm(
+      row.communityAlgorithmId
+        ? "删除后会同时移除已发布到社区的算法记录，但不会删除管理员已收录的平台留档。确认继续吗？"
+        : "确认删除这条算法接入申请吗？",
+      "删除算法接入申请",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  setSubmissionDeleting(row.id, true);
+  try {
+    await algorithmSubmissionsApi.deleteSubmission(row.id);
+    submissions.value = submissions.value.filter((item) => item.id !== row.id);
+    await store.fetchAlgorithms();
+    ElMessage.success("算法接入申请已删除");
+  } catch (e) {
+    ElMessage.error(e?.message || "删除算法接入申请失败");
+  } finally {
+    setSubmissionDeleting(row.id, false);
   }
 }
 
@@ -417,6 +462,13 @@ onMounted(loadSubmissions);
 .form-actions {
   display: flex;
   gap: 12px;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 1080px) {

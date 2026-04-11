@@ -13,6 +13,12 @@ export const metricsApi = {
   deleteMetric(metricId) {
     return request(`/metrics/${metricId}`, { method: "DELETE" });
   },
+  publishMetricToCommunity(metricId) {
+    return request(`/metrics/${metricId}/publish-community`, { method: "POST" });
+  },
+  downloadCommunityMetric(metricId) {
+    return request(`/community/metrics/${metricId}/download`, { method: "POST" });
+  },
   listAdminMetrics(query = {}) {
     return request("/admin/metrics", { method: "GET", query });
   },

@@ -411,6 +411,11 @@ function mapAlgorithmOut(x) {
     impl: x.impl,
     version: x.version,
     description: x.description || "",
+    dependencyText: String(x.dependency_text || ""),
+    entryText: String(x.entry_text || ""),
+    archiveFilename: String(x.archive_filename || ""),
+    archiveSha256: String(x.archive_sha256 || ""),
+    sourceSubmissionId: String(x.source_submission_id || ""),
     downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     allowUse: Boolean(x.allow_use),
@@ -442,6 +447,12 @@ function mapMetricOut(x) {
     uploaderId: String(x.owner_id || ""),
     status: String(x.status || "pending"),
     runtimeReady: Boolean(x.runtime_ready),
+    visibility: String(x.visibility || "private"),
+    allowDownload: Boolean(x.allow_download),
+    downloadCount: Number(x.download_count || 0),
+    sourceOwnerId: String(x.source_owner_id || ""),
+    sourceMetricId: String(x.source_metric_id || ""),
+    communityPublishedAt: x.community_published_at ? formatTs(x.community_published_at) : "",
     reviewNote: String(x.review_note || ""),
     reviewedBy: String(x.reviewed_by || ""),
     reviewedAt: x.reviewed_at ? formatTs(x.reviewed_at) : "-",
@@ -757,6 +768,7 @@ export const useAppStore = defineStore("app", {
         implementation_type: payload?.implementationType,
         formula_text: payload?.formulaText,
         code_text: payload?.codeText,
+        code_filename: payload?.codeFilename,
       });
       const metric = mapMetricOut(out);
       const idx = this.metricsCatalog.findIndex((item) => item.id === metric.id);
@@ -835,6 +847,7 @@ export const useAppStore = defineStore("app", {
         implementation_type: patch?.implementationType,
         formula_text: patch?.formulaText,
         code_text: patch?.codeText,
+        code_filename: patch?.codeFilename,
       });
       const metric = mapMetricOut(out);
       const idx = this.metricsCatalog.findIndex((item) => item.id === id);
@@ -857,6 +870,26 @@ export const useAppStore = defineStore("app", {
       const idx = this.metricsCatalog.findIndex((item) => item.id === id);
       if (idx >= 0) this.metricsCatalog.splice(idx, 1);
       saveState({ metricsCatalog: this.metricsCatalog });
+    },
+
+    async publishMetricToCommunity(id) {
+      const out = await metricsApi.publishMetricToCommunity(id);
+      const metric = mapMetricOut(out);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === id);
+      if (idx >= 0) this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
+      else this.metricsCatalog.unshift(metric);
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return metric;
+    },
+
+    async downloadCommunityMetric(id) {
+      const out = await metricsApi.downloadCommunityMetric(id);
+      const metric = mapMetricOut(out);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === metric.id);
+      if (idx >= 0) this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
+      else this.metricsCatalog.unshift(metric);
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return metric;
     },
 
     async resetUserAlgorithms() {

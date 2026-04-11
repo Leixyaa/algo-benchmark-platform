@@ -2,7 +2,7 @@
   <div class="page">
     <div class="header-section">
       <h2 class="title">社区中心</h2>
-      <div class="subtitle">浏览社区公开的算法和数据集，支持搜索、筛选、排序、查看详情和下载到当前账号。</div>
+      <div class="subtitle">浏览社区公开的算法、数据集和指标，支持搜索、筛选、排序、查看详情和下载到当前账号。</div>
     </div>
 
     <div class="toolbar-card">
@@ -16,6 +16,7 @@
         <el-tabs v-model="tab" class="resource-switch-tabs">
           <el-tab-pane label="公开算法" name="algorithms" />
           <el-tab-pane label="公开数据集" name="datasets" />
+          <el-tab-pane label="公开指标" name="metrics" />
         </el-tabs>
         <el-select v-model="sortBy" class="sort-select">
           <el-option label="最新发布" value="newest" />
@@ -32,10 +33,17 @@
         </el-select>
       </div>
 
-      <div class="toolbar-row" v-else>
+      <div class="toolbar-row" v-else-if="tab === 'datasets'">
         <el-select v-model="datasetTypeFilter" clearable placeholder="全部类型" class="filter-select">
           <el-option label="图像" value="图像" />
           <el-option label="视频" value="视频" />
+        </el-select>
+      </div>
+
+      <div class="toolbar-row" v-else>
+        <el-select v-model="metricDirectionFilter" clearable placeholder="全部方向" class="filter-select">
+          <el-option label="越大越好" value="higher_better" />
+          <el-option label="越小越好" value="lower_better" />
         </el-select>
       </div>
     </div>
@@ -69,7 +77,7 @@
       </el-table>
     </div>
 
-    <div v-else class="section">
+    <div v-else-if="tab === 'datasets'" class="section">
       <el-table :data="filteredDatasets" border stripe class="data-table">
         <el-table-column prop="name" label="数据集名称" min-width="220" />
         <el-table-column prop="type" label="类型" width="100" />
@@ -97,6 +105,43 @@
       </el-table>
     </div>
 
+    <div v-else class="section">
+      <el-table :data="filteredMetrics" border stripe class="data-table">
+        <el-table-column prop="displayName" label="指标名称" min-width="180" />
+        <el-table-column prop="metricKey" label="标识" width="170" />
+        <el-table-column label="方向" width="120">
+          <template #default="{ row }">
+            {{ row.direction === "lower_better" ? "越小越好" : "越大越好" }}
+          </template>
+        </el-table-column>
+        <el-table-column label="适用任务" min-width="180">
+          <template #default="{ row }">
+            {{ formatMetricTaskTypes(row.taskTypes) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="downloadCount" label="下载量" width="100" />
+        <el-table-column prop="createdAt" label="发布时间" width="180" />
+        <el-table-column label="操作" width="190">
+          <template #default="{ row }">
+            <el-button size="small" plain @click="openDetail('metric', row)">详情</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              @click="downloadMetric(row)"
+              :loading="downloadingMetricIds.has(row.id)"
+              :disabled="!store.user.isLoggedIn || isOwnedByCurrentUser(row) || isMetricDownloaded(row)"
+            >
+              {{ getMetricActionLabel(row) }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无符合条件的公开指标" />
+        </template>
+      </el-table>
+    </div>
+
     <el-dialog v-model="detailVisible" :title="detailTitle" width="780px">
       <div v-if="detailItem" class="detail-panel">
         <div class="detail-summary">
@@ -112,6 +157,9 @@
             <span v-if="detailType === 'algorithm'">版本：{{ detailItem.version || "-" }}</span>
             <span v-if="detailType === 'dataset'">类型：{{ detailItem.type || "-" }}</span>
             <span v-if="detailType === 'dataset'">规模：{{ detailItem.size || "-" }}</span>
+            <span v-if="detailType === 'metric'">标识：{{ detailItem.metricKey || "-" }}</span>
+            <span v-if="detailType === 'metric'">方向：{{ detailItem.direction === "lower_better" ? "越小越好" : "越大越好" }}</span>
+            <span v-if="detailType === 'metric'">GT：{{ detailItem.requiresReference ? "需要" : "不需要" }}</span>
           </div>
         </div>
 
@@ -119,6 +167,7 @@
           <div class="block-head">
             <div class="block-title">详细描述</div>
             <el-button
+              v-if="detailType !== 'metric'"
               size="small"
               plain
               type="danger"
@@ -128,10 +177,50 @@
               举报
             </el-button>
           </div>
-          <div class="description-box">{{ detailItem.description || "暂无描述" }}</div>
+          <div v-if="detailIsUserPackage" class="package-detail-grid">
+            <div class="package-detail-card">
+              <div class="package-detail-title">算法说明</div>
+              <div class="package-detail-text">{{ cleanPackageDescription(detailItem) }}</div>
+            </div>
+            <div class="package-detail-card">
+              <div class="package-detail-title">依赖环境</div>
+              <div class="package-detail-text">{{ detailItem.dependencyText || "未填写依赖说明" }}</div>
+            </div>
+            <div class="package-detail-card">
+              <div class="package-detail-title">入口说明</div>
+              <div class="package-detail-text">{{ detailItem.entryText || "未填写入口说明" }}</div>
+            </div>
+            <div class="package-detail-card package-detail-card-wide">
+              <div class="package-detail-title">代码包</div>
+              <div class="package-archive-row">
+                <span>{{ detailItem.archiveFilename || "未记录代码包文件名" }}</span>
+                <span v-if="detailItem.archiveSha256" class="archive-digest">SHA256：{{ shortDigest(detailItem.archiveSha256) }}</span>
+              </div>
+              <div class="package-note">下载到算法库后，在算法库中导出会优先下载原始代码包；没有代码包时才回退导出 JSON 元信息。</div>
+            </div>
+          </div>
+          <div v-else-if="detailType === 'metric'" class="package-detail-grid">
+            <div class="package-detail-card">
+              <div class="package-detail-title">指标说明</div>
+              <div class="package-detail-text">{{ detailItem.description || "暂无指标说明" }}</div>
+            </div>
+            <div class="package-detail-card">
+              <div class="package-detail-title">适用任务</div>
+              <div class="package-detail-text">{{ formatMetricTaskTypes(detailItem.taskTypes) }}</div>
+            </div>
+            <div class="package-detail-card">
+              <div class="package-detail-title">实现方式</div>
+              <div class="package-detail-text">{{ detailItem.implementationType === "formula" ? "公式 / 说明型指标" : "Python 指标代码" }}</div>
+            </div>
+            <div class="package-detail-card">
+              <div class="package-detail-title">代码文件</div>
+              <div class="package-detail-text">{{ detailItem.codeFilename || "未提供代码文件名" }}</div>
+            </div>
+          </div>
+          <div v-else class="description-box">{{ detailItem.description || "暂无描述" }}</div>
         </div>
 
-        <div class="detail-block">
+        <div v-if="detailType !== 'metric'" class="detail-block">
           <div class="block-title">评论区</div>
           <div v-loading="commentsLoading" class="comment-list">
             <div v-if="!detailComments.length" class="empty-text">暂无评论，欢迎发表第一条评论。</div>
@@ -207,12 +296,14 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
+import { metricsApi } from "../api/metrics";
 import { communityApi } from "../api/community";
-import { useAppStore } from "../stores/app";
+import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 const communityAlgorithms = ref([]);
 const communityDatasets = ref([]);
+const communityMetrics = ref([]);
 
 const tab = ref("algorithms");
 const keyword = ref("");
@@ -220,10 +311,13 @@ const sortBy = ref("newest");
 const taskFilter = ref("");
 const implFilter = ref("");
 const datasetTypeFilter = ref("");
+const metricDirectionFilter = ref("");
 const downloadingAlgorithmIds = ref(new Set());
 const downloadingDatasetIds = ref(new Set());
+const downloadingMetricIds = ref(new Set());
 const locallyDownloadedAlgorithmIds = ref(new Set());
 const locallyDownloadedDatasetIds = ref(new Set());
+const locallyDownloadedMetricIds = ref(new Set());
 const detailVisible = ref(false);
 const detailType = ref("algorithm");
 const detailItem = ref(null);
@@ -252,6 +346,11 @@ function mapAlgorithm(x) {
     impl: x.impl,
     version: x.version,
     description: x.description || "",
+    dependencyText: String(x.dependency_text || ""),
+    entryText: String(x.entry_text || ""),
+    archiveFilename: String(x.archive_filename || ""),
+    archiveSha256: String(x.archive_sha256 || ""),
+    sourceSubmissionId: String(x.source_submission_id || ""),
     downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     uploaderId: String(x.owner_id || ""),
@@ -275,13 +374,39 @@ function mapDataset(x) {
   };
 }
 
+function mapMetric(x) {
+  return {
+    id: x.metric_id,
+    metricKey: String(x.metric_key || ""),
+    name: String(x.name || ""),
+    displayName: String(x.display_name || x.name || x.metric_key || ""),
+    description: String(x.description || ""),
+    taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
+    direction: String(x.direction || "higher_better"),
+    requiresReference: Boolean(x.requires_reference),
+    implementationType: String(x.implementation_type || "python"),
+    formulaText: String(x.formula_text || ""),
+    codeFilename: String(x.code_filename || ""),
+    downloadCount: Number(x.download_count || 0),
+    visibility: String(x.visibility || "private"),
+    allowDownload: Boolean(x.allow_download),
+    uploaderId: String(x.owner_id || ""),
+    sourceOwnerId: String(x.source_owner_id || ""),
+    sourceMetricId: String(x.source_metric_id || ""),
+    createdAt: formatTs(x.created_at),
+    raw: x,
+  };
+}
+
 async function loadCommunity() {
-  const [algorithms, datasets] = await Promise.all([
+  const [algorithms, datasets, metrics] = await Promise.all([
     algorithmsApi.listAlgorithms({ limit: 500, scope: "community" }),
     datasetsApi.listDatasets({ limit: 200, scope: "community" }),
+    metricsApi.listMetrics({ limit: 500, scope: "community" }),
   ]);
   communityAlgorithms.value = (algorithms || []).map(mapAlgorithm);
   communityDatasets.value = (datasets || []).map(mapDataset);
+  communityMetrics.value = (metrics || []).map(mapMetric);
 }
 
 function setLoading(setRef, id, loading) {
@@ -304,6 +429,12 @@ function getAlgorithmActionLabel(row) {
 function getDatasetActionLabel(row) {
   if (isOwnedByCurrentUser(row)) return "自传";
   if (isDatasetDownloaded(row)) return "已下载";
+  return "下载";
+}
+
+function getMetricActionLabel(row) {
+  if (isOwnedByCurrentUser(row)) return "自传";
+  if (isMetricDownloaded(row)) return "已下载";
   return "下载";
 }
 
@@ -337,6 +468,21 @@ function isDatasetDownloaded(row) {
   });
 }
 
+function isMetricDownloaded(row) {
+  if (locallyDownloadedMetricIds.value.has(String(row?.id || ""))) return true;
+  const currentUser = String(store.user?.username || "");
+  return (store.metricsCatalog || []).some((item) => {
+    if (String(item?.uploaderId || "") !== currentUser) return false;
+    if (String(item?.sourceOwnerId || "") !== String(row?.uploaderId || "")) return false;
+    return String(item?.sourceMetricId || "") === String(row?.id || "");
+  });
+}
+
+function formatMetricTaskTypes(list) {
+  if (!Array.isArray(list) || !list.length) return "未限定";
+  return list.map((item) => TASK_LABEL_BY_TYPE[item] || item).join(" / ");
+}
+
 function getErrorCode(error) {
   return String(
     error?.detail?.error_code ||
@@ -362,7 +508,30 @@ function canReportComment(comment) {
   return String(comment?.author_id || "") !== String(store.user?.username || "");
 }
 
-const detailTitle = computed(() => (detailType.value === "algorithm" ? "算法详情" : "数据集详情"));
+const detailTitle = computed(() => {
+  if (detailType.value === "algorithm") return "算法详情";
+  if (detailType.value === "metric") return "指标详情";
+  return "数据集详情";
+});
+const detailIsUserPackage = computed(() => {
+  const item = detailItem.value || {};
+  return detailType.value === "algorithm" && (item.impl === "UserPackage" || Boolean(item.sourceSubmissionId));
+});
+
+function cleanPackageDescription(item) {
+  let text = String(item?.description || "").trim();
+  for (const token of ["依赖说明：", "入口说明：", "该算法来自", "该算法由用户"]) {
+    const idx = text.indexOf(token);
+    if (idx >= 0) text = text.slice(0, idx).trim();
+  }
+  return text || "暂无算法说明";
+}
+
+function shortDigest(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.length > 16 ? `${text.slice(0, 12)}...${text.slice(-6)}` : text;
+}
 
 async function openDetail(type, row) {
   detailType.value = type;
@@ -379,6 +548,10 @@ async function loadComments() {
   }
   commentsLoading.value = true;
   try {
+    if (detailType.value === "metric") {
+      detailComments.value = [];
+      return;
+    }
     detailComments.value =
       detailType.value === "algorithm"
         ? await communityApi.listAlgorithmComments(detailItem.value.id)
@@ -401,9 +574,15 @@ async function loadComments() {
 
 async function syncCommunityState() {
   await Promise.all([store.fetchAlgorithms(), store.fetchDatasets()]);
+  await store.fetchMetrics();
   await loadCommunity();
   if (!detailVisible.value || !detailItem.value?.id) return;
-  const sourceList = detailType.value === "algorithm" ? communityAlgorithms.value : communityDatasets.value;
+  const sourceList =
+    detailType.value === "algorithm"
+      ? communityAlgorithms.value
+      : detailType.value === "metric"
+        ? communityMetrics.value
+        : communityDatasets.value;
   const latest = (sourceList || []).find((item) => String(item?.id || "") === String(detailItem.value?.id || ""));
   if (!latest) {
     detailVisible.value = false;
@@ -586,6 +765,33 @@ async function downloadDataset(row) {
   }
 }
 
+async function downloadMetric(row) {
+  if (!store.user?.isLoggedIn) {
+    ElMessage({ type: "warning", message: "请先登录后再下载指标" });
+    return;
+  }
+  try {
+    setLoading(downloadingMetricIds, row.id, true);
+    await store.downloadCommunityMetric(row.id);
+    locallyDownloadedMetricIds.value = new Set([...locallyDownloadedMetricIds.value, String(row.id)]);
+    await store.fetchMetrics();
+    await loadCommunity();
+    ElMessage({ type: "success", message: "已下载到你的指标库中" });
+  } catch (e) {
+    const text = String(e?.message || e || "");
+    if (getErrorCode(e) === "E_HTTP" && text.includes("metric_already_downloaded")) {
+      locallyDownloadedMetricIds.value = new Set([...locallyDownloadedMetricIds.value, String(row.id)]);
+      await store.fetchMetrics();
+      await loadCommunity();
+      ElMessage({ type: "info", message: "该指标已下载到你的指标库中" });
+      return;
+    }
+    ElMessage({ type: "error", message: `下载指标失败：${e?.message || e}` });
+  } finally {
+    setLoading(downloadingMetricIds, row.id, false);
+  }
+}
+
 onMounted(async () => {
   window.addEventListener("focus", handleWindowFocus);
   await syncCommunityState();
@@ -629,6 +835,15 @@ const publicDatasets = computed(() =>
   })
 );
 
+const publicMetrics = computed(() =>
+  (communityMetrics.value || []).filter((item) => {
+    const ownerId = String(item?.raw?.owner_id || "");
+    const visibility = String(item?.visibility || item?.raw?.visibility || "").toLowerCase();
+    if (ownerId === "system") return false;
+    return visibility === "public" && Boolean(item?.allowDownload);
+  })
+);
+
 const algorithmTaskOptions = computed(() =>
   [...new Set(publicAlgorithms.value.map((item) => String(item?.task || "")).filter(Boolean))]
 );
@@ -650,6 +865,24 @@ const filteredDatasets = computed(() => {
   const items = publicDatasets.value.filter((item) => {
     if (datasetTypeFilter.value && item.type !== datasetTypeFilter.value) return false;
     return byKeyword([item.name, item.id, item.type, item.size, item.description, item.uploaderId, item.downloadCount]);
+  });
+  return sortItems(items);
+});
+
+const filteredMetrics = computed(() => {
+  const items = publicMetrics.value.filter((item) => {
+    if (metricDirectionFilter.value && item.direction !== metricDirectionFilter.value) return false;
+    return byKeyword([
+      item.displayName,
+      item.name,
+      item.id,
+      item.metricKey,
+      item.direction,
+      formatMetricTaskTypes(item.taskTypes),
+      item.description,
+      item.uploaderId,
+      item.downloadCount,
+    ]);
   });
   return sortItems(items);
 });
@@ -705,7 +938,7 @@ const filteredDatasets = computed(() => {
 }
 
 .resource-switch-tabs {
-  min-width: 220px;
+  min-width: 300px;
   margin: 0 8px;
 }
 
@@ -784,6 +1017,64 @@ const filteredDatasets = computed(() => {
   line-height: 1.8;
   color: #334466;
   white-space: pre-wrap;
+}
+
+.package-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.package-detail-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #f8fbff;
+  border: 1px solid #dce7ff;
+}
+
+.package-detail-card-wide {
+  grid-column: 1 / -1;
+}
+
+.package-detail-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f6df6;
+}
+
+.package-detail-text {
+  color: #334466;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.package-archive-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #1f2f57;
+  font-weight: 700;
+}
+
+.archive-digest {
+  color: #7b89a8;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.package-note {
+  margin-top: 8px;
+  color: #7b89a8;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .package-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .comment-list {
