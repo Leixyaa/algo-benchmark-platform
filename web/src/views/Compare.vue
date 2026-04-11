@@ -1,32 +1,32 @@
-<template>
+﻿<template>
   <div class="page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <div class="hero-kicker">Platform Recommender</div>
-        <h2 class="page-title">平台算法智能推荐</h2>
-        <p class="page-subtitle">默认按平台内置指标综合分排序，也支持按任意已执行指标单独排序对比，适合快速筛选平台标准算法并生成汇报结果。</p>
+        <div class="hero-kicker">Platform Compare</div>
+        <h2 class="page-title">平台算法对比分析</h2>
+        <p class="page-subtitle">围绕真实评测结果做筛选、排序、导出与结论整理，保留统一口径的指标对比，不再提供智能选型入口。</p>
         <div class="hero-meta">
           <div class="meta-pill">
-            <span class="meta-label">当前任务</span>
+            <span class="meta-label">褰撳墠浠诲姟</span>
             <strong>{{ selectedTaskSummary }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">当前数据集</span>
+            <span class="meta-label">褰撳墠鏁版嵁闆�</span>
             <strong>{{ selectedDatasetSummary }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">排序方式</span>
+            <span class="meta-label">鎺掑簭鏂瑰紡</span>
             <strong>{{ selectedRankMetricLabel }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">真实结果</span>
-            <strong>{{ tableRows.length }} 条</strong>
+            <span class="meta-label">鐪熷疄缁撴灉</span>
+            <strong>{{ tableRows.length }} 鏉�</strong>
           </div>
         </div>
       </div>
       <div class="header-actions">
-        <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">同步数据</el-button>
-        <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">重置配置</el-button>
+        <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">鍚屾鏁版嵁</el-button>
+        <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">閲嶇疆閰嶇疆</el-button>
       </div>
     </section>
 
@@ -36,26 +36,26 @@
           <div class="card-header">
             <div>
               <div class="card-eyebrow">Filter</div>
-              <div class="card-title">结果筛选</div>
+              <div class="card-title">缁撴灉绛涢€�</div>
             </div>
-            <p class="card-desc">先收窄任务、数据集和排序口径，再看推荐结论会更清楚。</p>
+            <p class="card-desc">鍏堟敹绐勪换鍔°€佹暟鎹泦鍜屾帓搴忓彛寰勶紝鍐嶇湅鎺ㄨ崘缁撹浼氭洿娓呮銆�</p>
           </div>
         </template>
         <div class="filter-form">
-          <el-select v-model="task" placeholder="任务类型" class="flex-item">
+          <el-select v-model="task" placeholder="浠诲姟绫诲瀷" class="flex-item">
             <el-option v-for="item in taskOptions" :key="item" :label="item" :value="item" />
           </el-select>
-          <el-select v-model="datasetId" placeholder="评测数据集" class="flex-item">
+          <el-select v-model="datasetId" placeholder="璇勬祴鏁版嵁闆�" class="flex-item">
             <el-option v-for="item in store.datasets" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
-          <el-select v-model="chartMetric" placeholder="排序方式" class="flex-item">
+          <el-select v-model="chartMetric" placeholder="鎺掑簭鏂瑰紡" class="flex-item">
             <el-option v-for="item in availableRankMetrics" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <div class="filter-row-secondary">
-            <el-checkbox v-model="onlyDone">仅显示已完成</el-checkbox>
+            <el-checkbox v-model="onlyDone">浠呮樉绀哄凡瀹屾垚</el-checkbox>
             <div class="filter-footer-actions">
-              <span class="inline-tip">当前满足筛选条件的真实结果：{{ tableRows.length }} 条</span>
-              <el-button plain class="ghost-btn" @click="reset">重置筛选</el-button>
+              <span class="inline-tip">褰撳墠婊¤冻绛涢€夋潯浠剁殑鐪熷疄缁撴灉锛歿{ tableRows.length }} 鏉�</span>
+              <el-button plain class="ghost-btn" @click="reset">閲嶇疆绛涢€�</el-button>
             </div>
           </div>
         </div>
@@ -66,22 +66,22 @@
           <div class="card-header">
             <div>
               <div class="card-eyebrow">Weight</div>
-              <div class="card-title">综合分权重</div>
+              <div class="card-title">缁煎悎鍒嗘潈閲�</div>
             </div>
-            <p class="card-desc">默认综合分只统计质量指标，自定义指标与耗时仍可单独参与排序。</p>
+            <p class="card-desc">榛樿缁煎悎鍒嗗彧缁熻璐ㄩ噺鎸囨爣锛岃嚜瀹氫箟鎸囨爣涓庤€楁椂浠嶅彲鍗曠嫭鍙備笌鎺掑簭銆�</p>
           </div>
         </template>
-        <div class="weight-note">默认综合分只使用质量指标：PSNR / SSIM / NIQE。耗时保留单独展示与单独排序。</div>
+        <div class="weight-note">榛樿缁煎悎鍒嗗彧浣跨敤璐ㄩ噺鎸囨爣锛歅SNR / SSIM / NIQE銆傝€楁椂淇濈暀鍗曠嫭灞曠ず涓庡崟鐙帓搴忋€�</div>
         <div class="weight-grid">
           <div class="weight-item"><span class="weight-label">PSNR</span><el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">SSIM</span><el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">NIQE</span><el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
         </div>
         <div class="weight-actions">
-          <el-button plain class="preset-btn" @click="presetQuality">质量优先</el-button>
-          <el-button plain class="preset-btn" @click="presetBalanced">均衡方案</el-button>
-          <el-button plain class="preset-btn" @click="presetPerception">感知优先</el-button>
-          <span class="weight-sum">权重总和：{{ weightSum.toFixed(2) }}</span>
+          <el-button plain class="preset-btn" @click="presetQuality">璐ㄩ噺浼樺厛</el-button>
+          <el-button plain class="preset-btn" @click="presetBalanced">鍧囪　鏂规</el-button>
+          <el-button plain class="preset-btn" @click="presetPerception">鎰熺煡浼樺厛</el-button>
+          <span class="weight-sum">鏉冮噸鎬诲拰锛歿{ weightSum.toFixed(2) }}</span>
         </div>
         <div class="weight-breakdown">
           <span v-for="item in weightBreakdown" :key="item.key" class="weight-chip">{{ item.label }} {{ item.percent }}%</span>
@@ -89,53 +89,11 @@
       </el-card>
     </div>
 
-    <el-card shadow="never" class="tool-card">
-      <div class="tool-row">
-        <div>
-          <div class="card-eyebrow">LinUCB</div>
-          <div class="tool-title">平台标准算法推荐</div>
-          <div class="tool-desc">该推荐只面向平台标准算法库，推荐结果与当前真实评测最优允许不完全一致。</div>
-        </div>
-        <div class="tool-status">{{ platformAlgorithmSummary }}</div>
-      </div>
-      <div class="tool-actions">
-        <div class="control-box">
-          <span class="control-label">Top-K</span>
-          <el-input-number v-model="fastTopK" :min="1" :max="10" size="small" :disabled="!store.user.isLoggedIn" />
-        </div>
-        <div class="control-box">
-          <span class="control-label">探索系数</span>
-          <el-input-number v-model="fastAlpha" :min="0" :max="2" :step="0.1" size="small" :disabled="!store.user.isLoggedIn" />
-        </div>
-        <el-button type="primary" class="primary-btn" :loading="fastLoading" @click="runFastSelect" :disabled="!store.user.isLoggedIn || !canRunFastSelect">分析平台推荐</el-button>
-        <el-button type="warning" plain class="accent-btn" @click="createRunsByFastSelect" :disabled="!store.user.isLoggedIn || !fastRecommendations.length">按推荐创建平台任务</el-button>
-      </div>
-      <div v-if="fastSelectBlockedReason" class="tool-warning">{{ fastSelectBlockedReason }}</div>
-
-      <div v-if="fastRecommendations.length" class="fast-res-container">
-        <el-table :data="fastRecommendations" size="small" class="mini-table">
-          <el-table-column label="推荐排名" width="90" align="center">
-            <template #default="{ $index }"><span class="rank-badge">第 {{ $index + 1 }} 名</span></template>
-          </el-table-column>
-          <el-table-column prop="algorithm_name" label="推荐算法" />
-          <el-table-column prop="algorithm_scope" label="算法范围" width="100" align="center" />
-          <el-table-column prop="score" label="UCB 得分" width="100" align="center" />
-          <el-table-column prop="mean_reward" label="历史均值" width="100" align="center" />
-          <el-table-column prop="sample_count" label="样本数" width="80" align="center" />
-        </el-table>
-        <div class="fast-meta-row">
-          <div v-if="fastContext" class="fast-meta">基于 {{ fastContext.historical_run_count }} 条历史 Run 分析，候选范围为平台标准算法库，alpha={{ fastContext.alpha }}。</div>
-          <div v-if="recommendationDifferenceText" class="fast-note">{{ recommendationDifferenceText }}</div>
-        </div>
-      </div>
-      <div v-else class="tool-placeholder">选择任务与数据集后，可先点击“分析平台推荐”得到候选算法，再决定是否批量创建平台任务。</div>
-    </el-card>
-
     <div class="results-layout">
       <div v-if="bestResultRow" class="recommend-card">
         <div class="recommend-top">
-          <div class="recommend-badge">当前最优</div>
-          <div class="recommend-sort-tag">按 {{ selectedRankMetricLabel }} 排序</div>
+          <div class="recommend-badge">褰撳墠鏈€浼�</div>
+          <div class="recommend-sort-tag">鎸?{{ selectedRankMetricLabel }} 鎺掑簭</div>
         </div>
         <h3 class="rec-title">{{ bestResultRow.algorithmName }}</h3>
         <p class="rec-summary">{{ bestResultSummary }}</p>
@@ -146,9 +104,9 @@
           <div class="rec-metric"><span class="rec-metric-label">{{ selectedRankMetricLabel }}</span><strong>{{ formatSortableMetricValue(bestResultRow) }}</strong></div>
         </div>
         <div class="export-actions">
-          <el-button type="success" class="success-btn" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">导出结论 Markdown</el-button>
-          <el-button plain class="soft-btn" @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">导出对比 Excel</el-button>
-          <el-button plain class="soft-btn" @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">导出对比 CSV</el-button>
+          <el-button type="success" class="success-btn" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">瀵煎嚭缁撹 Markdown</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">瀵煎嚭瀵规瘮 Excel</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">瀵煎嚭瀵规瘮 CSV</el-button>
         </div>
       </div>
 
@@ -157,7 +115,7 @@
           <div class="chart-header">
             <div>
               <div class="card-eyebrow">Chart</div>
-              <span class="chart-title">指标排行图（Top {{ chartTopN }}）</span>
+              <span class="chart-title">鎸囨爣鎺掕鍥撅紙Top {{ chartTopN }}锛�</span>
             </div>
             <div class="chart-actions">
               <el-select v-model="chartTopN" size="small" class="topn-select">
@@ -165,7 +123,7 @@
                 <el-option :value="10" label="Top 10" />
                 <el-option :value="15" label="Top 15" />
               </el-select>
-              <el-button plain class="soft-btn" size="small" @click="exportChartPng" :disabled="!store.user.isLoggedIn">导出图表</el-button>
+              <el-button plain class="soft-btn" size="small" @click="exportChartPng" :disabled="!store.user.isLoggedIn">瀵煎嚭鍥捐〃</el-button>
             </div>
           </div>
         </template>
@@ -180,30 +138,30 @@
           <div class="table-header">
             <div>
               <div class="card-eyebrow">Details</div>
-              <span class="table-title">对比明细清单</span>
+              <span class="table-title">瀵规瘮鏄庣粏娓呭崟</span>
             </div>
             <div class="table-actions">
-              <span class="sort-hint">当前排序：{{ selectedRankMetricLabel }}</span>
-              <el-button plain class="soft-btn" size="small" @click="exportXlsx" :disabled="!store.user.isLoggedIn">导出原始数据 Excel</el-button>
+              <span class="sort-hint">褰撳墠鎺掑簭锛歿{ selectedRankMetricLabel }}</span>
+              <el-button plain class="soft-btn" size="small" @click="exportXlsx" :disabled="!store.user.isLoggedIn">瀵煎嚭鍘熷鏁版嵁 Excel</el-button>
             </div>
           </div>
         </template>
-        <div class="table-note">默认综合分只统计质量指标 PSNR / SSIM / NIQE；耗时与自定义指标可通过上方“排序方式”切换查看。</div>
+        <div class="table-note">榛樿缁煎悎鍒嗗彧缁熻璐ㄩ噺鎸囨爣 PSNR / SSIM / NIQE锛涜€楁椂涓庤嚜瀹氫箟鎸囨爣鍙€氳繃涓婃柟鈥滄帓搴忔柟寮忊€濆垏鎹㈡煡鐪嬨€�</div>
         <el-table :data="tableRows" stripe class="compare-table" height="500">
-          <el-table-column prop="algorithmName" label="算法名称" min-width="160" fixed="left" />
+          <el-table-column prop="algorithmName" label="绠楁硶鍚嶇О" min-width="160" fixed="left" />
           <el-table-column :label="selectedRankMetricLabel" width="120" align="center">
             <template #default="{ row }"><span class="table-score">{{ formatSortableMetricValue(row) }}</span></template>
           </el-table-column>
           <el-table-column prop="psnr" label="PSNR" width="90" align="center" />
           <el-table-column prop="ssim" label="SSIM" width="90" align="center" />
           <el-table-column prop="niqe" label="NIQE" width="90" align="center" />
-          <el-table-column prop="elapsed" label="耗时" width="90" align="center" />
-          <el-table-column label="推荐分析" min-width="260">
+          <el-table-column prop="elapsed" label="鑰楁椂" width="90" align="center" />
+          <el-table-column label="鎺ㄨ崘鍒嗘瀽" min-width="260">
             <template #default="{ row }"><span class="table-reason">{{ row.reason || '-' }}</span></template>
           </el-table-column>
-          <el-table-column prop="createdAt" label="运行时间" width="160" />
+          <el-table-column prop="createdAt" label="杩愯鏃堕棿" width="160" />
         </el-table>
-        <div v-if="tableRows.length === 0" class="empty-state"><el-empty description="暂无符合条件的对比结果" /></div>
+        <div v-if="tableRows.length === 0" class="empty-state"><el-empty description="鏆傛棤绗﹀悎鏉′欢鐨勫姣旂粨鏋�" /></div>
       </el-card>
     </div>
   </div>
@@ -224,52 +182,11 @@ const chartTopN = ref(10);
 const wPSNR = ref(3.5);
 const wSSIM = ref(3.5);
 const wNIQE = ref(2.0);
-const fastTopK = ref(3);
-const fastAlpha = ref(0.35);
-const fastLoading = ref(false);
-const fastRecommendations = ref([]);
-const fastContext = ref(null);
 const chartCanvas = ref(null);
 const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
 let chartHits = [];
 const CACHE_KEY = "compare_filters_v2";
 const PLATFORM_DEFAULT_METRICS = ["PSNR", "SSIM", "NIQE"];
-const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
-  "alg_dn_cnn_light",
-  "alg_dn_cnn_strong",
-  "alg_denoise_bilateral_soft",
-  "alg_denoise_bilateral_strong",
-  "alg_denoise_gaussian_light",
-  "alg_denoise_gaussian_strong",
-  "alg_denoise_median_light",
-  "alg_denoise_median_strong",
-  "alg_dehaze_dcp_fast",
-  "alg_dehaze_dcp_strong",
-  "alg_dehaze_clahe_mild",
-  "alg_dehaze_clahe_strong",
-  "alg_dehaze_gamma_mild",
-  "alg_dehaze_gamma_strong",
-  "alg_deblur_unsharp_light",
-  "alg_deblur_unsharp_strong",
-  "alg_deblur_laplacian_light",
-  "alg_deblur_laplacian_strong",
-  "alg_sr_nearest",
-  "alg_sr_linear",
-  "alg_sr_bicubic_sharp",
-  "alg_sr_lanczos_sharp",
-  "alg_lowlight_gamma_soft",
-  "alg_lowlight_gamma_strong",
-  "alg_lowlight_clahe_soft",
-  "alg_lowlight_clahe_strong",
-  "alg_video_denoise_gaussian_light",
-  "alg_video_denoise_gaussian_strong",
-  "alg_video_denoise_median_light",
-  "alg_video_denoise_median_strong",
-  "alg_video_sr_nearest",
-  "alg_video_sr_linear",
-  "alg_video_sr_bicubic_sharp",
-  "alg_video_sr_lanczos_sharp",
-]);
 
 const datasetMap = computed(() => new Map((store.datasets || []).map((item) => [item.id, item])));
 const taskOptions = computed(() => Array.from(new Set((store.algorithms || []).map((item) => item.task).filter(Boolean))));
@@ -279,7 +196,7 @@ const availableRankMetrics = computed(() => {
     { value: "psnr", label: "PSNR", direction: "higher_better" },
     { value: "ssim", label: "SSIM", direction: "higher_better" },
     { value: "niqe", label: "NIQE", direction: "lower_better" },
-    { value: "time", label: "耗时", direction: "lower_better" },
+    { value: "time", label: "鑰楁椂", direction: "lower_better" },
   ];
   const seen = new Set(base.map((item) => item.value));
   for (const item of store.metricsCatalog || []) {
@@ -292,47 +209,8 @@ const availableRankMetrics = computed(() => {
 });
 const selectedRankMetricMeta = computed(() => availableRankMetrics.value.find((item) => item.value === chartMetric.value) || availableRankMetrics.value[0]);
 const selectedRankMetricLabel = computed(() => selectedRankMetricMeta.value?.label || "默认综合分");
-const selectedTaskSummary = computed(() => task.value || "全部任务");
+const selectedTaskSummary = computed(() => task.value || "鍏ㄩ儴浠诲姟");
 const selectedDatasetSummary = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value)?.name || datasetId.value : "全部数据集");
-const selectedFastTaskLabel = computed(() => task.value || taskOptions.value?.[0] || "");
-const selectedFastTaskType = computed(() => mapTaskLabelToType(selectedFastTaskLabel.value));
-const selectedFastDataset = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value) || null : null);
-const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value));
-const weightBreakdown = computed(() => {
-  const sum = weightSum.value > 0 ? weightSum.value : 1;
-  return [
-    { key: "psnr", label: "PSNR", percent: Math.round((Number(wPSNR.value) / sum) * 100) },
-    { key: "ssim", label: "SSIM", percent: Math.round((Number(wSSIM.value) / sum) * 100) },
-    { key: "niqe", label: "NIQE", percent: Math.round((Number(wNIQE.value) / sum) * 100) },
-  ];
-});
-const platformAlgorithmSummary = computed(() => {
-  const taskLabel = selectedFastTaskLabel.value;
-  if (!taskLabel) return "请先选择任务类型";
-  const count = getPlatformAlgorithmsForTask(taskLabel, mapTaskLabelToType(taskLabel)).length;
-  return `当前候选平台算法 ${count} 个`;
-});
-function getDatasetPairCountForTask(dataset, taskType) {
-  const directMeta = dataset?.meta && typeof dataset.meta === "object" ? dataset.meta : null;
-  const rawMeta = dataset?.raw?.meta && typeof dataset.raw.meta === "object" ? dataset.raw.meta : null;
-  const meta = directMeta || rawMeta || {};
-  const pairsMap = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
-  return Number(pairsMap?.[taskType] ?? 0);
-}
-const selectedFastDatasetPairCount = computed(() => {
-  if (!selectedFastDataset.value || !selectedFastTaskType.value) return 0;
-  return getDatasetPairCountForTask(selectedFastDataset.value, selectedFastTaskType.value);
-});
-const fastSelectBlockedReason = computed(() => {
-  if (!selectedFastTaskLabel.value) return "请先选择任务类型后再分析平台推荐。";
-  if (!datasetId.value) return "请先选择一个数据集后再分析平台推荐。";
-  if (!selectedFastDataset.value) return "当前选中的数据集不存在，请重新选择。";
-  if (selectedFastDatasetPairCount.value <= 0) {
-    return `当前数据集未识别出“${selectedFastTaskLabel.value}”任务的可配对样本，暂不能执行平台推荐。`;
-  }
-  return "";
-});
-const canRunFastSelect = computed(() => !fastSelectBlockedReason.value);
 function loadCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
@@ -375,8 +253,6 @@ function resetAllConfig() {
   wPSNR.value = 3.5;
   wSSIM.value = 3.5;
   wNIQE.value = 2.0;
-  fastRecommendations.value = [];
-  fastContext.value = null;
   saveCache();
 }
 
@@ -501,11 +377,11 @@ const tableRows = computed(() => {
       score,
       comparableSampleCount: ctx.sampleCount || 0,
       legacyReason: okAll
-        ? `默认质量综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% 计算。`
-        : "平台内置指标不完整，当前不参与默认综合分排名。",
+        ? "默认质量综合分按 PSNR / SSIM / NIQE 加权计算。"
+        : "平台内置指标不完整，当前不参与默认综合分排序。",
       reason: okAll
         ? `默认质量综合分按 PSNR ${Math.round(W.psnr * 100)}% + SSIM ${Math.round(W.ssim * 100)}% + NIQE ${Math.round(W.niqe * 100)}% 计算；评分范围为同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）。耗时请单独查看。`
-        : "同任务同数据集下平台内置指标不完整，当前不参与默认综合分排名。",
+        : "同任务同数据集下平台内置指标不完整，当前不参与默认综合分排序。",
     };
   });
 
@@ -529,15 +405,8 @@ const bestResultRow = computed(() => (tableRows.value.length ? tableRows.value[0
 const bestResultSummary = computed(() => {
   const top = bestResultRow.value;
   if (!top) return "";
-  if (chartMetric.value === "score") return `这是当前筛选条件下基于质量综合分计算得到的默认最优方案。${top.reason ? ` ${top.reason}` : ""}`;
+  if (chartMetric.value === "score") return `这是当前筛选条件下基于综合分得到的默认最优方案。${top.reason ? ` ${top.reason}` : ""}`;
   return `这是当前筛选条件下按“${selectedRankMetricLabel.value}”排序得到的当前最优方案。${top.reason ? ` ${top.reason}` : ""}`;
-});
-const recommendationDifferenceText = computed(() => {
-  const fastTop = fastRecommendations.value?.[0];
-  const best = bestResultRow.value;
-  if (!fastTop || !best) return "";
-  if (String(fastTop.algorithm_name || "") === String(best.algorithmName || "")) return "当前平台算法推荐第一名与真实评测最优一致。";
-  return `当前平台算法推荐第一名为 ${fastTop.algorithm_name}，但当前真实评测最优为 ${best.algorithmName}。前者基于历史反馈推荐，后者基于当前真实评测结果。`;
 });
 const recommendText = computed(() => {
   if (!tableRows.value.length) return "";
@@ -545,11 +414,11 @@ const recommendText = computed(() => {
   const currentValue = getSortMetricValue(top, chartMetric.value);
   if (!Number.isFinite(currentValue)) return "";
   return [
-    `推荐算法：${top.algorithmName}`,
-    `当前排序：${selectedRankMetricLabel.value}=${formatSortMetricValue(currentValue, chartMetric.value)}`,
-    `推荐理由：${top.reason || '-'}`,
-    `结论口径：${compareAuthenticityLabel(top)}`,
-    `指标摘要：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || '-'}`,
+    `鎺ㄨ崘绠楁硶锛?{top.algorithmName}`,
+    `褰撳墠鎺掑簭锛?{selectedRankMetricLabel.value}=${formatSortMetricValue(currentValue, chartMetric.value)}`,
+    `鎺ㄨ崘鐞嗙敱锛?{top.reason || '-'}`,
+    `缁撹鍙ｅ緞锛?{compareAuthenticityLabel(top)}`,
+    `鎸囨爣鎽樿锛歅SNR=${top.psnr}锛孲SIM=${top.ssim}锛孨IQE=${top.niqe}锛岃€楁椂=${top.elapsed || '-'}`,
   ].join(" ");
 });
 const chartItems = computed(() => {
@@ -573,7 +442,7 @@ function onChartMove(event) {
   const y = event.clientY - rect.top;
   const hit = chartHits.find((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
   if (!hit) return onChartLeave();
-  chartTip.value = { visible: true, x: Math.max(8, Math.min(rect.width - 8, x + 12)), y: Math.max(8, Math.min(rect.height - 8, y + 12)), text: `${hit.name}：${hit.text}` };
+  chartTip.value = { visible: true, x: Math.max(8, Math.min(rect.width - 8, x + 12)), y: Math.max(8, Math.min(rect.height - 8, y + 12)), text: `${hit.name}锛?{hit.text}` };
 }
 
 function drawChart() {
@@ -628,7 +497,7 @@ function drawChart() {
   if (!items.length) {
     ctx.fillStyle = "#94a3b8";
     ctx.textAlign = "center";
-    ctx.fillText("暂无图表数据", cssW / 2, cssH / 2);
+    ctx.fillText("鏆傛棤鍥捐〃鏁版嵁", cssW / 2, cssH / 2);
     chartHits = [];
     return;
   }
@@ -651,7 +520,7 @@ function drawChart() {
     ctx.fillStyle = "#3b82f6";
     ctx.fillRect(x, y, bw, h);
     ctx.fillStyle = "#1f2937";
-    const label = item.name.length > 12 ? `${item.name.slice(0, 12)}…` : item.name;
+    const label = item.name.length > 12 ? `${item.name.slice(0, 12)}...` : item.name;
     ctx.save();
     ctx.translate(x + bw / 2, padT + plotH + 8);
     ctx.rotate(-Math.PI / 5);
@@ -667,76 +536,8 @@ function drawChart() {
   ctx.fillText(`图表指标：${selectedRankMetricLabel.value}${extra}`, padL, 0);
 }
 
-function getPlatformAlgorithmsForTask(taskLabel, taskType) {
-  return (store.algorithms || []).filter((item) => {
-    const isSystem = String(item?.raw?.owner_id || "") === "system";
-    const active = item?.raw?.is_active !== false;
-    const taskMatched = String(item?.task || "") === String(taskLabel || "") || String(item?.taskType || "") === String(taskType || "");
-    const impl = String(item?.impl || item?.raw?.impl || "").trim().toLowerCase();
-    const hasCommunitySource = Boolean(String(item?.sourceUploaderId || "").trim() || String(item?.sourceAlgorithmId || "").trim());
-    const visiblePlatform = hasCommunitySource || !HIDDEN_PLATFORM_ALGORITHM_IDS.has(String(item?.id || ""));
-    const allowUse = Boolean(item?.allowUse || item?.raw?.allow_use);
-    const runtimeReadyRaw = item?.runtimeReady ?? item?.raw?.runtime_ready;
-    const runtimeOk =
-      impl !== "userpackage" ||
-      (!String(taskType || "").startsWith("video_") &&
-        allowUse &&
-        (isSystem ? true : (runtimeReadyRaw == null ? allowUse : Boolean(runtimeReadyRaw))));
-    return isSystem && active && taskMatched && visiblePlatform && runtimeOk;
-  });
-}
 
-async function runFastSelect() {
-  const taskLabel = selectedFastTaskLabel.value;
-  const dsId = datasetId.value || "";
-  if (fastSelectBlockedReason.value) return ElMessage.warning(fastSelectBlockedReason.value);
-  await store.fetchAlgorithms();
-  const taskType = mapTaskLabelToType(taskLabel);
-  const algorithms = getPlatformAlgorithmsForTask(taskLabel, taskType);
-  if (!algorithms.length) return ElMessage.warning("当前任务下暂无可推荐的平台算法");
-  fastLoading.value = true;
-  try {
-    const out = await store.fastSelect({ task_type: taskType, dataset_id: dsId, candidate_algorithm_ids: algorithms.map((item) => item.id), top_k: fastTopK.value, alpha: fastAlpha.value });
-    const recs = Array.isArray(out?.recommendations) ? out.recommendations : [];
-    const algMap = new Map(algorithms.map((item) => [item.id, item]));
-    fastRecommendations.value = recs.map((item) => ({
-      algorithm_id: String(item.algorithm_id || ""),
-      algorithm_name: algMap.get(String(item.algorithm_id || ""))?.name || String(item.algorithm_id || ""),
-      algorithm_scope: "平台算法",
-      score: Number(item.score ?? 0).toFixed(4),
-      mean_reward: Number(item.mean_reward ?? 0).toFixed(4),
-      sample_count: Number(item.sample_count ?? 0),
-    }));
-    fastContext.value = out?.context || null;
-    if (!fastRecommendations.value.length) ElMessage.warning("当前没有返回推荐结果");
-  } catch (error) {
-    fastRecommendations.value = [];
-    fastContext.value = null;
-    const errorCode = String(error?.detail?.error_code || error?.data?.detail?.error_code || "");
-    if (errorCode === "E_DATASET_NO_PAIR") {
-      ElMessage.warning(fastSelectBlockedReason.value || "当前任务与数据集没有可用配对样本，无法执行平台推荐。");
-      return;
-    }
-    ElMessage.error(`平台算法推荐失败：${error?.message || error}`);
-  } finally {
-    fastLoading.value = false;
-  }
-}
 
-async function createRunsByFastSelect() {
-  const taskLabel = task.value || taskOptions.value?.[0] || "";
-  const dsId = datasetId.value || store.datasets?.[0]?.id || "";
-  if (!taskLabel || !dsId) return ElMessage.warning("请先选择任务和数据集");
-  await store.fetchAlgorithms();
-  if (!fastRecommendations.value.length) return ElMessage.warning("请先执行平台算法推荐");
-  let created = 0;
-  for (const item of fastRecommendations.value) {
-    await store.createRun({ task: taskLabel, datasetId: dsId, algorithmId: item.algorithm_id, metrics: [...PLATFORM_DEFAULT_METRICS], params: { source: "fast_select", fast_top_k: fastTopK.value, fast_alpha: fastAlpha.value }, strictValidate: true });
-    created += 1;
-  }
-  await store.fetchRuns();
-  ElMessage.success(`已创建 ${created} 个平台推荐任务`);
-}
 function buildExportRows() {
   return (tableRows.value || []).map((row) => ({
     创建时间: row.createdAt ?? "",
@@ -787,10 +588,10 @@ function exportXlsx() { exportRecommendXlsx(); }
 
 function exportConclusionMd() {
   const lines = [
-    "# 平台算法对比结论",
+    "# 骞冲彴绠楁硶瀵规瘮缁撹",
     "",
     `- 排序方式：${selectedRankMetricLabel.value}`,
-    `- 默认综合分口径：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}（耗时单独展示，不计入默认综合分）`,
+    `- 榛樿缁煎悎鍒嗗彛寰勶細PSNR=${wPSNR.value}锛孲SIM=${wSSIM.value}锛孨IQE=${wNIQE.value}锛堣€楁椂鍗曠嫭灞曠ず锛屼笉璁″叆榛樿缁煎悎鍒嗭級`,
     "",
   ];
   if (bestResultRow.value) {
@@ -799,12 +600,12 @@ function exportConclusionMd() {
     lines.push("");
   }
   if (recommendText.value) {
-    lines.push("## 推荐说明");
+    lines.push("## 鎺ㄨ崘璇存槑");
     lines.push(recommendText.value);
     lines.push("");
   }
   for (const row of tableRows.value) {
-    lines.push(`- ${row.algorithmName}：${selectedRankMetricLabel.value}=${formatSortableMetricValue(row)}；${row.reason || '-'}`);
+    lines.push(`- ${row.algorithmName}锛?{selectedRankMetricLabel.value}=${formatSortableMetricValue(row)}锛?{row.reason || '-'}`);
   }
   downloadBlob(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8;" }), `compare_${Date.now()}.md`);
 }
@@ -1377,3 +1178,7 @@ onMounted(async () => {
   }
 }
 </style>
+
+
+
+

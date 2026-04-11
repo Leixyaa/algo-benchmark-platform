@@ -1,9 +1,8 @@
-// web/src/stores/app.js
-// Pinia 全局 store（前端对接后端）
-// - NewRun：POST /runs 创建 run
-// - Runs：轮询 GET /runs/{id}
-// - Compare：展示后端 metrics（PSNR/SSIM/NIQE）
-
+﻿// web/src/stores/app.js
+// Pinia 鍏ㄥ眬 store锛堝墠绔鎺ュ悗绔級
+// - NewRun锛歅OST /runs 鍒涘缓 run
+// - Runs锛氳疆璇?GET /runs/{id}
+// - Compare锛氬睍绀哄悗绔?metrics锛圥SNR/SSIM/NIQE锛?
 import { defineStore } from "pinia";
 import { runsApi } from "../api/runs";
 import { datasetsApi } from "../api/datasets";
@@ -54,15 +53,15 @@ function _scopedKey(username) {
   return `${LS_KEY}:${_scopeName(username)}`;
 }
 
-// ====================== 任务类型统一映射（唯一真相） ======================
+// ====================== 浠诲姟绫诲瀷缁熶竴鏄犲皠锛堝敮涓€鐪熺浉锛?======================
 export const TASK_LABEL_BY_TYPE = {
-  denoise: "去噪",
+  denoise: "鍘诲櫔",
   deblur: "去模糊",
-  dehaze: "去雾",
-  sr: "超分辨率",
+  dehaze: "鍘婚浘",
+  sr: "瓒呭垎杈ㄧ巼",
   lowlight: "低照度增强",
-  video_denoise: "视频去噪",
-  video_sr: "视频超分",
+  video_denoise: "瑙嗛鍘诲櫔",
+  video_sr: "瑙嗛瓒呭垎",
 };
 
 export const TASK_TYPE_BY_LABEL = Object.fromEntries(
@@ -80,7 +79,7 @@ export function toTaskType(taskLabel) {
 function hasBadText(v) {
   if (typeof v !== "string") return false;
   if (v.includes("\uFFFD")) return true;
-  if (/[?？]{2,}/.test(v)) return true;
+  if (/[?锛焆]{2,}/.test(v)) return true;
   return false;
 }
 
@@ -107,9 +106,9 @@ function repairLoadedState(state) {
   if (Array.isArray(next.datasets)) {
     next.datasets = next.datasets.map((d) => {
       if (!d || typeof d !== "object") return d;
-      const name2 = normalizeBadString(d.name, "（名称乱码，请编辑）");
-      const type2 = normalizeBadString(d.type, "（类型乱码，请编辑）");
-      const size2 = normalizeBadString(d.size, "（大小乱码，请编辑）");
+      const name2 = normalizeBadString(d.name, "锛堝悕绉颁贡鐮侊紝璇风紪杈戯級");
+      const type2 = normalizeBadString(d.type, "锛堢被鍨嬩贡鐮侊紝璇风紪杈戯級");
+      const size2 = normalizeBadString(d.size, "锛堝ぇ灏忎贡鐮侊紝璇风紪杈戯級");
       if (name2 === d.name && type2 === d.type && size2 === d.size) return d;
       changed = true;
       return { ...d, name: name2, type: type2, size: size2 };
@@ -127,19 +126,19 @@ function repairLoadedState(state) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
-        return { ...a, task: "去噪", name: "DnCNN(示例)" };
+        return { ...a, task: "鍘诲櫔", name: "DnCNN(绀轰緥)" };
       }
       if (isDcp) {
         const needsFix = hasBadText(a.task) || hasBadText(a.name);
         if (!needsFix) return a;
         changed = true;
-        return { ...a, task: "去雾", name: "DCP暗通道先验(真实)" };
+        return { ...a, task: "鍘婚浘", name: "DCP鏆楅€氶亾鍏堥獙(鐪熷疄)" };
       }
 
       const task2 = normalizeTaskLabel(a.task);
       const name2 = normalizeBadString(a.name, "（算法名乱码，请编辑）");
-      const impl2 = normalizeBadString(a.impl, "（实现方式乱码）");
-      const ver2 = normalizeBadString(a.version, "（版本乱码）");
+      const impl2 = normalizeBadString(a.impl, "锛堝疄鐜版柟寮忎贡鐮侊級");
+      const ver2 = normalizeBadString(a.version, "锛堢増鏈贡鐮侊級");
       if (task2 === a.task && name2 === a.name && impl2 === a.impl && ver2 === a.version) return a;
       changed = true;
       return { ...a, task: task2, name: name2, impl: impl2, version: ver2 };
@@ -195,14 +194,14 @@ function saveState(partial, username) {
 }
 
 
-// ====================== 状态/映射工具 ======================
+// ====================== 鐘舵€?鏄犲皠宸ュ叿 ======================
 
 function normalizeStatusCN(status) {
   const s = String(status ?? "").toLowerCase();
   if (["done", "completed", "success", "已完成"].includes(s)) return "已完成";
   if (["running", "运行中"].includes(s)) return "运行中";
   if (["queued", "pending", "排队中"].includes(s)) return "排队中";
-  if (["failed", "error", "失败"].includes(s)) return "失败";
+  if (["failed", "error", "澶辫触"].includes(s)) return "澶辫触";
   if (["canceling", "cancelling", "取消中"].includes(s)) return "取消中";
   if (["canceled", "cancelled", "已取消"].includes(s)) return "已取消";
   return String(status ?? "");
@@ -240,8 +239,8 @@ function ensureBaselineAlgorithms(algs) {
 
   add({
     id: "alg_dn_cnn",
-    task: "去噪",
-    name: "FastNLMeans(基线)",
+    task: "鍘诲櫔",
+    name: "FastNLMeans(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -249,8 +248,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_bilateral",
-    task: "去噪",
-    name: "Bilateral(基线)",
+    task: "鍘诲櫔",
+    name: "Bilateral(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -258,8 +257,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_gaussian",
-    task: "去噪",
-    name: "Gaussian(基线)",
+    task: "鍘诲櫔",
+    name: "Gaussian(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -267,8 +266,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_denoise_median",
-    task: "去噪",
-    name: "Median(基线)",
+    task: "鍘诲櫔",
+    name: "Median(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -277,8 +276,8 @@ function ensureBaselineAlgorithms(algs) {
 
   add({
     id: "alg_dehaze_dcp",
-    task: "去雾",
-    name: "DCP暗通道先验(基线)",
+    task: "鍘婚浘",
+    name: "DCP鏆楅€氶亾鍏堥獙(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -286,8 +285,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_dehaze_clahe",
-    task: "去雾",
-    name: "CLAHE(基线)",
+    task: "鍘婚浘",
+    name: "CLAHE(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -295,8 +294,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_dehaze_gamma",
-    task: "去雾",
-    name: "Gamma(基线)",
+    task: "鍘婚浘",
+    name: "Gamma(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -306,7 +305,7 @@ function ensureBaselineAlgorithms(algs) {
   add({
     id: "alg_deblur_unsharp",
     task: "去模糊",
-    name: "UnsharpMask(基线)",
+    name: "UnsharpMask(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -315,21 +314,21 @@ function ensureBaselineAlgorithms(algs) {
   add({
     id: "alg_deblur_laplacian",
     task: "去模糊",
-    name: "LaplacianSharpen(基线)",
+    name: "LaplacianSharpen(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
     defaultParams: { laplacian_strength: 0.7 },
   });
 
-  add({ id: "alg_sr_bicubic", task: "超分辨率", name: "Bicubic(基线)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
-  add({ id: "alg_sr_lanczos", task: "超分辨率", name: "Lanczos(基线)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
-  add({ id: "alg_sr_nearest", task: "超分辨率", name: "Nearest(基线)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_bicubic", task: "瓒呭垎杈ㄧ巼", name: "Bicubic(鍩虹嚎)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_lanczos", task: "瓒呭垎杈ㄧ巼", name: "Lanczos(鍩虹嚎)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
+  add({ id: "alg_sr_nearest", task: "瓒呭垎杈ㄧ巼", name: "Nearest(鍩虹嚎)", impl: "OpenCV", version: "v1", createdAt, defaultParams: {} });
 
   add({
     id: "alg_lowlight_gamma",
     task: "低照度增强",
-    name: "Gamma(基线)",
+    name: "Gamma(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -338,7 +337,7 @@ function ensureBaselineAlgorithms(algs) {
   add({
     id: "alg_lowlight_clahe",
     task: "低照度增强",
-    name: "CLAHE(基线)",
+    name: "CLAHE(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -346,8 +345,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_video_denoise_gaussian",
-    task: "视频去噪",
-    name: "VideoGaussian(基线)",
+    task: "瑙嗛鍘诲櫔",
+    name: "VideoGaussian(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -355,8 +354,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_video_denoise_median",
-    task: "视频去噪",
-    name: "VideoMedian(基线)",
+    task: "瑙嗛鍘诲櫔",
+    name: "VideoMedian(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -364,8 +363,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_video_sr_bicubic",
-    task: "视频超分",
-    name: "VideoBicubic(基线)",
+    task: "瑙嗛瓒呭垎",
+    name: "VideoBicubic(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -373,8 +372,8 @@ function ensureBaselineAlgorithms(algs) {
   });
   add({
     id: "alg_video_sr_lanczos",
-    task: "视频超分",
-    name: "VideoLanczos(基线)",
+    task: "瑙嗛瓒呭垎",
+    name: "VideoLanczos(鍩虹嚎)",
     impl: "OpenCV",
     version: "v1",
     createdAt,
@@ -479,7 +478,7 @@ function formatMetricDisplayName(metricKey, metricsCatalog = []) {
 }
 
 function isTerminal(statusCN) {
-  return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
+  return statusCN === "已完成" || statusCN === "澶辫触" || statusCN === "已取消";
 }
 
 // runId -> timerId
@@ -490,28 +489,28 @@ const _pollTimers = new Map();
 export const useAppStore = defineStore("app", {
   state: () => {
     const loaded = loadState(currentAuthUsername());
-      return {
-        // 用户状态
-        user: {
-          username: currentAuthUsername(),
-          token: currentAuthToken(),
-          role: currentAuthRole(),
-          isLoggedIn: !!currentAuthToken(),
-        },
-        notices: [],
-        // 数据资产
-        datasets: (loaded?.datasets?.length ? loaded.datasets : []),
+    return {
+      // 用户状态
+      user: {
+        username: currentAuthUsername(),
+        token: currentAuthToken(),
+        role: currentAuthRole(),
+        isLoggedIn: !!currentAuthToken(),
+      },
+      notices: [],
+      // 数据资源
+      datasets: (loaded?.datasets?.length ? loaded.datasets : []),
         algorithms: ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []),
         metricsCatalog: loaded?.metricsCatalog || [],
         presets: loaded?.presets || [],
         runs: loaded?.runs || [],
-        // 全局控制
+        // 鍏ㄥ眬鎺у埗
         loading: false,
       };
   },
 
   actions: {
-    // --- 用户 Actions ---
+    // --- 鐢ㄦ埛 Actions ---
     async login(username, password) {
       try {
         const res = await http.post("/login", { username, password });
@@ -614,7 +613,7 @@ export const useAppStore = defineStore("app", {
         this.notices = (this.notices || []).filter((item) => String(item?.notice_id || "") !== String(noticeId));
       },
 
-    // ====================== Catalog：数据集/算法（后端持久化） ======================
+    // ====================== Catalog锛氭暟鎹泦/绠楁硶锛堝悗绔寔涔呭寲锛?======================
     async fetchDatasets(limit = 200) {
       const list = await datasetsApi.listDatasets({ limit });
       const currentUsername = String(this.user?.username || "");
@@ -903,11 +902,10 @@ export const useAppStore = defineStore("app", {
     },
 
 
-    // ====================== 阶段C：后端对接（创建/拉取/轮询） ======================
+    // ====================== 闃舵C锛氬悗绔鎺ワ紙鍒涘缓/鎷夊彇/杞锛?======================
 
     /**
-     * 创建真实 Run（后端写 Redis + 投递 Celery）
-     * @param {{task:string,datasetId:string,algorithmId:string,metrics?:string[],params?:object}} payload
+     * 鍒涘缓鐪熷疄 Run锛堝悗绔啓 Redis + 鎶曢€?Celery锛?     * @param {{task:string,datasetId:string,algorithmId:string,metrics?:string[],params?:object}} payload
      * @returns {Promise<string>} runId
      */
     async createRun(payload) {
@@ -930,7 +928,7 @@ export const useAppStore = defineStore("app", {
       const run = this._mapRunOut(out);
       this._upsertRun(run);
 
-      // 创建后立即轮询直到 done/failed
+      // 鍒涘缓鍚庣珛鍗宠疆璇㈢洿鍒?done/failed
       this.startPolling(run.id);
 
       return run.id;
@@ -951,16 +949,16 @@ export const useAppStore = defineStore("app", {
         const list = await runsApi.listRuns({ limit });
         const mapped = (list ?? []).map((x) => this._mapRunOut(x));
 
-        // 覆盖式同步：以 Redis 为准
+        // 覆盖式同步：以服务端返回为准
         this.runs = mapped;
         saveState({ runs: this.runs });
-        // 对未结束的 run 自动补轮询
+        // 对未结束的 run 自动继续轮询
         for (const r of this.runs) {
           if (!isTerminal(r.status)) this.startPolling(r.id);
         }
       } catch (error) {
         if (error?.response?.status === 401) {
-          // 认证失败，清空任务列表
+          // 认证失效时清空任务列表
           this.runs = [];
           saveState({ runs: this.runs });
         }
@@ -969,7 +967,7 @@ export const useAppStore = defineStore("app", {
     },
 
     /**
-     * 拉取单个 Run（轮询/详情用）
+     * 鎷夊彇鍗曚釜 Run锛堣疆璇?璇︽儏鐢級
      * @param {string} runId
      */
     async fetchRun(runId) {
@@ -981,7 +979,7 @@ export const useAppStore = defineStore("app", {
 
     async cancelRun(runId) {
       const prev = this.runs.find((r) => r.id === runId);
-      if (prev && (prev.status === "已完成" || prev.status === "失败" || prev.status === "已取消")) return;
+      if (prev && (prev.status === "已完成" || prev.status === "澶辫触" || prev.status === "已取消")) return;
 
       this._upsertRun({ id: runId, status: "取消中" });
       try {
@@ -997,40 +995,9 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async fastSelect(payload = {}) {
-      const taskType =
-        String(payload.task_type || "").trim() ||
-        toTaskType(String(payload.task || "").trim());
-      if (!taskType) {
-        throw new Error("task_type_required");
-      }
-      const datasetId = String(payload.dataset_id || payload.datasetId || "").trim();
-      const allowEmptyDatasetId = Boolean(payload.allow_empty_dataset_id ?? payload.allowEmptyDatasetId ?? false);
-      if (!datasetId && !allowEmptyDatasetId) {
-        throw new Error("dataset_id_required");
-      }
-      const out = await runsApi.fastSelect({
-        task_type: taskType,
-        dataset_id: datasetId || null,
-        candidate_algorithm_ids: Array.isArray(payload.candidate_algorithm_ids)
-          ? payload.candidate_algorithm_ids
-          : (Array.isArray(payload.candidateAlgorithmIds) ? payload.candidateAlgorithmIds : []),
-        top_k: Number(payload.top_k ?? payload.topK ?? 3),
-        alpha: Number(payload.alpha ?? 0.35),
-        lambda_reg: payload.lambda_reg ?? payload.lambdaReg,
-        recency_half_life_hours: payload.recency_half_life_hours ?? payload.recencyHalfLifeHours,
-        cold_start_bonus: payload.cold_start_bonus ?? payload.coldStartBonus,
-        low_support_penalty: payload.low_support_penalty ?? payload.lowSupportPenalty,
-        min_support: payload.min_support ?? payload.minSupport,
-      });
-      return out;
-    },
-
     /**
-     * 启动轮询（默认 800ms）
-     * - run 进入终态（已完成/失败）会自动 stop
-     * - 网络/后端短暂重启：不立即 stop，让下一轮继续尝试
-     */
+     * 鍚姩杞锛堥粯璁?800ms锛?     * - run 杩涘叆缁堟€侊紙宸插畬鎴?澶辫触锛変細鑷姩 stop
+     * - 缃戠粶/鍚庣鐭殏閲嶅惎锛氫笉绔嬪嵆 stop锛岃涓嬩竴杞户缁皾璇?     */
     startPolling(runId, intervalMs = 800) {
       if (_pollTimers.has(runId)) return;
 
@@ -1059,7 +1026,7 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    // ====================== 内部：Run 映射 & upsert ======================
+    // ====================== 鍐呴儴锛歊un 鏄犲皠 & upsert ======================
 
     _mapRunOut(out) {
       const statusCN = normalizeStatusCN(out?.status);
@@ -1085,8 +1052,7 @@ export const useAppStore = defineStore("app", {
       return {
         id: out.run_id,
 
-        // ? 同时保留英文与中文，后续筛选/导出不再乱
-        taskType,
+        // ? 鍚屾椂淇濈暀鑻辨枃涓庝腑鏂囷紝鍚庣画绛涢€?瀵煎嚭涓嶅啀涔?        taskType,
         task: toTaskLabel(taskType),
 
         datasetId: out.dataset_id,
@@ -1096,7 +1062,7 @@ export const useAppStore = defineStore("app", {
         status: statusCN,
         createdAt: formatTs(out.created_at),
 
-        // 表格直接用：扁平字段
+        // 琛ㄦ牸鐩存帴鐢細鎵佸钩瀛楁
         psnr: metrics.PSNR ?? metrics.psnr ?? null,
         ssim: metrics.SSIM ?? metrics.ssim ?? null,
         niqe: metrics.NIQE ?? metrics.niqe ?? null,
@@ -1105,7 +1071,7 @@ export const useAppStore = defineStore("app", {
 
         error: out?.error ?? null,
 
-        // 保留原始字段（未来导出/详情用）
+        // 淇濈暀鍘熷瀛楁锛堟湭鏉ュ鍑?璇︽儏鐢級
         raw,
       };
     },
@@ -1120,3 +1086,4 @@ export const useAppStore = defineStore("app", {
     },
   },
 });
+

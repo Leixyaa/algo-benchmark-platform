@@ -16,7 +16,6 @@ import hashlib
 from .celery_app import celery_app
 from .store import make_redis, load_run, save_run, load_dataset, load_algorithm, list_metrics
 from . import errors as err
-from .selector import online_update_model_with_run
 from .metric_runtime import execute_python_metric
 from .algorithm_runtime import AlgorithmRuntimeError, UserAlgorithmImageRunner
 
@@ -1026,7 +1025,6 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 run["record"] = record
                 _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
                 check_cancel()
-                online_update_model_with_run(r, run)
                 save_run(r, run_id, run)
                 check_cancel()
                 return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
@@ -1119,7 +1117,6 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             run["record"] = record
             _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
             check_cancel()
-            online_update_model_with_run(r, run)
             save_run(r, run_id, run)
             check_cancel()
             return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}
@@ -1139,7 +1136,6 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["error_detail"] = None
         _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
         check_cancel()
-        online_update_model_with_run(r, run)
         save_run(r, run_id, run)
         check_cancel()
         return {"ok": True, "run_id": run_id, "metrics": run["metrics"]}

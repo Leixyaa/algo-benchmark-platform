@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import time
@@ -47,9 +47,6 @@ from .schemas import (
     PresetCreate,
     PresetOut,
     PresetPatch,
-    FastSelectRequest,
-    FastSelectResponse,
-    FastSelectItem,
     MetricCreate,
     MetricPatch,
     MetricReview,
@@ -104,14 +101,6 @@ from .auth import (
 )
 from .celery_app import celery_app
 from .tasks import execute_run
-from .selector import (
-    build_context_vector,
-    fast_select_algorithms,
-    fast_select_algorithms_online,
-    bootstrap_online_model_from_runs,
-    load_online_model,
-    FastSelectConfig,
-)
 from . import errors as err, sql_store
 from .metric_runtime import validate_python_metric_code
 from .vision.dataset_access import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos, resolve_dataset_dir
@@ -119,9 +108,9 @@ from .vision.dataset_access import IMG_EXTS, VIDEO_EXTS, count_paired_images, co
 import cv2
 
 
-app = FastAPI(title="图像复原增强算法评测平台 API", version="0.1.0")
+app = FastAPI(title="鍥惧儚澶嶅師澧炲己绠楁硶璇勬祴骞冲彴 API", version="0.1.0")
 
-# --- 用户系统 (User System) ---
+# --- 鐢ㄦ埛绯荤粺 (User System) ---
 
 _ADMIN_USERNAME = os.getenv("ABP_ADMIN_USERNAME", "admin").strip() or "admin"
 _ADMIN_PASSWORD = os.getenv("ABP_ADMIN_PASSWORD", "Admin@123456")
@@ -291,8 +280,8 @@ async def _http_exception_handler(_: Request, exc: HTTPException):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发环境下允许所有源
-    allow_credentials=False, # 设为 False 以支持 "*"
+    allow_origins=["*"],  # 寮€鍙戠幆澧冧笅鍏佽鎵€鏈夋簮
+    allow_credentials=False, # 璁句负 False 浠ユ敮鎸?"*"
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
@@ -451,7 +440,7 @@ def _algorithm_name_exists(r, name: str, exclude_id: str | None = None) -> bool:
 
 
 def _make_unique_algorithm_name(r, base_name: str) -> str:
-    base = str(base_name or "下载算法").strip() or "下载算法"
+    base = str(base_name or "涓嬭浇绠楁硶").strip() or "涓嬭浇绠楁硶"
     if not _algorithm_name_exists(r, base):
         return base
     idx = 2
@@ -477,7 +466,7 @@ def _algorithm_name_exists_for_owner(r, owner_id: str, name: str, exclude_id: st
 
 
 def _make_owner_unique_algorithm_name(r, owner_id: str, base_name: str, exclude_id: str | None = None) -> str:
-    base = str(base_name or "下载算法").strip() or "下载算法"
+    base = str(base_name or "涓嬭浇绠楁硶").strip() or "涓嬭浇绠楁硶"
     if not _algorithm_name_exists_for_owner(r, owner_id, base, exclude_id=exclude_id):
         return base
     idx = 2
@@ -561,12 +550,11 @@ _PINNED_OWNER_USERNAME = "1959920806"
 
 
 def _pin_dataset_and_algorithm_owners(r) -> None:
-    # 只处理没有所有者的数据集和算法
+    # 鍙鐞嗘病鏈夋墍鏈夎€呯殑鏁版嵁闆嗗拰绠楁硶
     for data in list_all_datasets(r, limit=5000):
         if not isinstance(data, dict) or "dataset_id" not in data:
             continue
-        # 只有当没有所有者时，才设置为系统所有者
-        if not data.get("owner_id"):
+        # 鍙湁褰撴病鏈夋墍鏈夎€呮椂锛屾墠璁剧疆涓虹郴缁熸墍鏈夎€?        if not data.get("owner_id"):
             data["owner_id"] = "system"
             save_dataset(r, str(data.get("dataset_id") or ""), data)
 
@@ -574,7 +562,7 @@ def _pin_dataset_and_algorithm_owners(r) -> None:
         if not isinstance(data, dict) or "algorithm_id" not in data:
             continue
         alg_id = str(data.get("algorithm_id") or "")
-        # 只有当没有所有者时，才设置为系统所有者或_PINNED_OWNER_USERNAME
+        # 鍙湁褰撴病鏈夋墍鏈夎€呮椂锛屾墠璁剧疆涓虹郴缁熸墍鏈夎€呮垨_PINNED_OWNER_USERNAME
         if not data.get("owner_id"):
             target_owner = "system" if alg_id in BUILTIN_ALGORITHM_IDS else "system"
             data["owner_id"] = target_owner
@@ -593,89 +581,89 @@ def _builtin_algorithm_catalog():
             "param_presets": param_presets or {},
         })
 
-    add("alg_dn_cnn", "去噪", "FastNLMeans(基线)",
+    add("alg_dn_cnn", "鍘诲櫔", "FastNLMeans(鍩虹嚎)",
         {"nlm_h": 10, "nlm_hColor": 10, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
         {"speed": {"nlm_h": 7, "nlm_hColor": 7, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 15},
          "quality": {"nlm_h": 12, "nlm_hColor": 12, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21}})
-    add("alg_dn_cnn_light", "去噪", "FastNLMeans-轻度(基线)",
+    add("alg_dn_cnn_light", "鍘诲櫔", "FastNLMeans-杞诲害(鍩虹嚎)",
         {"nlm_h": 7, "nlm_hColor": 7, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 15},
         {"speed": {"nlm_h": 5, "nlm_hColor": 5, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 11},
          "quality": {"nlm_h": 9, "nlm_hColor": 9, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 17}})
-    add("alg_dn_cnn_strong", "去噪", "FastNLMeans-增强(基线)",
+    add("alg_dn_cnn_strong", "鍘诲櫔", "FastNLMeans-澧炲己(鍩虹嚎)",
         {"nlm_h": 14, "nlm_hColor": 14, "nlm_templateWindowSize": 9, "nlm_searchWindowSize": 25},
         {"speed": {"nlm_h": 12, "nlm_hColor": 12, "nlm_templateWindowSize": 7, "nlm_searchWindowSize": 21},
          "quality": {"nlm_h": 16, "nlm_hColor": 16, "nlm_templateWindowSize": 11, "nlm_searchWindowSize": 31}})
-    add("alg_denoise_bilateral", "去噪", "Bilateral(基线)", {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
+    add("alg_denoise_bilateral", "鍘诲櫔", "Bilateral(鍩虹嚎)", {"bilateral_d": 7, "bilateral_sigmaColor": 35, "bilateral_sigmaSpace": 35},
         {"speed": {"bilateral_d": 5, "bilateral_sigmaColor": 25, "bilateral_sigmaSpace": 25},
          "quality": {"bilateral_d": 9, "bilateral_sigmaColor": 50, "bilateral_sigmaSpace": 50}})
-    add("alg_denoise_bilateral_soft", "去噪", "Bilateral-轻度(基线)", {"bilateral_d": 5, "bilateral_sigmaColor": 20, "bilateral_sigmaSpace": 20},
+    add("alg_denoise_bilateral_soft", "鍘诲櫔", "Bilateral-杞诲害(鍩虹嚎)", {"bilateral_d": 5, "bilateral_sigmaColor": 20, "bilateral_sigmaSpace": 20},
         {"speed": {"bilateral_d": 3, "bilateral_sigmaColor": 15, "bilateral_sigmaSpace": 15},
          "quality": {"bilateral_d": 7, "bilateral_sigmaColor": 28, "bilateral_sigmaSpace": 28}})
-    add("alg_denoise_bilateral_strong", "去噪", "Bilateral-增强(基线)", {"bilateral_d": 11, "bilateral_sigmaColor": 60, "bilateral_sigmaSpace": 60},
+    add("alg_denoise_bilateral_strong", "鍘诲櫔", "Bilateral-澧炲己(鍩虹嚎)", {"bilateral_d": 11, "bilateral_sigmaColor": 60, "bilateral_sigmaSpace": 60},
         {"speed": {"bilateral_d": 9, "bilateral_sigmaColor": 50, "bilateral_sigmaSpace": 50},
          "quality": {"bilateral_d": 13, "bilateral_sigmaColor": 75, "bilateral_sigmaSpace": 75}})
-    add("alg_denoise_gaussian", "去噪", "Gaussian(基线)", {"gaussian_sigma": 1.0}, {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}})
-    add("alg_denoise_gaussian_light", "去噪", "Gaussian-轻度(基线)", {"gaussian_sigma": 0.6}, {"speed": {"gaussian_sigma": 0.4}, "quality": {"gaussian_sigma": 0.8}})
-    add("alg_denoise_gaussian_strong", "去噪", "Gaussian-增强(基线)", {"gaussian_sigma": 1.6}, {"speed": {"gaussian_sigma": 1.2}, "quality": {"gaussian_sigma": 2.0}})
-    add("alg_denoise_median", "去噪", "Median(基线)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
-    add("alg_denoise_median_light", "去噪", "Median-轻度(基线)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
-    add("alg_denoise_median_strong", "去噪", "Median-增强(基线)", {"median_ksize": 7}, {"speed": {"median_ksize": 5}, "quality": {"median_ksize": 9}})
+    add("alg_denoise_gaussian", "鍘诲櫔", "Gaussian(鍩虹嚎)", {"gaussian_sigma": 1.0}, {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}})
+    add("alg_denoise_gaussian_light", "鍘诲櫔", "Gaussian-杞诲害(鍩虹嚎)", {"gaussian_sigma": 0.6}, {"speed": {"gaussian_sigma": 0.4}, "quality": {"gaussian_sigma": 0.8}})
+    add("alg_denoise_gaussian_strong", "鍘诲櫔", "Gaussian-澧炲己(鍩虹嚎)", {"gaussian_sigma": 1.6}, {"speed": {"gaussian_sigma": 1.2}, "quality": {"gaussian_sigma": 2.0}})
+    add("alg_denoise_median", "鍘诲櫔", "Median(鍩虹嚎)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
+    add("alg_denoise_median_light", "鍘诲櫔", "Median-杞诲害(鍩虹嚎)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
+    add("alg_denoise_median_strong", "鍘诲櫔", "Median-澧炲己(鍩虹嚎)", {"median_ksize": 7}, {"speed": {"median_ksize": 5}, "quality": {"median_ksize": 9}})
 
-    add("alg_dehaze_dcp", "去雾", "DCP暗通道先验(基线)", {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
+    add("alg_dehaze_dcp", "鍘婚浘", "DCP鏆楅€氶亾鍏堥獙(鍩虹嚎)", {"dcp_patch": 15, "dcp_omega": 0.95, "dcp_t0": 0.1},
         {"speed": {"dcp_patch": 7, "dcp_omega": 0.9, "dcp_t0": 0.12}, "quality": {"dcp_patch": 21, "dcp_omega": 0.97, "dcp_t0": 0.08}})
-    add("alg_dehaze_dcp_fast", "去雾", "DCP-快速(基线)", {"dcp_patch": 7, "dcp_omega": 0.9, "dcp_t0": 0.12},
+    add("alg_dehaze_dcp_fast", "鍘婚浘", "DCP-蹇€?鍩虹嚎)", {"dcp_patch": 7, "dcp_omega": 0.9, "dcp_t0": 0.12},
         {"speed": {"dcp_patch": 5, "dcp_omega": 0.88, "dcp_t0": 0.14}, "quality": {"dcp_patch": 11, "dcp_omega": 0.93, "dcp_t0": 0.1}})
-    add("alg_dehaze_dcp_strong", "去雾", "DCP-增强(基线)", {"dcp_patch": 23, "dcp_omega": 0.98, "dcp_t0": 0.08},
+    add("alg_dehaze_dcp_strong", "鍘婚浘", "DCP-澧炲己(鍩虹嚎)", {"dcp_patch": 23, "dcp_omega": 0.98, "dcp_t0": 0.08},
         {"speed": {"dcp_patch": 19, "dcp_omega": 0.96, "dcp_t0": 0.09}, "quality": {"dcp_patch": 27, "dcp_omega": 0.99, "dcp_t0": 0.06}})
-    add("alg_dehaze_clahe", "去雾", "CLAHE(基线)", {"clahe_clip_limit": 2.0}, {"speed": {"clahe_clip_limit": 1.5}, "quality": {"clahe_clip_limit": 3.0}})
-    add("alg_dehaze_clahe_mild", "去雾", "CLAHE-轻度(基线)", {"clahe_clip_limit": 1.5}, {"speed": {"clahe_clip_limit": 1.2}, "quality": {"clahe_clip_limit": 2.0}})
-    add("alg_dehaze_clahe_strong", "去雾", "CLAHE-增强(基线)", {"clahe_clip_limit": 3.5}, {"speed": {"clahe_clip_limit": 3.0}, "quality": {"clahe_clip_limit": 4.5}})
-    add("alg_dehaze_gamma", "去雾", "Gamma(基线)", {"gamma": 0.75}, {"speed": {"gamma": 0.8}, "quality": {"gamma": 0.65}})
-    add("alg_dehaze_gamma_mild", "去雾", "Gamma-轻度(基线)", {"gamma": 0.85}, {"speed": {"gamma": 0.9}, "quality": {"gamma": 0.78}})
-    add("alg_dehaze_gamma_strong", "去雾", "Gamma-增强(基线)", {"gamma": 0.6}, {"speed": {"gamma": 0.65}, "quality": {"gamma": 0.5}})
+    add("alg_dehaze_clahe", "鍘婚浘", "CLAHE(鍩虹嚎)", {"clahe_clip_limit": 2.0}, {"speed": {"clahe_clip_limit": 1.5}, "quality": {"clahe_clip_limit": 3.0}})
+    add("alg_dehaze_clahe_mild", "鍘婚浘", "CLAHE-杞诲害(鍩虹嚎)", {"clahe_clip_limit": 1.5}, {"speed": {"clahe_clip_limit": 1.2}, "quality": {"clahe_clip_limit": 2.0}})
+    add("alg_dehaze_clahe_strong", "鍘婚浘", "CLAHE-澧炲己(鍩虹嚎)", {"clahe_clip_limit": 3.5}, {"speed": {"clahe_clip_limit": 3.0}, "quality": {"clahe_clip_limit": 4.5}})
+    add("alg_dehaze_gamma", "鍘婚浘", "Gamma(鍩虹嚎)", {"gamma": 0.75}, {"speed": {"gamma": 0.8}, "quality": {"gamma": 0.65}})
+    add("alg_dehaze_gamma_mild", "鍘婚浘", "Gamma-杞诲害(鍩虹嚎)", {"gamma": 0.85}, {"speed": {"gamma": 0.9}, "quality": {"gamma": 0.78}})
+    add("alg_dehaze_gamma_strong", "鍘婚浘", "Gamma-澧炲己(鍩虹嚎)", {"gamma": 0.6}, {"speed": {"gamma": 0.65}, "quality": {"gamma": 0.5}})
 
-    add("alg_deblur_unsharp", "去模糊", "UnsharpMask(基线)", {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
+    add("alg_deblur_unsharp", "去模糊", "UnsharpMask(鍩虹嚎)", {"unsharp_sigma": 1.0, "unsharp_amount": 1.6},
         {"speed": {"unsharp_sigma": 0.8, "unsharp_amount": 1.2}, "quality": {"unsharp_sigma": 1.2, "unsharp_amount": 2.0}})
-    add("alg_deblur_unsharp_light", "去模糊", "Unsharp-轻度(基线)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
+    add("alg_deblur_unsharp_light", "去模糊", "Unsharp-杞诲害(鍩虹嚎)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.0}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.5}})
-    add("alg_deblur_unsharp_strong", "去模糊", "Unsharp-增强(基线)", {"unsharp_sigma": 1.3, "unsharp_amount": 2.4},
+    add("alg_deblur_unsharp_strong", "去模糊", "Unsharp-澧炲己(鍩虹嚎)", {"unsharp_sigma": 1.3, "unsharp_amount": 2.4},
         {"speed": {"unsharp_sigma": 1.1, "unsharp_amount": 2.0}, "quality": {"unsharp_sigma": 1.6, "unsharp_amount": 2.8}})
-    add("alg_deblur_laplacian", "去模糊", "LaplacianSharpen(基线)", {"laplacian_strength": 0.7}, {"speed": {"laplacian_strength": 0.5}, "quality": {"laplacian_strength": 0.9}})
-    add("alg_deblur_laplacian_light", "去模糊", "Laplacian-轻度(基线)", {"laplacian_strength": 0.5}, {"speed": {"laplacian_strength": 0.35}, "quality": {"laplacian_strength": 0.7}})
-    add("alg_deblur_laplacian_strong", "去模糊", "Laplacian-增强(基线)", {"laplacian_strength": 1.1}, {"speed": {"laplacian_strength": 0.9}, "quality": {"laplacian_strength": 1.4}})
+    add("alg_deblur_laplacian", "去模糊", "LaplacianSharpen(鍩虹嚎)", {"laplacian_strength": 0.7}, {"speed": {"laplacian_strength": 0.5}, "quality": {"laplacian_strength": 0.9}})
+    add("alg_deblur_laplacian_light", "去模糊", "Laplacian-杞诲害(鍩虹嚎)", {"laplacian_strength": 0.5}, {"speed": {"laplacian_strength": 0.35}, "quality": {"laplacian_strength": 0.7}})
+    add("alg_deblur_laplacian_strong", "去模糊", "Laplacian-澧炲己(鍩虹嚎)", {"laplacian_strength": 1.1}, {"speed": {"laplacian_strength": 0.9}, "quality": {"laplacian_strength": 1.4}})
 
-    add("alg_sr_nearest", "超分辨率", "Nearest(基线)")
-    add("alg_sr_linear", "超分辨率", "Linear(基线)")
-    add("alg_sr_bicubic", "超分辨率", "Bicubic(基线)")
-    add("alg_sr_bicubic_sharp", "超分辨率", "Bicubic-Sharp(基线)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.3},
+    add("alg_sr_nearest", "瓒呭垎杈ㄧ巼", "Nearest(鍩虹嚎)")
+    add("alg_sr_linear", "瓒呭垎杈ㄧ巼", "Linear(鍩虹嚎)")
+    add("alg_sr_bicubic", "瓒呭垎杈ㄧ巼", "Bicubic(鍩虹嚎)")
+    add("alg_sr_bicubic_sharp", "瓒呭垎杈ㄧ巼", "Bicubic-Sharp(鍩虹嚎)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.3},
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.1}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6}})
-    add("alg_sr_lanczos", "超分辨率", "Lanczos(基线)")
-    add("alg_sr_lanczos_sharp", "超分辨率", "Lanczos-Sharp(基线)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
+    add("alg_sr_lanczos", "瓒呭垎杈ㄧ巼", "Lanczos(鍩虹嚎)")
+    add("alg_sr_lanczos_sharp", "瓒呭垎杈ㄧ巼", "Lanczos-Sharp(鍩虹嚎)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.0}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.5}})
 
-    add("alg_lowlight_gamma", "低照度增强", "Gamma(基线)", {"lowlight_gamma": 0.6}, {"speed": {"lowlight_gamma": 0.7}, "quality": {"lowlight_gamma": 0.55}})
-    add("alg_lowlight_gamma_soft", "低照度增强", "Gamma-轻度(基线)", {"lowlight_gamma": 0.75}, {"speed": {"lowlight_gamma": 0.8}, "quality": {"lowlight_gamma": 0.65}})
-    add("alg_lowlight_gamma_strong", "低照度增强", "Gamma-增强(基线)", {"lowlight_gamma": 0.45}, {"speed": {"lowlight_gamma": 0.5}, "quality": {"lowlight_gamma": 0.35}})
-    add("alg_lowlight_clahe", "低照度增强", "CLAHE(基线)", {"clahe_clip_limit": 2.5}, {"speed": {"clahe_clip_limit": 2.0}, "quality": {"clahe_clip_limit": 3.5}})
-    add("alg_lowlight_clahe_soft", "低照度增强", "CLAHE-轻度(基线)", {"clahe_clip_limit": 1.8}, {"speed": {"clahe_clip_limit": 1.5}, "quality": {"clahe_clip_limit": 2.4}})
-    add("alg_lowlight_clahe_strong", "低照度增强", "CLAHE-增强(基线)", {"clahe_clip_limit": 3.8}, {"speed": {"clahe_clip_limit": 3.2}, "quality": {"clahe_clip_limit": 4.5}})
-    add("alg_lowlight_hybrid", "低照度增强", "Gamma-CLAHE混合(基线)", {"lowlight_gamma": 0.62, "clahe_clip_limit": 2.6},
+    add("alg_lowlight_gamma", "低照度增强", "Gamma(鍩虹嚎)", {"lowlight_gamma": 0.6}, {"speed": {"lowlight_gamma": 0.7}, "quality": {"lowlight_gamma": 0.55}})
+    add("alg_lowlight_gamma_soft", "低照度增强", "Gamma-杞诲害(鍩虹嚎)", {"lowlight_gamma": 0.75}, {"speed": {"lowlight_gamma": 0.8}, "quality": {"lowlight_gamma": 0.65}})
+    add("alg_lowlight_gamma_strong", "低照度增强", "Gamma-澧炲己(鍩虹嚎)", {"lowlight_gamma": 0.45}, {"speed": {"lowlight_gamma": 0.5}, "quality": {"lowlight_gamma": 0.35}})
+    add("alg_lowlight_clahe", "低照度增强", "CLAHE(鍩虹嚎)", {"clahe_clip_limit": 2.5}, {"speed": {"clahe_clip_limit": 2.0}, "quality": {"clahe_clip_limit": 3.5}})
+    add("alg_lowlight_clahe_soft", "低照度增强", "CLAHE-杞诲害(鍩虹嚎)", {"clahe_clip_limit": 1.8}, {"speed": {"clahe_clip_limit": 1.5}, "quality": {"clahe_clip_limit": 2.4}})
+    add("alg_lowlight_clahe_strong", "低照度增强", "CLAHE-澧炲己(鍩虹嚎)", {"clahe_clip_limit": 3.8}, {"speed": {"clahe_clip_limit": 3.2}, "quality": {"clahe_clip_limit": 4.5}})
+    add("alg_lowlight_hybrid", "低照度增强", "Gamma-CLAHE娣峰悎(鍩虹嚎)", {"lowlight_gamma": 0.62, "clahe_clip_limit": 2.6},
         {"speed": {"lowlight_gamma": 0.7, "clahe_clip_limit": 2.2}, "quality": {"lowlight_gamma": 0.55, "clahe_clip_limit": 3.2}})
 
-    add("alg_video_denoise_gaussian", "视频去噪", "Video-Gaussian(基线)", {"gaussian_sigma": 1.0}, {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}})
-    add("alg_video_denoise_gaussian_light", "视频去噪", "Video-Gaussian-轻度(基线)", {"gaussian_sigma": 0.6}, {"speed": {"gaussian_sigma": 0.4}, "quality": {"gaussian_sigma": 0.8}})
-    add("alg_video_denoise_gaussian_strong", "视频去噪", "Video-Gaussian-增强(基线)", {"gaussian_sigma": 1.6}, {"speed": {"gaussian_sigma": 1.2}, "quality": {"gaussian_sigma": 2.0}})
-    add("alg_video_denoise_median", "视频去噪", "Video-Median(基线)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
-    add("alg_video_denoise_median_light", "视频去噪", "Video-Median-轻度(基线)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
-    add("alg_video_denoise_median_strong", "视频去噪", "Video-Median-增强(基线)", {"median_ksize": 7}, {"speed": {"median_ksize": 5}, "quality": {"median_ksize": 9}})
+    add("alg_video_denoise_gaussian", "瑙嗛鍘诲櫔", "Video-Gaussian(鍩虹嚎)", {"gaussian_sigma": 1.0}, {"speed": {"gaussian_sigma": 0.8}, "quality": {"gaussian_sigma": 1.2}})
+    add("alg_video_denoise_gaussian_light", "瑙嗛鍘诲櫔", "Video-Gaussian-杞诲害(鍩虹嚎)", {"gaussian_sigma": 0.6}, {"speed": {"gaussian_sigma": 0.4}, "quality": {"gaussian_sigma": 0.8}})
+    add("alg_video_denoise_gaussian_strong", "瑙嗛鍘诲櫔", "Video-Gaussian-澧炲己(鍩虹嚎)", {"gaussian_sigma": 1.6}, {"speed": {"gaussian_sigma": 1.2}, "quality": {"gaussian_sigma": 2.0}})
+    add("alg_video_denoise_median", "瑙嗛鍘诲櫔", "Video-Median(鍩虹嚎)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
+    add("alg_video_denoise_median_light", "瑙嗛鍘诲櫔", "Video-Median-杞诲害(鍩虹嚎)", {"median_ksize": 3}, {"speed": {"median_ksize": 3}, "quality": {"median_ksize": 5}})
+    add("alg_video_denoise_median_strong", "瑙嗛鍘诲櫔", "Video-Median-澧炲己(鍩虹嚎)", {"median_ksize": 7}, {"speed": {"median_ksize": 5}, "quality": {"median_ksize": 9}})
 
-    add("alg_video_sr_nearest", "视频超分", "Video-Nearest(基线)")
-    add("alg_video_sr_linear", "视频超分", "Video-Linear(基线)")
-    add("alg_video_sr_bicubic", "视频超分", "Video-Bicubic(基线)")
-    add("alg_video_sr_bicubic_sharp", "视频超分", "Video-Bicubic-Sharp(基线)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.3},
+    add("alg_video_sr_nearest", "瑙嗛瓒呭垎", "Video-Nearest(鍩虹嚎)")
+    add("alg_video_sr_linear", "瑙嗛瓒呭垎", "Video-Linear(鍩虹嚎)")
+    add("alg_video_sr_bicubic", "瑙嗛瓒呭垎", "Video-Bicubic(鍩虹嚎)")
+    add("alg_video_sr_bicubic_sharp", "瑙嗛瓒呭垎", "Video-Bicubic-Sharp(鍩虹嚎)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.3},
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.1}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.6}})
-    add("alg_video_sr_lanczos", "视频超分", "Video-Lanczos(基线)")
-    add("alg_video_sr_lanczos_sharp", "视频超分", "Video-Lanczos-Sharp(基线)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
+    add("alg_video_sr_lanczos", "瑙嗛瓒呭垎", "Video-Lanczos(鍩虹嚎)")
+    add("alg_video_sr_lanczos_sharp", "瑙嗛瓒呭垎", "Video-Lanczos-Sharp(鍩虹嚎)", {"unsharp_sigma": 0.8, "unsharp_amount": 1.2},
         {"speed": {"unsharp_sigma": 0.6, "unsharp_amount": 1.0}, "quality": {"unsharp_sigma": 1.0, "unsharp_amount": 1.5}})
     return items
 
@@ -689,7 +677,7 @@ def _builtin_metric_catalog():
             "metric_key": "PSNR",
             "name": "PSNR",
             "display_name": "PSNR",
-            "description": "峰值信噪比，用于衡量复原结果与 GT 图像的整体像素误差。",
+            "description": "峰值信噪比，用于衡量复原结果与 GT 图像的像素误差。",
             "task_types": task_types,
             "direction": "higher_better",
             "requires_reference": True,
@@ -1038,7 +1026,7 @@ def _promote_algorithm_submission_to_platform(r, submission: dict, runtime_ready
         description_parts.append(f"依赖说明：{dependency_text}")
     if entry_text:
         description_parts.append(f"入口说明：{entry_text}")
-    description_parts.append("该算法由用户代码包提交并经管理员审核存档，当前仍处于受控接入阶段，尚未进入自动执行链路。")
+    description_parts.append("该算法由用户代码包提交并经管理员审核留档，当前仍处于受控接入阶段，尚未进入自动执行链路。")
     data = {
         "algorithm_id": platform_id,
         "task": task_label,
@@ -1253,18 +1241,15 @@ def _list_runnable_metrics(r, task_type: str | None = None) -> list[dict]:
 
 def _ensure_catalog_defaults(r):
     """
-    确保 Redis 中包含默认的数据集和算法。
-    使用全局变量缓存初始化状态，避免每个 API 请求都执行复杂的初始化逻辑。
-    """
+    纭繚 Redis 涓寘鍚粯璁ょ殑鏁版嵁闆嗗拰绠楁硶銆?    浣跨敤鍏ㄥ眬鍙橀噺缂撳瓨鍒濆鍖栫姸鎬侊紝閬垮厤姣忎釜 API 璇锋眰閮芥墽琛屽鏉傜殑鍒濆鍖栭€昏緫銆?    """
     global _CATALOG_INITIALIZED
     if _CATALOG_INITIALIZED:
         return
     
-    # 执行初始化逻辑
+    # 鎵ц鍒濆鍖栭€昏緫
     created = time.time()
     
-    # 1. 默认数据集
-    demo_ds_id = "ds_demo"
+    # 1. 榛樿鏁版嵁闆?    demo_ds_id = "ds_demo"
     demo_ds_dir = _dataset_storage_root() / "system" / demo_ds_id
     demo_type = "图像"
     demo_size = "0 张"
@@ -1276,7 +1261,7 @@ def _ensure_catalog_defaults(r):
 
     demo_ds = {
         "dataset_id": demo_ds_id,
-        "name": "Demo-样例数据集",
+        "name": "Demo-示例数据集",
         "type": demo_type,
         "size": demo_size,
         "owner_id": "system",
@@ -1288,8 +1273,7 @@ def _ensure_catalog_defaults(r):
     if not cur_ds:
         save_dataset(r, demo_ds_id, demo_ds)
     else:
-        # 修复乱码或缺失字段
-        need_patch = False
+        # 淇涔辩爜鎴栫己澶卞瓧娈?        need_patch = False
         for k in ("name", "type", "size"):
             v = str(cur_ds.get(k) or "")
             if not v or "?" in v or "\ufffd" in v:
@@ -1311,7 +1295,7 @@ def _ensure_catalog_defaults(r):
         if need_patch:
             save_dataset(r, demo_ds_id, cur_ds)
 
-    # 2. 默认算法
+    # 2. 榛樿绠楁硶
     defaults = _builtin_algorithm_catalog()
     for x in defaults:
         cur = load_algorithm(r, x["algorithm_id"])
@@ -1321,7 +1305,7 @@ def _ensure_catalog_defaults(r):
             x2["owner_id"] = "system"
             save_algorithm(r, x2["algorithm_id"], x2)
             continue
-        # 增量修复逻辑
+        # 澧為噺淇閫昏緫
         need_patch = False
         if str(cur.get("owner_id") or "") != "system":
             cur["owner_id"] = "system"
@@ -1332,7 +1316,7 @@ def _ensure_catalog_defaults(r):
         if need_patch:
             save_algorithm(r, x["algorithm_id"], cur)
 
-    # 3. 默认指标
+    # 3. 榛樿鎸囨爣
     for item in _builtin_metric_catalog():
         cur = load_metric(r, item["metric_id"])
         if not cur:
@@ -1425,13 +1409,13 @@ def _validate_text_encoding(v: str, field: str) -> str:
     s = (v or "").strip()
     if not s:
         return s
-    if "\ufffd" in s or re.search(r"[?？]{3,}", s):
+    if "\ufffd" in s or re.search(r"[?锛焆{3,}", s):
         err.api_error(
             400,
             err.E_TEXT_ENCODING_INVALID,
             "text_encoding_invalid",
             field=field,
-            hint="请使用 UTF-8 提交文本",
+            hint="璇蜂娇鐢?UTF-8 鎻愪氦鏂囨湰",
             value_preview=s[:32],
         )
     return s
@@ -1473,7 +1457,7 @@ def _repair_algorithm_task_label(value: str | None) -> str:
         return TASK_LABEL_BY_TYPE[lower]
     if s in TASK_TYPE_BY_LABEL:
         return s
-    if "\ufffd" in s or re.fullmatch(r"[?？]+", s):
+    if "\ufffd" in s or re.fullmatch(r"[?锛焆+", s):
         return UNKNOWN_ALGORITHM_TASK_LABEL
     return s
 
@@ -1483,17 +1467,16 @@ def _get_dataset_cache_key(dataset_id: str) -> str:
 
 
 def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tuple[str, str, dict]:
-    # 尝试使用用户独有的目录结构
-    user_dir = data_root / owner_id
+    # 灏濊瘯浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
     ds_dir = user_dir / dataset_id
     
-    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    # 濡傛灉鐢ㄦ埛鐩綍涓嶅瓨鍦紝灏濊瘯浣跨敤鏃х殑鐩綍缁撴瀯锛堢洿鎺ュ湪data涓嬶級
     if not ds_dir.exists():
         ds_dir = data_root / dataset_id
     
     gt_dir = ds_dir / "gt"
     if not gt_dir.exists():
-        # 检查是否存在其他可能的GT目录名称
+        # 妫€鏌ユ槸鍚﹀瓨鍦ㄥ叾浠栧彲鑳界殑GT鐩綍鍚嶇О
         possible_gt_dirs = ["groundtruth", "reference", "target"]
         for dir_name in possible_gt_dirs:
             alt_gt_dir = ds_dir / dir_name
@@ -1501,8 +1484,8 @@ def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tu
                 gt_dir = alt_gt_dir
                 break
         else:
-            # 没有找到GT目录
-            return "图像", f"0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
+            # 娌℃湁鎵惧埌GT鐩綍
+            return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
     from .vision.dataset_io import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos
 
     input_dir_by_task = {
@@ -1806,7 +1789,7 @@ def _create_notice(r, username: str, title: str, content: str, *, kind: str = "i
         "notice_id": f"notice_{uuid.uuid4().hex[:12]}",
         "username": owner,
         "kind": str(kind or "info").strip() or "info",
-        "title": str(title or "").strip() or "系统通知",
+        "title": str(title or "").strip() or "绯荤粺閫氱煡",
         "content": str(content or "").strip(),
         "created_at": time.time(),
         "read": False,
@@ -2063,73 +2046,6 @@ def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict:
     return item
 
 
-FAST_SELECT_HIDDEN_PLATFORM_ALGORITHM_IDS = {
-    "alg_dn_cnn_light",
-    "alg_dn_cnn_strong",
-    "alg_denoise_bilateral_soft",
-    "alg_denoise_bilateral_strong",
-    "alg_denoise_gaussian_light",
-    "alg_denoise_gaussian_strong",
-    "alg_denoise_median_light",
-    "alg_denoise_median_strong",
-    "alg_dehaze_dcp_fast",
-    "alg_dehaze_dcp_strong",
-    "alg_dehaze_clahe_mild",
-    "alg_dehaze_clahe_strong",
-    "alg_dehaze_gamma_mild",
-    "alg_dehaze_gamma_strong",
-    "alg_deblur_unsharp_light",
-    "alg_deblur_unsharp_strong",
-    "alg_deblur_laplacian_light",
-    "alg_deblur_laplacian_strong",
-    "alg_sr_nearest",
-    "alg_sr_linear",
-    "alg_sr_bicubic_sharp",
-    "alg_sr_lanczos_sharp",
-    "alg_lowlight_gamma_soft",
-    "alg_lowlight_gamma_strong",
-    "alg_lowlight_clahe_soft",
-    "alg_lowlight_clahe_strong",
-    "alg_video_denoise_gaussian_light",
-    "alg_video_denoise_gaussian_strong",
-    "alg_video_denoise_median_light",
-    "alg_video_denoise_median_strong",
-    "alg_video_sr_nearest",
-    "alg_video_sr_linear",
-    "alg_video_sr_bicubic_sharp",
-    "alg_video_sr_lanczos_sharp",
-}
-
-
-def _is_fast_select_platform_algorithm(algorithm: dict | None, *, task_label: str, task_type: str) -> bool:
-    if not isinstance(algorithm, dict):
-        return False
-    if str(algorithm.get("owner_id") or "system").strip() != "system":
-        return False
-    if str(algorithm.get("task") or "").strip() != str(task_label or "").strip():
-        return False
-    if not _is_algorithm_active(algorithm):
-        return False
-
-    algorithm_id = str(algorithm.get("algorithm_id") or "").strip()
-    impl = str(algorithm.get("impl") or "").strip().lower()
-    has_community_source = bool(
-        str(algorithm.get("source_owner_id") or "").strip()
-        or str(algorithm.get("source_algorithm_id") or "").strip()
-    )
-    if not has_community_source and algorithm_id in FAST_SELECT_HIDDEN_PLATFORM_ALGORITHM_IDS:
-        return False
-
-    if impl == "userpackage":
-        if str(task_type or "").startswith("video_"):
-            return False
-        runtime_ready = algorithm.get("runtime_ready")
-        runtime_ok = bool(runtime_ready) if runtime_ready is not None else bool(algorithm.get("allow_use", False))
-        return runtime_ok and bool(algorithm.get("allow_use", False))
-
-    return True
-
-
 def _assert_algorithm_manage_access(algorithm: dict, current_user: dict) -> None:
     owner_id = str((algorithm or {}).get("owner_id") or "system").strip() or "system"
     if owner_id == "system":
@@ -2210,7 +2126,7 @@ def _assert_pinned_user(current_user: dict) -> None:
 def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     _ensure_catalog_defaults(r)
-    # 管理页只返回当前用户自己的数据集；社区页单独返回公开资源
+    # 绠＄悊椤靛彧杩斿洖褰撳墠鐢ㄦ埛鑷繁鐨勬暟鎹泦锛涚ぞ鍖洪〉鍗曠嫭杩斿洖鍏紑璧勬簮
     owner_id = _username_of(current_user) or None
     include_public = str(scope or "manage").lower() == "community"
     if include_public:
@@ -2236,10 +2152,10 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
     existing_dataset = None
     
     if existing_dataset:
-        # 检查数据集是否属于当前用户
+        # 妫€鏌ユ暟鎹泦鏄惁灞炰簬褰撳墠鐢ㄦ埛
         if str(existing_dataset.get("owner_id")) != owner_id:
             err.api_error(409, err.E_DATASET_ID_EXISTS, "dataset_id_exists", dataset_id=dataset_id)
-        # 如果是当前用户的数据集，更新它
+        # 如果是当前用户的数据集，则更新原记录
         data = {
             **existing_dataset,
             "name": _validate_text_encoding(payload.name, "dataset.name"),
@@ -2251,7 +2167,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "allow_download": allow_download,
         }
     else:
-        # 创建新数据集
+        # 鍒涘缓鏂版暟鎹泦
         created = time.time()
         data = {
             "dataset_id": dataset_id,
@@ -2541,12 +2457,12 @@ def _increment_dataset_version(r, dataset_id: str) -> int:
 
 
 def _get_dataset_fs_hash(owner_id: str, dataset_id: str) -> str:
-    """计算数据集文件系统的哈希值，用于检测文件变化"""
-    # 尝试使用用户独有的目录结构
+    """计算数据集文件系统哈希，用于检测文件变化。"""
+    # 优先使用用户独立目录结构
     user_dir = data_root / owner_id
     ds_dir = user_dir / dataset_id
     
-    # 如果用户目录不存在，尝试使用旧的目录结构（直接在data下）
+    # 濡傛灉鐢ㄦ埛鐩綍涓嶅瓨鍦紝灏濊瘯浣跨敤鏃х殑鐩綍缁撴瀯锛堢洿鎺ュ湪data涓嬶級
     if not ds_dir.exists():
         ds_dir = data_root / dataset_id
     
@@ -2556,15 +2472,13 @@ def _get_dataset_fs_hash(owner_id: str, dataset_id: str) -> str:
     hasher = hashlib.md5()
     
     if ds_dir.exists():
-        # 遍历目录，计算文件路径和修改时间的哈希值
-        for root, dirs, files in os.walk(ds_dir):
+        # 閬嶅巻鐩綍锛岃绠楁枃浠惰矾寰勫拰淇敼鏃堕棿鐨勫搱甯屽€?        for root, dirs, files in os.walk(ds_dir):
             for file in sorted(files):
                 file_path = os.path.join(root, file)
                 try:
-                    # 获取文件修改时间
+                    # 鑾峰彇鏂囦欢淇敼鏃堕棿
                     mtime = os.path.getmtime(file_path)
-                    # 更新哈希值
-                    hasher.update(f"{file_path}:{mtime}".encode('utf-8'))
+                    # 鏇存柊鍝堝笇鍊?                    hasher.update(f"{file_path}:{mtime}".encode('utf-8'))
                 except:
                     pass
     
@@ -2673,7 +2587,7 @@ def _scan_dataset_dir_on_disk(ds_dir: Path) -> tuple[str, str, dict]:
 @app.post("/datasets/{dataset_id}/scan", response_model=DatasetOut)
 def scan_dataset(
     dataset_id: str,
-    force_refresh: bool = Query(False, description="是否强制刷新缓存"),
+    force_refresh: bool = Query(False, description="鏄惁寮哄埗鍒锋柊缂撳瓨"),
     current_user: dict = Depends(get_current_user),
 ):
     r = make_redis()
@@ -2683,19 +2597,16 @@ def scan_dataset(
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     _assert_resource_access(cur, current_user, allow_system=True)
     
-    # 获取数据集版本
-    version_key = _get_dataset_version_key(dataset_id)
+    # 鑾峰彇鏁版嵁闆嗙増鏈?    version_key = _get_dataset_version_key(dataset_id)
     current_version = r.get(version_key) or "0"
     
-    # 获取数据集所有者
-    owner_id = cur.get("owner_id", "system")
-    # 检查文件系统变化
-    fs_hash_key = _get_dataset_fs_hash_key(dataset_id)
+    # 鑾峰彇鏁版嵁闆嗘墍鏈夎€?    owner_id = cur.get("owner_id", "system")
+    # 妫€鏌ユ枃浠剁郴缁熷彉鍖?    fs_hash_key = _get_dataset_fs_hash_key(dataset_id)
     ds_dir = _dataset_dir_from_record(cur)
     current_fs_hash = _get_dataset_fs_hash_by_dir(ds_dir)
     cached_fs_hash = r.get(fs_hash_key)
     
-    # 如果文件系统发生变化，增加版本号
+    # 濡傛灉鏂囦欢绯荤粺鍙戠敓鍙樺寲锛屽鍔犵増鏈彿
     if cached_fs_hash != current_fs_hash:
         current_version = str(_increment_dataset_version(r, dataset_id))
         r.set(fs_hash_key, current_fs_hash)
@@ -2709,41 +2620,38 @@ def scan_dataset(
         try:
             import json
             cached = json.loads(cached_data)
-            # 检查缓存中的版本是否与当前版本一致
+            # 只有缓存版本与当前版本一致时才复用
             if cached.get("version") == current_version:
                 t = cached.get("type")
                 size = cached.get("size")
                 meta = cached.get("meta", {})
             else:
-                # 版本不一致，缓存失效
+                # 鐗堟湰涓嶄竴鑷达紝缂撳瓨澶辨晥
                 use_cache = False
         except Exception:
             use_cache = False
     else:
         use_cache = False
     
-    # 如果没有缓存或缓存无效，执行扫描
+    # 濡傛灉娌℃湁缂撳瓨鎴栫紦瀛樻棤鏁堬紝鎵ц鎵弿
     if not use_cache:
         data_root = Path(__file__).resolve().parents[1] / "data"
-        # 确保数据目录存在
+        # 纭繚鏁版嵁鐩綍瀛樺湪
         data_root.mkdir(parents=True, exist_ok=True)
-        # 获取数据集所有者
-        owner_id = cur.get("owner_id", "system")
-        # 使用用户独有的目录结构
-        user_dir = data_root / owner_id
+        # 鑾峰彇鏁版嵁闆嗘墍鏈夎€?        owner_id = cur.get("owner_id", "system")
+        # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?        user_dir = data_root / owner_id
         user_dir.mkdir(parents=True, exist_ok=True)
         ds_dir.parent.mkdir(parents=True, exist_ok=True)
         t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
         
-        # 缓存结果，包含版本信息
-        import json
+        # 缂撳瓨缁撴灉锛屽寘鍚増鏈俊鎭?        import json
         cache_data = {
             "version": current_version,
             "type": t,
             "size": size,
             "meta": meta
         }
-        # 缓存永不过期，只有在数据集变化时才会失效
+        # 缂撳瓨姘镐笉杩囨湡锛屽彧鏈夊湪鏁版嵁闆嗗彉鍖栨椂鎵嶄細澶辨晥
         r.set(cache_key, json.dumps(cache_data))
     
     existing_meta = cur.get("meta") if isinstance(cur.get("meta"), dict) else {}
@@ -2773,7 +2681,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
         cur = {
             "dataset_id": dataset_id,
             "name": dataset_id,
-            "type": "图像",
+            "type": "鍥惧儚",
             "size": "-",
             "storage_path": str(_make_managed_dataset_dir(owner_id, dataset_id)),
             "owner_id": owner_id,
@@ -2781,7 +2689,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
             "meta": {},
         }
     else:
-        # 从现有数据集中获取owner_id
+        # 浠庣幇鏈夋暟鎹泦涓幏鍙杘wner_id
         owner_id = cur.get("owner_id", _username_of(current_user))
     _assert_resource_access(cur, current_user, allow_system=True)
 
@@ -2790,9 +2698,8 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     except Exception:
         err.api_error(400, err.E_BAD_BASE64, "bad_base64")
 
-    # 使用用户独有的目录结构
-    user_dir = data_root / owner_id
-    # 确保数据目录存在
+    # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
+    # 纭繚鏁版嵁鐩綍瀛樺湪
     ds_dir = _dataset_dir_from_record(cur)
     ds_dir.parent.mkdir(parents=True, exist_ok=True)
     if payload.overwrite and ds_dir.exists():
@@ -2816,11 +2723,10 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     cur["source_dataset_id"] = str(cur.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "") or None
     save_dataset(r, dataset_id, cur)
     
-    # 增加数据集版本号，使缓存失效
+    # 澧炲姞鏁版嵁闆嗙増鏈彿锛屼娇缂撳瓨澶辨晥
     _increment_dataset_version(r, dataset_id)
     
-    # 清除缓存，确保下次扫描获取最新数据
-    cache_key = _get_dataset_cache_key(dataset_id)
+    # 娓呴櫎缂撳瓨锛岀‘淇濅笅娆℃壂鎻忚幏鍙栨渶鏂版暟鎹?    cache_key = _get_dataset_cache_key(dataset_id)
     r.delete(cache_key)
     
     return DatasetOut(**cur)
@@ -2842,14 +2748,14 @@ def import_dataset_zip_file(
         cur = {
             "dataset_id": dataset_id,
             "name": dataset_id,
-            "type": "图像",
+            "type": "鍥惧儚",
             "size": "-",
             "owner_id": owner_id,
             "created_at": created,
             "meta": {},
         }
     else:
-        # 从现有数据集中获取owner_id
+        # 浠庣幇鏈夋暟鎹泦涓幏鍙杘wner_id
         owner_id = cur.get("owner_id", _username_of(current_user))
     _assert_resource_access(cur, current_user, allow_system=True)
     try:
@@ -2858,9 +2764,8 @@ def import_dataset_zip_file(
         err.api_error(400, err.E_BAD_BASE64, "bad_zip_file")
 
     data_root = Path(__file__).resolve().parents[1] / "data"
-    # 使用用户独有的目录结构
-    user_dir = data_root / owner_id
-    # 确保数据目录存在
+    # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
+    # 纭繚鏁版嵁鐩綍瀛樺湪
     ds_dir = _dataset_dir_from_record(cur)
     ds_dir.parent.mkdir(parents=True, exist_ok=True)
     if overwrite and ds_dir.exists():
@@ -2882,11 +2787,10 @@ def import_dataset_zip_file(
     cur["meta"] = meta
     save_dataset(r, dataset_id, cur)
     
-    # 增加数据集版本号，使缓存失效
+    # 澧炲姞鏁版嵁闆嗙増鏈彿锛屼娇缂撳瓨澶辨晥
     _increment_dataset_version(r, dataset_id)
     
-    # 清除缓存，确保下次扫描获取最新数据
-    cache_key = _get_dataset_cache_key(dataset_id)
+    # 娓呴櫎缂撳瓨锛岀‘淇濅笅娆℃壂鎻忚幏鍙栨渶鏂版暟鎹?    cache_key = _get_dataset_cache_key(dataset_id)
     r.delete(cache_key)
     
     return DatasetOut(**cur)
@@ -2946,10 +2850,9 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
     allow_download = visibility == "public"
     
     if existing_algorithm:
-        # 检查算法是否属于当前用户
+        # 仅允许更新当前用户自己的算法
         if str(existing_algorithm.get("owner_id")) != owner_id:
             err.api_error(409, err.E_ALGORITHM_ID_EXISTS, "algorithm_id_exists", algorithm_id=algorithm_id)
-        # 如果是当前用户的算法，更新它
         # 确保算法名称唯一
         _ensure_unique_algorithm_name(r, payload.name, exclude_id=algorithm_id)
         data = {
@@ -2966,8 +2869,7 @@ def create_algorithm(payload: AlgorithmCreate, current_user: dict = Depends(get_
             "allow_download": allow_download,
         }
     else:
-        # 创建新算法
-        # 确保算法名称唯一
+        # 创建新算法并确保算法名称唯一
         _ensure_unique_algorithm_name(r, payload.name)
         created = time.time()
         data = {
@@ -3646,7 +3548,7 @@ def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = D
             err.api_error(409, err.E_HTTP, "algorithm_already_downloaded", algorithm_id=algorithm_id)
 
     target_algorithm_id = _make_unique_algorithm_id(r, algorithm_id, target_owner)
-    target_name = _make_owner_unique_algorithm_name(r, target_owner, str(source.get("name") or "下载算法"))
+    target_name = _make_owner_unique_algorithm_name(r, target_owner, str(source.get("name") or "涓嬭浇绠楁硶"))
 
     copied = dict(source)
     copied["algorithm_id"] = target_algorithm_id
@@ -3964,7 +3866,7 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
         _create_notice(
             r,
             source_owner,
-            "社区算法已被平台收录",
+            "绀惧尯绠楁硶宸茶骞冲彴鏀跺綍",
             f"你上传的社区算法“{str(source.get('name') or algorithm_id).strip() or algorithm_id}”已被管理员收录进平台标准算法库。",
             kind="success",
         )
@@ -4176,311 +4078,6 @@ def remove_preset(preset_id: str, current_user: dict = Depends(get_current_user)
     return {"ok": True, "preset_id": preset_id}
 
 
-@app.post("/recommend/fast-select", response_model=FastSelectResponse)
-def recommend_fast_select(payload: FastSelectRequest, current_user: Optional[dict] = Depends(get_current_user_optional)):
-    r = make_redis()
-    username = _username_of(current_user)
-    is_admin = _normalize_user_role(current_user) == "admin"
-    task_type = (payload.task_type or "").strip().lower()
-    dataset_id = (payload.dataset_id or "").strip()
-    if task_type not in TASK_LABEL_BY_TYPE:
-        err.api_error(400, err.E_BAD_TASK_TYPE, "bad_task_type", task_type=task_type, allowed=list(TASK_LABEL_BY_TYPE.keys()))
-    aggregate_dataset_count = 0
-    if not dataset_id:
-        if not is_admin:
-            err.api_error(400, err.E_DATASET_ID_REQUIRED, "dataset_id_required")
-        meta, pair_count, aggregate_dataset_count = _aggregate_dataset_meta_for_task(r, task_type, current_user)
-        if pair_count <= 0:
-            err.api_error(
-                409,
-                err.E_DATASET_NO_PAIR,
-                "dataset_no_pair_for_task",
-                task_type=task_type,
-                dataset_id="",
-                pair_count=pair_count,
-            )
-    else:
-        ds = load_dataset(r, dataset_id)
-        if not ds:
-            err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
-        _assert_resource_access(ds, current_user, allow_system=True)
-        meta = ds.get("meta") if isinstance(ds.get("meta"), dict) else {}
-        pairs_map = meta.get("pairs_by_task") if isinstance(meta.get("pairs_by_task"), dict) else {}
-        pair_count = int(pairs_map.get(task_type) or 0)
-        if pair_count <= 0:
-            err.api_error(
-                409,
-                err.E_DATASET_NO_PAIR,
-                "dataset_no_pair_for_task",
-                task_type=task_type,
-                dataset_id=dataset_id,
-                pair_count=pair_count,
-            )
-
-    task_label = TASK_LABEL_BY_TYPE.get(task_type, "")
-    explicit_candidate_ids = bool(payload.candidate_algorithm_ids)
-    if payload.candidate_algorithm_ids:
-        candidate_ids = []
-        for x in payload.candidate_algorithm_ids:
-            aid = str(x or "").strip()
-            if aid:
-                candidate_ids.append(aid)
-    else:
-        all_algs = list_algorithms(r, limit=5000, owner_id=None, include_public=True) or []
-        candidate_ids = [
-            str(x.get("algorithm_id") or "")
-            for x in all_algs
-            if _is_fast_select_platform_algorithm(x, task_label=task_label, task_type=task_type)
-        ]
-
-    def _normalize_effective_params(params: dict | None) -> dict:
-        src = params if isinstance(params, dict) else {}
-        ignore = {"batch_id", "batch_name", "source", "fast_top_k", "fast_alpha", "metrics", "param_scheme", "user_scheme_name"}
-        out = {}
-        for k in sorted(src.keys()):
-            if k in ignore:
-                continue
-            out[k] = src.get(k)
-        return out
-
-    def _scheme_base_name(name: str) -> str:
-        n = str(name or "").strip()
-        n = re.sub(r"\s+#\d+\s*$", "", n).strip()
-        if n.endswith("）"):
-            i = n.rfind("（")
-            if i > 0:
-                return n[:i].strip()
-        if n.endswith(")"):
-            i = n.rfind("(")
-            if i > 0:
-                return n[:i].strip()
-        return n
-
-    def _algorithm_family_tokens(alg: dict | None) -> set[str]:
-        if not isinstance(alg, dict):
-            return set()
-        tokens: set[str] = set()
-        for raw in (
-            _scheme_base_name(str(alg.get("name") or "")),
-            str(alg.get("algorithm_id") or ""),
-            str(alg.get("source_submission_id") or ""),
-            str(alg.get("source_algorithm_id") or ""),
-        ):
-            text = str(raw or "").strip().lower()
-            if not text:
-                continue
-            tokens.add(text)
-            plain = "".join(ch for ch in text if ch.isalnum())
-            if plain:
-                tokens.add(plain)
-        alias_map = {
-            "fastnlmeans": {"fastnlmeans", "dncnn"},
-            "dncnn": {"fastnlmeans", "dncnn"},
-            "bilateral": {"bilateral"},
-            "gaussian": {"gaussian", "videogaussian"},
-            "median": {"median", "videomedian"},
-            "clahe": {"clahe"},
-            "gamma": {"gamma"},
-            "dcp": {"dcp", "darkchannel"},
-            "unsharpmask": {"unsharpmask", "unsharp"},
-            "laplaciansharpen": {"laplaciansharpen", "laplacian"},
-            "bicubic": {"bicubic", "videobicubic"},
-            "lanczos": {"lanczos", "videolanczos"},
-            "nearest": {"nearest", "videonearest"},
-            "linear": {"linear", "videolinear"},
-            "gammaclahehybrid": {"gammaclahehybrid", "hybrid"},
-        }
-        expanded = set(tokens)
-        for token in list(tokens):
-            for key, aliases in alias_map.items():
-                if key in token or any(alias in token for alias in aliases):
-                    expanded.update(aliases)
-                    expanded.add(key)
-        return expanded
-
-    uniq = []
-    seen = set()
-    for aid in candidate_ids:
-        if not aid or aid in seen:
-            continue
-        seen.add(aid)
-        uniq.append(aid)
-    candidate_ids = uniq
-    if not candidate_ids:
-        err.api_error(409, err.E_TASK_NOT_SUPPORTED, "no_candidate_algorithms", task_type=task_type, task_label=task_label)
-
-    valid_ids = []
-    alg_by_id: dict[str, dict] = {}
-    candidate_defaults: dict[str, dict] = {}
-    for aid in candidate_ids:
-        alg = load_algorithm(r, aid)
-        if not alg:
-            err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=aid)
-        alg_owner = str((alg.get("owner_id") or "system")).strip() or "system"
-        alg_visibility = str((alg.get("visibility") or "private")).lower()
-        if is_admin and alg_owner != "system":
-            if alg_visibility != "public":
-                err.api_error(403, err.E_HTTP, "algorithm_not_public", algorithm_id=aid)
-        else:
-            _assert_resource_access(alg, current_user, allow_system=True)
-        if str((alg.get("task") or "")).strip() != task_label:
-            err.api_error(
-                409,
-                err.E_ALGORITHM_TASK_MISMATCH,
-                "algorithm_task_mismatch",
-                algorithm_id=aid,
-                algorithm_task=(alg.get("task") or ""),
-                task_type=task_type,
-                task_label=task_label,
-            )
-        if explicit_candidate_ids and is_admin:
-            if not _is_algorithm_active(alg):
-                continue
-        elif not _is_fast_select_platform_algorithm(alg, task_label=task_label, task_type=task_type):
-            continue
-        valid_ids.append(aid)
-        alg_by_id[aid] = alg
-        candidate_defaults[aid] = _normalize_effective_params(alg.get("default_params") if isinstance(alg.get("default_params"), dict) else {})
-
-    target_context = build_context_vector(task_type=task_type, dataset_meta=meta)
-    alpha = float(payload.alpha if payload.alpha is not None else 0.35)
-    alpha = max(0.0, min(alpha, 2.0))
-    lambda_reg = float(payload.lambda_reg if payload.lambda_reg is not None else 1.0)
-    lambda_reg = max(0.05, min(lambda_reg, 50.0))
-    recency_half_life_hours = float(payload.recency_half_life_hours if payload.recency_half_life_hours is not None else 72.0)
-    recency_half_life_hours = max(1.0, min(recency_half_life_hours, 24.0 * 60.0))
-    cold_start_bonus = float(payload.cold_start_bonus if payload.cold_start_bonus is not None else 0.08)
-    cold_start_bonus = max(0.0, min(cold_start_bonus, 0.5))
-    low_support_penalty = float(payload.low_support_penalty if payload.low_support_penalty is not None else 0.06)
-    low_support_penalty = max(0.0, min(low_support_penalty, 0.5))
-    min_support = int(payload.min_support if payload.min_support is not None else 3)
-    min_support = max(1, min(min_support, 50))
-    cfg = FastSelectConfig(
-        alpha=alpha,
-        lambda_reg=lambda_reg,
-        recency_half_life_hours=recency_half_life_hours,
-        cold_start_bonus=cold_start_bonus,
-        low_support_penalty=low_support_penalty,
-        min_support=min_support,
-    )
-    model = load_online_model(r, task_type)
-    historical_done_count = 0
-    force_historical_selection = bool(is_admin and explicit_candidate_ids)
-    if (not force_historical_selection) and model and int(model.get("feature_dim") or 0) == int(target_context.shape[0]):
-        arm_stats = fast_select_algorithms_online(
-            task_type=task_type,
-            candidate_algorithm_ids=valid_ids,
-            target_context=target_context,
-            model=model,
-            config=cfg,
-        )
-        arms = model.get("arms") if isinstance(model.get("arms"), dict) else {}
-        historical_done_count = int(sum(int((v or {}).get("sample_count") or 0) for v in arms.values() if isinstance(v, dict)))
-    else:
-        runs = (_list_all_runs(r, limit=5000) if is_admin else list_runs(r, limit=5000, owner_id=(username or None))) or []
-        run_alg_cache: dict[str, dict] = {}
-        augmented_runs = list(runs)
-        for run in runs:
-            if str(run.get("task_type") or "") != task_type:
-                continue
-            if str(run.get("status") or "").lower() != "done":
-                continue
-            run_alg_id = str(run.get("algorithm_id") or "")
-            if not run_alg_id:
-                continue
-            if run_alg_id not in run_alg_cache:
-                run_alg_cache[run_alg_id] = load_algorithm(r, run_alg_id) or {}
-            run_alg = run_alg_cache.get(run_alg_id) or {}
-            run_base = _scheme_base_name(str(run_alg.get("name") or ""))
-            run_family = _algorithm_family_tokens(run_alg)
-            run_eff = _normalize_effective_params(run.get("params") if isinstance(run.get("params"), dict) else {})
-            for aid in valid_ids:
-                if aid == run_alg_id:
-                    continue
-                cand_alg = alg_by_id.get(aid) or {}
-                cand_base = _scheme_base_name(str(cand_alg.get("name") or ""))
-                cand_family = _algorithm_family_tokens(cand_alg)
-                cand_eff = candidate_defaults.get(aid) or {}
-                same_submission = bool(
-                    str(cand_alg.get("source_submission_id") or "").strip()
-                    and str(cand_alg.get("source_submission_id") or "").strip() == str(run_alg.get("source_submission_id") or "").strip()
-                )
-                same_source_algorithm = bool(
-                    str(cand_alg.get("source_algorithm_id") or "").strip()
-                    and str(cand_alg.get("source_algorithm_id") or "").strip() == run_alg_id
-                )
-                same_base = bool(cand_base and run_base and cand_base == run_base)
-                same_family = bool(cand_family and run_family and (cand_family & run_family))
-                if not same_submission and not same_source_algorithm and not same_base and not same_family:
-                    continue
-                if run_eff and cand_eff and run_eff != cand_eff:
-                    continue
-                shadow = dict(run)
-                shadow["algorithm_id"] = aid
-                shadow["_shadow_reused"] = True
-                shadow["_shadow_source_algorithm_id"] = run_alg_id
-                augmented_runs.append(shadow)
-        arm_stats = fast_select_algorithms(
-            task_type=task_type,
-            candidate_algorithm_ids=valid_ids,
-            historical_runs=augmented_runs,
-            target_context=target_context,
-            config=cfg,
-        )
-        historical_done_count = len([x for x in runs if str(x.get("task_type") or "") == task_type and str(x.get("status") or "").lower() == "done"])
-        bootstrap_online_model_from_runs(r, task_type=task_type, historical_runs=runs, config=cfg)
-
-    top_k = int(payload.top_k if payload.top_k is not None else 3)
-    if top_k < 1:
-        top_k = 1
-    if top_k > len(arm_stats):
-        top_k = len(arm_stats)
-
-    recs = [
-        FastSelectItem(
-            algorithm_id=x.algorithm_id,
-            score=x.score,
-            expected_reward=x.expected_reward,
-            mean_reward=x.mean_reward,
-            uncertainty=x.uncertainty,
-            exploration_bonus=x.exploration_bonus,
-            cold_start_bonus=x.cold_start_bonus,
-            reliability=x.reliability,
-            sample_count=x.sample_count,
-            direct_sample_count=x.direct_sample_count,
-            shadow_sample_count=x.shadow_sample_count,
-        )
-        for x in arm_stats[:top_k]
-    ]
-
-    context = {
-        "pair_count": pair_count,
-        "supported_tasks": meta.get("supported_task_types") if isinstance(meta.get("supported_task_types"), list) else [],
-        "counts_by_dir": meta.get("counts_by_dir") if isinstance(meta.get("counts_by_dir"), dict) else {},
-        "feature_dim": int(target_context.shape[0]),
-        "candidate_count": len(valid_ids),
-        "historical_run_count": historical_done_count,
-        "alpha": alpha,
-        "lambda_reg": lambda_reg,
-        "recency_half_life_hours": recency_half_life_hours,
-        "cold_start_bonus": cold_start_bonus,
-        "low_support_penalty": low_support_penalty,
-        "min_support": min_support,
-        "online_model": bool(model),
-        "dataset_mode": "single" if dataset_id else "aggregate",
-        "aggregate_dataset_count": aggregate_dataset_count,
-    }
-
-    return FastSelectResponse(
-        task_type=task_type,
-        dataset_id=dataset_id,
-        top_k=top_k,
-        reward_formula="expected + alpha*uncertainty + cold_start_bonus/sqrt(n+1) - low_support_penalty*(1-reliability)",
-        context=context,
-        recommendations=recs,
-    )
-
-
 @app.post("/runs", response_model=RunOut)
 def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
@@ -4553,7 +4150,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
     from .vision.dataset_access import count_paired_images, count_paired_videos
 
     data_root = Path(__file__).resolve().parents[1] / "data"
-    # 确保数据目录存在
+    # 纭繚鏁版嵁鐩綍瀛樺湪
     data_root.mkdir(parents=True, exist_ok=True)
     input_dir_by_task = {
         "dehaze": "hazy",
@@ -4686,7 +4283,7 @@ def export_runs(
     owner_id = _username_of(current_user) or None
     runs = list_runs(r, limit=limit, owner_id=owner_id)
 
-    # ===== 筛选当前导出范围 =====
+    # ===== 绛涢€夊綋鍓嶅鍑鸿寖鍥?=====
     def ok(x: dict) -> bool:
         if status and x.get("status") != status:
             return False
@@ -4700,7 +4297,7 @@ def export_runs(
 
     runs = [x for x in runs if ok(x)]
 
-    # ===== 展平 params / samples 字段 =====
+    # ===== 灞曞钩 params / samples 瀛楁 =====
     headers = [
         "run_id",
         "task_type",
@@ -4950,3 +4547,5 @@ def cancel_run(run_id: str, current_user: dict = Depends(get_current_user)):
     save_run(r, run_id, run)
     celery_app.control.revoke(run_id, terminate=False)
     return {"ok": True, "run_id": run_id, "status": "canceling"}
+
+
