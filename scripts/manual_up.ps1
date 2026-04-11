@@ -1,8 +1,13 @@
 param(
   [switch]$SkipRedis,
+  [switch]$SkipMySQL,
   [switch]$DryRun,
   [ValidateRange(1, 16)]
-  [int]$WorkerCount = 2
+  [int]$WorkerCount = 2,
+  [string]$MySqlContainerName = "algo-mysql",
+  [int]$MySqlPort = 3306,
+  [string]$MySqlDatabase = "algo_benchmark",
+  [string]$MySqlRootPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +40,7 @@ $backendDir = Join-Path $repoRoot "backend"
 $webDir = Join-Path $repoRoot "web"
 $venvPy = Join-Path $backendDir ".venv\Scripts\python.exe"
 $redisScript = Join-Path (Split-Path -Parent $PSCommandPath) "start_docker_redis.ps1"
+$mysqlScript = Join-Path (Split-Path -Parent $PSCommandPath) "start_docker_mysql.ps1"
 
 if (-not (Test-Path -LiteralPath $backendDir)) {
   Write-Host "Backend directory not found: $backendDir"
@@ -66,6 +72,33 @@ if (-not $SkipRedis) {
   }
 }
 
+if (-not $SkipMySQL) {
+  if (-not (Test-Path -LiteralPath $mysqlScript)) {
+    Write-Host "MySQL startup script not found: $mysqlScript"
+    exit 1
+  }
+  if ([string]::IsNullOrWhiteSpace($MySqlRootPassword)) {
+    $MySqlRootPassword = $env:ABP_MYSQL_ROOT_PASSWORD
+  }
+  if ([string]::IsNullOrWhiteSpace($MySqlRootPassword)) {
+    $MySqlRootPassword = "abp_mysql_123456"
+  }
+  if ($DryRun) {
+    & $mysqlScript -DryRun -ContainerName $MySqlContainerName -Port $MySqlPort -Database $MySqlDatabase -RootPassword $MySqlRootPassword
+  } else {
+    & $mysqlScript -ContainerName $MySqlContainerName -Port $MySqlPort -Database $MySqlDatabase -RootPassword $MySqlRootPassword
+  }
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed to start Docker MySQL."
+    exit 1
+  }
+  $encodedMySqlRootPassword = [Uri]::EscapeDataString($MySqlRootPassword)
+  $env:ABP_SQL_STORE_URL = "mysql+pymysql://root:${encodedMySqlRootPassword}@127.0.0.1:${MySqlPort}/${MySqlDatabase}?charset=utf8mb4"
+  if ([string]::IsNullOrWhiteSpace($env:ABP_SQL_FALLBACK_REDIS)) {
+    $env:ABP_SQL_FALLBACK_REDIS = "1"
+  }
+}
+
 Start-ServiceWindow `
   -Title "ABP - Backend API" `
   -WorkingDir $backendDir `
@@ -86,6 +119,9 @@ Start-ServiceWindow `
 Write-Host ""
 Write-Host "Started services:"
 Write-Host "  Redis:   127.0.0.1:6379"
+if (-not $SkipMySQL) {
+  Write-Host "  MySQL:   127.0.0.1:$MySqlPort/$MySqlDatabase"
+}
 Write-Host "  Backend: http://127.0.0.1:8001/docs"
 Write-Host "  Workers: $WorkerCount"
 Write-Host "  Web:     http://localhost:5173/"

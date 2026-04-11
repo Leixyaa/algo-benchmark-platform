@@ -76,3 +76,17 @@ python scripts\migrate_algorithms_to_sql.py
 - 算法与算法接入申请：优先读写 MySQL，同时镜像写入 Redis，迁移期可从 Redis 兜底读取。
 - 数据集、指标、Run、用户、日志：暂时仍按原 Redis 口径运行。
 - 后续如果继续暴露同步问题，再按风险顺序迁移数据集、指标和用户表。
+
+## 6. 日常启动
+
+`scripts\manual_up.ps1` 默认会启动 Redis 和 MySQL，并把 `ABP_SQL_STORE_URL` 注入后端与 Worker 窗口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\manual_up.ps1
+```
+
+如需临时回到纯 Redis 口径：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\manual_up.ps1 -SkipMySQL
+```
