@@ -66,15 +66,19 @@ from .store import (
     make_redis,
     save_run,
     load_run,
+    delete_run,
     list_runs,
+    list_all_runs,
     save_dataset,
     load_dataset,
     delete_dataset,
     list_datasets,
+    list_all_datasets,
     save_algorithm,
     load_algorithm,
     delete_algorithm,
     list_algorithms,
+    list_all_algorithms,
     save_preset,
     load_preset,
     delete_preset,
@@ -108,7 +112,7 @@ from .selector import (
     load_online_model,
     FastSelectConfig,
 )
-from . import errors as err
+from . import errors as err, sql_store
 from .metric_runtime import validate_python_metric_code
 from .vision.dataset_access import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos, resolve_dataset_dir
 
@@ -558,17 +562,7 @@ _PINNED_OWNER_USERNAME = "1959920806"
 
 def _pin_dataset_and_algorithm_owners(r) -> None:
     # 只处理没有所有者的数据集和算法
-    dataset_keys = r.keys("dataset:*")
-    for k in dataset_keys:
-        if ":version:" in k or ":fs_hash:" in k or ":scan:" in k:
-            continue
-        s = r.get(k)
-        if not s:
-            continue
-        try:
-            data = json.loads(s)
-        except Exception:
-            continue
+    for data in list_all_datasets(r, limit=5000):
         if not isinstance(data, dict) or "dataset_id" not in data:
             continue
         # 只有当没有所有者时，才设置为系统所有者
@@ -576,15 +570,7 @@ def _pin_dataset_and_algorithm_owners(r) -> None:
             data["owner_id"] = "system"
             save_dataset(r, str(data.get("dataset_id") or ""), data)
 
-    algorithm_keys = r.keys("algorithm:*")
-    for k in algorithm_keys:
-        s = r.get(k)
-        if not s:
-            continue
-        try:
-            data = json.loads(s)
-        except Exception:
-            continue
+    for data in list_all_algorithms(r, limit=5000):
         if not isinstance(data, dict) or "algorithm_id" not in data:
             continue
         alg_id = str(data.get("algorithm_id") or "")
@@ -1618,11 +1604,79 @@ def _username_of(current_user: Optional[dict]) -> str:
     return str(current_user.get("username") or "").strip()
 
 
+def _sql_record_list(record_type: str, limit: int = 5000) -> Optional[list[dict]]:
+    if not sql_store.is_enabled():
+        return None
+    try:
+        return sql_store.list_records(record_type, limit=limit, filter_by_owner=False) or []
+    except Exception:
+        if not sql_store.allow_redis_fallback():
+            raise
+        return None
+
+
+def _sql_record_load(record_type: str, record_id: str) -> Optional[dict]:
+    if not sql_store.is_enabled():
+        return None
+    try:
+        return sql_store.load_record(record_type, record_id)
+    except Exception:
+        if not sql_store.allow_redis_fallback():
+            raise
+        return None
+
+
+def _sql_record_save(record_type: str, record_id: str, data: dict) -> None:
+    if not sql_store.is_enabled():
+        return
+    try:
+        sql_store.save_record(record_type, record_id, data)
+    except Exception:
+        if not sql_store.allow_redis_fallback():
+            raise
+
+
+def _sql_record_delete(record_type: str, record_id: str) -> None:
+    if not sql_store.is_enabled():
+        return
+    try:
+        sql_store.delete_record(record_type, record_id)
+    except Exception:
+        if not sql_store.allow_redis_fallback():
+            raise
+
+
+def _merge_by(items: list[dict], sql_items: Optional[list[dict]], key_builder) -> list[dict]:
+    if sql_items is None:
+        return items
+    merged: dict[str, dict] = {}
+    for item in items:
+        if isinstance(item, dict):
+            merged[str(key_builder(item))] = item
+    for item in sql_items:
+        if isinstance(item, dict):
+            merged[str(key_builder(item))] = item
+    return list(merged.values())
+
+
 def _comment_key(resource_type: str, resource_id: str, comment_id: str) -> str:
     return f"comment:{resource_type}:{resource_id}:{comment_id}"
 
 
+def _comment_record_id(resource_type: str, resource_id: str, comment_id: str) -> str:
+    return f"{resource_type}:{resource_id}:{comment_id}"
+
+
 def _list_resource_comments(r, resource_type: str, resource_id: str) -> list[dict]:
+    sql_items = _sql_record_list("comment", limit=5000)
+    if sql_items is not None:
+        sql_items = [
+            item for item in sql_items
+            if str(item.get("resource_type") or "") == resource_type and str(item.get("resource_id") or "") == resource_id
+        ]
+        if not sql_store.allow_redis_fallback():
+            sql_items.sort(key=lambda item: float(item.get("created_at") or 0))
+            return sql_items
     items: list[dict] = []
     pattern = _comment_key(resource_type, resource_id, "*")
     for key in r.scan_iter(match=pattern, count=500):
@@ -1635,6 +1689,11 @@ def _list_resource_comments(r, resource_type: str, resource_id: str) -> list[dic
                 items.append(data)
         except Exception:
             continue
+    items = _merge_by(items, sql_items, lambda item: _comment_record_id(
+        str(item.get("resource_type") or resource_type),
+        str(item.get("resource_id") or resource_id),
+        str(item.get("comment_id") or ""),
+    ))
     items.sort(key=lambda item: float(item.get("created_at") or 0))
     return items
 
@@ -1643,10 +1702,16 @@ def _save_resource_comment(r, resource_type: str, resource_id: str, data: dict) 
     comment_id = str(data.get("comment_id") or "").strip()
     if not comment_id:
         raise ValueError("comment_id_required")
+    _sql_record_save("comment", _comment_record_id(resource_type, resource_id, comment_id), data)
     r.set(_comment_key(resource_type, resource_id, comment_id), json.dumps(data, ensure_ascii=False))
 
 
 def _load_resource_comment(r, resource_type: str, resource_id: str, comment_id: str) -> Optional[dict]:
+    item = _sql_record_load("comment", _comment_record_id(resource_type, resource_id, comment_id))
+    if item is not None:
+        return item
+    if sql_store.is_enabled() and not sql_store.allow_redis_fallback():
+        return None
     raw = r.get(_comment_key(resource_type, resource_id, comment_id))
     if not raw:
         return None
@@ -1658,11 +1723,16 @@ def _load_resource_comment(r, resource_type: str, resource_id: str, comment_id: 
 
 
 def _delete_resource_comment(r, resource_type: str, resource_id: str, comment_id: str) -> None:
+    _sql_record_delete("comment", _comment_record_id(resource_type, resource_id, comment_id))
     r.delete(_comment_key(resource_type, resource_id, comment_id))
 
 
 def _notice_key(username: str, notice_id: str) -> str:
     return f"notice:{username}:{notice_id}"
+
+
+def _notice_record_id(username: str, notice_id: str) -> str:
+    return f"{username}:{notice_id}"
 
 
 def _report_key(report_id: str) -> str:
@@ -1674,10 +1744,16 @@ def _save_notice(r, username: str, data: dict) -> None:
     owner = str(username or "").strip()
     if not notice_id or not owner:
         raise ValueError("notice_key_required")
+    _sql_record_save("notice", _notice_record_id(owner, notice_id), data)
     r.set(_notice_key(owner, notice_id), json.dumps(data, ensure_ascii=False))
 
 
 def _load_notice(r, username: str, notice_id: str) -> Optional[dict]:
+    item = _sql_record_load("notice", _notice_record_id(username, notice_id))
+    if item is not None:
+        return item
+    if sql_store.is_enabled() and not sql_store.allow_redis_fallback():
+        return None
     raw = r.get(_notice_key(username, notice_id))
     if not raw:
         return None
@@ -1692,6 +1768,14 @@ def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
     owner = str(username or "").strip()
     if not owner:
         return []
+    sql_items = _sql_record_list("notice", limit=5000)
+    if sql_items is not None:
+        sql_items = [item for item in sql_items if str(item.get("username") or "") == owner]
+        if unread_only:
+            sql_items = [item for item in sql_items if not bool(item.get("read"))]
+        if not sql_store.allow_redis_fallback():
+            sql_items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+            return sql_items
     items: list[dict] = []
     for key in r.scan_iter(match=_notice_key(owner, "*"), count=500):
         try:
@@ -1706,6 +1790,10 @@ def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
             items.append(data)
         except Exception:
             continue
+    items = _merge_by(items, sql_items, lambda item: _notice_record_id(
+        str(item.get("username") or owner),
+        str(item.get("notice_id") or ""),
+    ))
     items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
     return items
 
@@ -1728,10 +1816,16 @@ def _create_notice(r, username: str, title: str, content: str, *, kind: str = "i
 
 
 def _save_report(r, report_id: str, data: dict) -> None:
+    _sql_record_save("report", report_id, data)
     r.set(_report_key(report_id), json.dumps(data, ensure_ascii=False))
 
 
 def _load_report(r, report_id: str) -> Optional[dict]:
+    item = _sql_record_load("report", report_id)
+    if item is not None:
+        return item
+    if sql_store.is_enabled() and not sql_store.allow_redis_fallback():
+        return None
     raw = r.get(_report_key(report_id))
     if not raw:
         return None
@@ -1743,6 +1837,10 @@ def _load_report(r, report_id: str) -> Optional[dict]:
 
 
 def _list_reports(r) -> list[dict]:
+    sql_items = _sql_record_list("report", limit=5000)
+    if sql_items is not None and not sql_store.allow_redis_fallback():
+        sql_items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+        return sql_items
     items: list[dict] = []
     for key in r.scan_iter(match="report:*", count=500):
         try:
@@ -1754,11 +1852,13 @@ def _list_reports(r) -> list[dict]:
                 items.append(data)
         except Exception:
             continue
+    items = _merge_by(items, sql_items, lambda item: str(item.get("report_id") or ""))
     items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
     return items
 
 
 def _delete_report(r, report_id: str) -> None:
+    _sql_record_delete("report", report_id)
     r.delete(_report_key(report_id))
 
 
@@ -1879,35 +1979,11 @@ def _dataset_has_files(dataset_dir: Path) -> bool:
 
 
 def _list_all_dataset_records(r) -> list[dict]:
-    items: list[dict] = []
-    for key in r.scan_iter(match="dataset:*", count=1000):
-        if ":version:" in key or ":fs_hash:" in key or ":scan:" in key:
-            continue
-        try:
-            raw = r.get(key)
-            if not raw:
-                continue
-            data = json.loads(raw)
-            if isinstance(data, dict) and data.get("dataset_id"):
-                items.append(data)
-        except Exception:
-            continue
-    return items
+    return list_all_datasets(r, limit=5000) or []
 
 
 def _list_all_algorithm_records(r) -> list[dict]:
-    items: list[dict] = []
-    for key in r.scan_iter(match="algorithm:*", count=1000):
-        try:
-            raw = r.get(key)
-            if not raw:
-                continue
-            data = json.loads(raw)
-            if isinstance(data, dict) and data.get("algorithm_id"):
-                items.append(data)
-        except Exception:
-            continue
-    return items
+    return list_all_algorithms(r, limit=5000) or []
 
 
 def _assert_resource_access(resource: dict, current_user: Optional[dict], *, allow_system: bool = True) -> None:
@@ -2063,19 +2139,7 @@ def _assert_algorithm_manage_access(algorithm: dict, current_user: dict) -> None
 
 
 def _list_all_runs(r, limit: int = 5000) -> list[dict]:
-    items: list[dict] = []
-    for key in r.scan_iter(match="run:*", count=1000):
-        try:
-            raw = r.get(key)
-            if not raw:
-                continue
-            data = json.loads(raw)
-            if isinstance(data, dict) and data.get("run_id"):
-                items.append(data)
-        except Exception:
-            continue
-    items.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
-    return items[:limit]
+    return list_all_runs(r, limit=limit) or []
 
 
 def _aggregate_dataset_meta_for_task(r, task_type: str, current_user: Optional[dict]) -> tuple[dict, int, int]:
@@ -2113,6 +2177,10 @@ def _aggregate_dataset_meta_for_task(r, task_type: str, current_user: Optional[d
 
 
 def _list_all_comments(r) -> list[dict]:
+    sql_items = _sql_record_list("comment", limit=5000)
+    if sql_items is not None and not sql_store.allow_redis_fallback():
+        sql_items.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
+        return sql_items
     items: list[dict] = []
     for key in r.scan_iter(match="comment:*:*:*", count=1000):
         try:
@@ -2124,6 +2192,11 @@ def _list_all_comments(r) -> list[dict]:
                 items.append(data)
         except Exception:
             continue
+    items = _merge_by(items, sql_items, lambda item: _comment_record_id(
+        str(item.get("resource_type") or ""),
+        str(item.get("resource_id") or ""),
+        str(item.get("comment_id") or ""),
+    ))
     items.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
     return items
 
@@ -3008,21 +3081,14 @@ def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
             delete_algorithm_submission(r, submission_id)
 
             has_archive_reference = False
-            for key in r.scan_iter(match="algorithm:*", count=1000):
-                try:
-                    raw = r.get(key)
-                    if not raw:
-                        continue
-                    data = json.loads(raw)
-                    if not isinstance(data, dict):
-                        continue
-                    if str(data.get("algorithm_id") or "").strip() == algorithm_id:
-                        continue
-                    if str(data.get("source_submission_id") or "").strip() == submission_id:
-                        has_archive_reference = True
-                        break
-                except Exception:
+            for data in _list_all_algorithm_records(r):
+                if not isinstance(data, dict):
                     continue
+                if str(data.get("algorithm_id") or "").strip() == algorithm_id:
+                    continue
+                if str(data.get("source_submission_id") or "").strip() == submission_id:
+                    has_archive_reference = True
+                    break
 
             if not str(submission.get("platform_algorithm_id") or "").strip() and not has_archive_reference:
                 try:
@@ -3169,17 +3235,12 @@ def delete_algorithm_submission_for_current_user(submission_id: str, current_use
 
     delete_algorithm_submission(r, submission_id)
     has_archive_reference = False
-    for key in r.scan_iter(match="algorithm:*", count=1000):
-        try:
-            raw = r.get(key)
-            if not raw:
-                continue
-            data = json.loads(raw)
-            if isinstance(data, dict) and str(data.get("source_submission_id") or "").strip() == submission_id:
-                has_archive_reference = True
-                break
-        except Exception:
+    for data in _list_all_algorithm_records(r):
+        if not isinstance(data, dict):
             continue
+        if str(data.get("source_submission_id") or "").strip() == submission_id:
+            has_archive_reference = True
+            break
     if not str(cur.get("platform_algorithm_id") or "").strip() and not has_archive_reference:
         try:
             shutil.rmtree(_algorithm_submission_dir(str(cur.get("owner_id") or "system"), submission_id), ignore_errors=True)
@@ -4792,18 +4853,10 @@ def clear_runs(
     Clear runs by status (default: done).
     """
     r = make_redis()
-    keys = r.keys("run:*")
     username = current_user["username"]
 
     deleted = 0
-    for k in keys:
-        s = r.get(k)
-        if not s:
-            continue
-        try:
-            data = json.loads(s)
-        except Exception:
-            continue
+    for data in list_runs(r, limit=5000, owner_id=username):
         if str(data.get("owner_id") or "") != username:
             continue
 
@@ -4811,7 +4864,7 @@ def clear_runs(
             if data.get("status") != status:
                 continue
 
-        r.delete(k)
+        delete_run(r, str(data.get("run_id") or ""))
         deleted += 1
 
     return {"ok": True, "deleted": deleted, "status": status}
@@ -4849,7 +4902,7 @@ def batch_clear_runs(
         if str(run.get("status") or "") in {"queued", "running", "canceling"}:
             skipped += 1
             continue
-        r.delete(f"run:{run_id}")
+        delete_run(r, run_id)
         deleted += 1
 
     return {"ok": True, "deleted": deleted, "skipped": skipped}

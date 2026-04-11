@@ -92,9 +92,22 @@ if metadata is not None:
         Column("reviewed_at", Float, index=True),
         Column("payload_json", Text, nullable=False),
     )
+
+    store_records_table = _table(
+        "abp_store_records",
+        Column("record_type", String(64), primary_key=True),
+        Column("record_id", String(191), primary_key=True),
+        Column("owner_id", String(191), index=True),
+        Column("visibility", String(32), index=True),
+        Column("created_at", Float, index=True),
+        Column("updated_at", Float, index=True),
+        Column("sort_at", Float, index=True),
+        Column("payload_json", Text, nullable=False),
+    )
 else:
     algorithms_table = None
     algorithm_submissions_table = None
+    store_records_table = None
 
 
 @lru_cache(maxsize=1)
@@ -136,6 +149,29 @@ def _bool_or_none(value: Any) -> Optional[bool]:
     if value is None:
         return None
     return bool(value)
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _record_values(record_type: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(data or {})
+    created_at = _float_or_zero(item.get("created_at"))
+    updated_at = _float_or_zero(item.get("updated_at") if item.get("updated_at") is not None else created_at)
+    return {
+        "record_type": str(record_type),
+        "record_id": str(record_id),
+        "owner_id": str(item.get("owner_id") or item.get("username") or "system"),
+        "visibility": str(item.get("visibility") or "private"),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "sort_at": updated_at or created_at,
+        "payload_json": _dump(item),
+    }
 
 
 def _algorithm_values(algorithm_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +268,14 @@ def list_algorithms(limit: int = 500, owner_id: Optional[str] = None, include_pu
     return [item for item in (_load(row[0]) for row in rows) if item]
 
 
+def list_all_algorithms(limit: int = 5000) -> list[Dict[str, Any]]:
+    init_schema()
+    stmt = select(algorithms_table.c.payload_json).order_by(algorithms_table.c.created_at.desc()).limit(int(limit or 5000))
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+    return [item for item in (_load(row[0]) for row in rows) if item]
+
+
 def save_algorithm_submission(submission_id: str, data: Dict[str, Any]) -> None:
     values = _submission_values(submission_id, data)
     _upsert(algorithm_submissions_table, "submission_id", values["submission_id"], values)
@@ -254,6 +298,78 @@ def delete_algorithm_submission(submission_id: str) -> None:
 def list_algorithm_submissions(limit: int = 5000) -> list[Dict[str, Any]]:
     init_schema()
     stmt = select(algorithm_submissions_table.c.payload_json).order_by(algorithm_submissions_table.c.created_at.desc()).limit(int(limit or 5000))
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+    return [item for item in (_load(row[0]) for row in rows) if item]
+
+
+def save_record(record_type: str, record_id: str, data: Dict[str, Any]) -> None:
+    values = _record_values(record_type, record_id, data)
+    init_schema()
+    engine = get_engine()
+    with engine.begin() as conn:
+        result = conn.execute(
+            update(store_records_table)
+            .where(
+                (store_records_table.c.record_type == values["record_type"])
+                & (store_records_table.c.record_id == values["record_id"])
+            )
+            .values(**values)
+        )
+        if int(result.rowcount or 0) == 0:
+            conn.execute(insert(store_records_table).values(**values))
+
+
+def load_record(record_type: str, record_id: str) -> Optional[Dict[str, Any]]:
+    init_schema()
+    stmt = select(store_records_table.c.payload_json).where(
+        (store_records_table.c.record_type == str(record_type))
+        & (store_records_table.c.record_id == str(record_id))
+    )
+    with get_engine().connect() as conn:
+        row = conn.execute(stmt).first()
+    return _load(row[0]) if row else None
+
+
+def delete_record(record_type: str, record_id: str) -> None:
+    init_schema()
+    with get_engine().begin() as conn:
+        conn.execute(
+            delete(store_records_table).where(
+                (store_records_table.c.record_type == str(record_type))
+                & (store_records_table.c.record_id == str(record_id))
+            )
+        )
+
+
+def list_records(
+    record_type: str,
+    limit: int = 500,
+    owner_id: Optional[str] = None,
+    include_public: bool = False,
+    filter_by_owner: bool = True,
+) -> list[Dict[str, Any]]:
+    init_schema()
+    stmt = (
+        select(store_records_table.c.payload_json)
+        .where(store_records_table.c.record_type == str(record_type))
+        .order_by(store_records_table.c.sort_at.desc())
+        .limit(int(limit or 500))
+    )
+    if filter_by_owner:
+        if owner_id:
+            if include_public:
+                stmt = stmt.where(
+                    (store_records_table.c.owner_id == "system")
+                    | (store_records_table.c.owner_id == owner_id)
+                    | (store_records_table.c.visibility == "public")
+                )
+            else:
+                stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.owner_id == owner_id))
+        elif include_public:
+            stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.visibility == "public"))
+        else:
+            stmt = stmt.where(store_records_table.c.owner_id == "system")
     with get_engine().connect() as conn:
         rows = conn.execute(stmt).all()
     return [item for item in (_load(row[0]) for row in rows) if item]

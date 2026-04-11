@@ -1,11 +1,19 @@
 # MySQL 算法资源迁移说明
 
-本次先迁移最容易出现同步问题的两类数据：
+当前迁移会覆盖主要持久业务数据：
 
+- `run:*`：评测运行记录
+- `dataset:*`：数据集记录，自动排除扫描缓存与版本辅助键
 - `algorithm:*`：平台算法、社区算法、用户算法副本、接入算法副本
+- `preset:*`：参数方案
+- `metric:*`：自定义指标
 - `algorithm_submission:*`：用户算法接入申请与审核状态
+- `user:*`：本地用户账号记录
+- `comment:*:*:*`：社区评论
+- `notice:*:*`：站内通知
+- `report:*`：举报处理记录
 
-暂不迁移 Run、日志、Celery 队列状态。Redis 仍继续作为 Celery Broker/Backend 和运行态缓存使用。
+暂不迁移 Celery 队列状态。Redis 仍继续作为 Celery Broker/Backend 使用，并在迁移期保留镜像与兜底能力。
 
 ## 1. 安装依赖
 
@@ -70,12 +78,13 @@ python scripts\migrate_algorithms_to_sql.py
 
 - `abp_algorithms`
 - `abp_algorithm_submissions`
+- `abp_store_records`
 
 ## 5. 当前存储口径
 
-- 算法与算法接入申请：优先读写 MySQL，同时镜像写入 Redis，迁移期可从 Redis 兜底读取。
-- 数据集、指标、Run、用户、日志：暂时仍按原 Redis 口径运行。
-- 后续如果继续暴露同步问题，再按风险顺序迁移数据集、指标和用户表。
+- 算法与算法接入申请：使用专表优先读写 MySQL，同时镜像写入 Redis，迁移期可从 Redis 兜底读取。
+- Run、数据集、参数方案、指标、用户、评论、通知、举报：使用 `abp_store_records` 优先读写 MySQL，同时镜像写入 Redis，迁移期可从 Redis 兜底读取。
+- Celery 队列状态：继续使用 Redis。
 
 ## 6. 日常启动
 
