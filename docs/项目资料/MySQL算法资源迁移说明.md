@@ -78,6 +78,14 @@ python scripts\migrate_algorithms_to_sql.py
 
 - `abp_algorithms`
 - `abp_algorithm_submissions`
+- `abp_runs`
+- `abp_datasets`
+- `abp_presets`
+- `abp_metrics`
+- `abp_users`
+- `abp_comments`
+- `abp_notices`
+- `abp_reports`
 - `abp_store_records`
 
 ## 5. 当前存储口径
