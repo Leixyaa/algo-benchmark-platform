@@ -12,19 +12,45 @@
         <p>创建您的私有算法评测空间</p>
       </div>
 
-      <el-form :model="form" :rules="rules" ref="formRef" label-position="top" @keyup.enter="handleRegister" size="large">
+      <el-form
+        ref="formRef"
+        :model="form"
+        :rules="rules"
+        label-position="top"
+        size="large"
+        @keyup.enter="handleRegister"
+      >
         <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="建议使用学号或英文名" prefix-icon="User" clearable />
+          <el-input
+            v-model="form.username"
+            placeholder="建议使用学号或英文名"
+            prefix-icon="User"
+            clearable
+          />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            prefix-icon="Lock"
+            show-password
+          />
         </el-form-item>
         <el-form-item label="确认密码" prop="confirmPassword">
-          <el-input v-model="form.confirmPassword" type="password" placeholder="请再次输入密码" prefix-icon="Lock" show-password />
+          <el-input
+            v-model="form.confirmPassword"
+            type="password"
+            placeholder="请再次输入密码"
+            prefix-icon="Lock"
+            show-password
+          />
         </el-form-item>
 
         <div class="actions">
-          <el-button type="primary" :loading="loading" @click="handleRegister" class="submit-btn">注册并登录</el-button>
+          <el-button type="primary" :loading="loading" class="submit-btn" @click="handleRegister">
+            注册并登录
+          </el-button>
 
           <div class="divider">
             <span>已有账号？</span>
@@ -32,23 +58,22 @@
 
           <div class="links">
             <router-link to="/login" class="login-link">返回登录</router-link>
-            <el-button type="text" @click="continueAsGuest" class="guest-btn">以游客身份访问</el-button>
+            <el-button type="text" class="guest-btn" @click="continueAsGuest">以游客身份访问</el-button>
           </div>
         </div>
       </el-form>
     </el-card>
 
-    <div class="footer-info">
-      &copy; 2026 Algo Benchmark Platform · Graduation Project
-    </div>
+    <div class="footer-info">&copy; 2026 Algo Benchmark Platform · Graduation Project</div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from "vue";
+import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useAppStore } from "../stores/app";
 import { ElMessage } from "element-plus";
+
+import { useAppStore } from "../stores/app";
 
 const router = useRouter();
 const store = useAppStore();
@@ -67,17 +92,26 @@ const rules = {
   confirmPassword: [
     { required: true, message: "请再次输入密码", trigger: "blur" },
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (value !== form.password) {
           callback(new Error("两次输入的密码不一致"));
-        } else {
-          callback();
+          return;
         }
+        callback();
       },
       trigger: "blur",
     },
   ],
 };
+
+function getRegisterErrorMessage(error) {
+  const detail = error?.detail;
+  const raw = typeof detail === "string" ? detail : error?.message || String(error || "");
+  if (raw.includes("user_already_exists")) return "该用户名已注册，请更换用户名或直接登录";
+  if (raw.includes("admin_username_reserved")) return "该用户名为系统保留账号，请更换其他用户名";
+  if (raw.includes("username_required")) return "请输入用户名";
+  return raw || "注册失败";
+}
 
 async function handleRegister() {
   if (!formRef.value) return;
@@ -91,8 +125,8 @@ async function handleRegister() {
       await store.login(form.username, form.password);
       ElMessage.success("注册成功");
       router.push("/");
-    } catch (e) {
-      ElMessage.error(e?.detail || e || "注册失败");
+    } catch (error) {
+      ElMessage.error(getRegisterErrorMessage(error));
     } finally {
       loading.value = false;
     }

@@ -74,7 +74,7 @@
                 placeholder="请选择评测数据集" 
                 class="full-width-select"
               >
-                <el-option v-for="d in store.datasets" :key="d.id" :label="datasetOptionLabel(d)" :value="d.id" />
+                <el-option v-for="d in availableDatasets" :key="d.id" :label="datasetOptionLabel(d)" :value="d.id" />
               </el-select>
               <div v-if="datasetHintText" class="dataset-alert">
                 <el-alert :title="datasetHintText" :type="datasetHintType" :closable="false" show-icon />
@@ -88,6 +88,32 @@
               >
                 立即扫描数据集配对
               </el-button>
+            </el-form-item>
+            <el-form-item label="评测模式">
+              <div class="eval-mode-grid">
+                <button
+                  type="button"
+                  class="eval-mode-card"
+                  :class="{ active: form.evalMode === 'preview' }"
+                  @click="form.evalMode = 'preview'"
+                >
+                  <span class="eval-mode-title">快速预览</span>
+                  <span class="eval-mode-desc">默认只跑前 5 个样本，适合演示、调参和快速检查结果走势。</span>
+                </button>
+                <button
+                  type="button"
+                  class="eval-mode-card"
+                  :class="{ active: form.evalMode === 'full' }"
+                  @click="form.evalMode = 'full'"
+                >
+                  <span class="eval-mode-title">全量评测</span>
+                  <span class="eval-mode-desc">按当前任务的全部有效配对样本执行，适合正式实验、导出和论文数据。</span>
+                </button>
+              </div>
+              <div class="algorithm-selection-note">
+                当前任务共识别 {{ selectedPairCount }} 对有效样本；
+                {{ form.evalMode === 'preview' ? '本次将最多评测前 5 对。' : '本次将按全部有效样本执行。' }}
+              </div>
             </el-form-item>
           </el-form>
         </div>
@@ -312,13 +338,12 @@ function getPackageRole(alg) {
   return "";
 }
 function getAlgorithmSourceKey(alg) {
-  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
-  if (impl !== "userpackage") return "";
+  const sourceAlgorithmId = String(alg?.sourceAlgorithmId || alg?.raw?.source_algorithm_id || "").trim();
+  const sourceOwnerId = String(alg?.sourceUploaderId || alg?.raw?.source_owner_id || "").trim();
+  if (sourceAlgorithmId) return `source:${sourceOwnerId}:${sourceAlgorithmId}`;
   const submissionId = String(alg?.sourceSubmissionId || alg?.raw?.source_submission_id || "").trim();
   if (submissionId) return `submission:${submissionId}`;
-  const sourceAlgorithmId = String(alg?.sourceAlgorithmId || alg?.raw?.source_algorithm_id || "").trim();
-  if (sourceAlgorithmId) return `source:${sourceAlgorithmId}`;
-  return "";
+  return `self:${String(alg?.uploaderId || alg?.raw?.owner_id || "").trim()}:${String(alg?.id || alg?.raw?.algorithm_id || "").trim()}`;
 }
 function getAlgorithmBaseName(alg) {
   return String(alg?.name || "")
@@ -328,14 +353,13 @@ function getAlgorithmBaseName(alg) {
     .toLowerCase();
 }
 function algorithmPreferenceScore(alg) {
-  const impl = String(alg?.impl || alg?.raw?.impl || "").trim().toLowerCase();
   const runtimeReady = Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready);
   const allowUse = Boolean(alg?.allowUse || alg?.raw?.allow_use);
   const isActive = alg?.raw?.is_active !== false;
   const role = getPackageRole(alg);
-  if (impl !== "userpackage") return 0;
   if (isCurrentUserAlgorithm(alg) && role === "owner_runtime" && runtimeReady && isActive) return 300;
-  if (isPlatformAlgorithm(alg) && role === "platform" && allowUse && isActive) return 200;
+  if (isPlatformAlgorithm(alg) && role === "platform" && allowUse && isActive) return 260;
+  if (isCurrentUserAlgorithm(alg) && role === "downloaded_community" && runtimeReady && isActive) return 180;
   if (isCurrentUserAlgorithm(alg)) return 150;
   if (isPlatformAlgorithm(alg)) return 100;
   return 10;
@@ -348,7 +372,11 @@ function isVisiblePlatformAlgorithm(alg) {
 
   if (isCurrentUserAlgorithm(alg)) {
     if (impl === "userpackage") {
-      return role === "owner_runtime" && !String(taskType || "").startsWith("video_") && Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready);
+      return (
+        (role === "owner_runtime" || role === "downloaded_community") &&
+        !String(taskType || "").startsWith("video_") &&
+        Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready)
+      );
     }
     return true;
   }
@@ -372,17 +400,67 @@ const activeStep = ref(0);
 
 const BUILTIN_METRIC_KEYS = ["PSNR", "SSIM", "NIQE"];
 const metrics = ref([...BUILTIN_METRIC_KEYS]);
+function dedupeBySource(items, getKey, getScore = () => 0) {
+  const out = [];
+  const indexByKey = new Map();
+  for (const item of items) {
+    const key = String(getKey(item) || "").trim();
+    if (!key) {
+      out.push(item);
+      continue;
+    }
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, out.length);
+      out.push(item);
+      continue;
+    }
+    if (Number(getScore(item) || 0) > Number(getScore(out[existingIndex]) || 0)) {
+      out[existingIndex] = item;
+    }
+  }
+  return out;
+}
+function getDatasetSourceKey(item) {
+  const sourceDatasetId = String(item?.sourceDatasetId || item?.raw?.source_dataset_id || item?.raw?.meta?.downloaded_from_dataset_id || "").trim();
+  const sourceOwnerId = String(item?.sourceUploaderId || item?.raw?.source_owner_id || item?.raw?.meta?.downloaded_from_owner_id || "").trim();
+  if (sourceDatasetId) return `source:${sourceOwnerId}:${sourceDatasetId}`;
+  return `self:${String(item?.uploaderId || item?.raw?.owner_id || "").trim()}:${String(item?.id || item?.raw?.dataset_id || "").trim()}`;
+}
+function getDatasetPreferenceScore(item) {
+  return String(item?.sourceDatasetId || item?.raw?.source_dataset_id || item?.raw?.meta?.downloaded_from_dataset_id || "").trim() ? 10 : 20;
+}
+function getMetricSourceKey(item) {
+  const metricKey = String(item?.metricKey || "").trim().toUpperCase();
+  if (String(item?.uploaderId || item?.raw?.owner_id || "").trim() === "system" && metricKey) {
+    return `builtin:${metricKey}`;
+  }
+  const sourceMetricId = String(item?.sourceMetricId || item?.raw?.source_metric_id || "").trim();
+  const sourceOwnerId = String(item?.sourceOwnerId || item?.raw?.source_owner_id || "").trim();
+  if (sourceMetricId) return `source:${sourceOwnerId}:${sourceMetricId}`;
+  return `self:${String(item?.uploaderId || item?.raw?.owner_id || "").trim()}:${String(item?.id || item?.raw?.metric_id || "").trim()}`;
+}
+function getMetricPreferenceScore(item) {
+  if (String(item?.uploaderId || item?.raw?.owner_id || "").trim() === "system") return 30;
+  return String(item?.sourceMetricId || item?.raw?.source_metric_id || "").trim() ? 10 : 20;
+}
+const availableDatasets = computed(() =>
+  dedupeBySource(store.datasets || [], getDatasetSourceKey, getDatasetPreferenceScore)
+);
 const readyMetrics = computed(() =>
-  (store.metricsCatalog || [])
-    .filter((item) => item.status === "approved" && item.runtimeReady)
-    .filter((item) => !item.taskTypes?.length || item.taskTypes.includes(form.taskType))
-    .sort((a, b) => {
-      const order = ["PSNR", "SSIM", "NIQE"];
-      const ia = order.indexOf(a.metricKey);
-      const ib = order.indexOf(b.metricKey);
-      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-      return String(a.displayName || a.metricKey).localeCompare(String(b.displayName || b.metricKey), "zh-Hans-CN-u-co-pinyin");
-    })
+  dedupeBySource(
+    (store.metricsCatalog || [])
+      .filter((item) => item.status === "approved" && item.runtimeReady)
+      .filter((item) => !item.taskTypes?.length || item.taskTypes.includes(form.taskType)),
+    getMetricSourceKey,
+    getMetricPreferenceScore
+  ).sort((a, b) => {
+    const order = ["PSNR", "SSIM", "NIQE"];
+    const ia = order.indexOf(a.metricKey);
+    const ib = order.indexOf(b.metricKey);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    return String(a.displayName || a.metricKey).localeCompare(String(b.displayName || b.metricKey), "zh-Hans-CN-u-co-pinyin");
+  })
 );
 const builtinReadyMetrics = computed(() =>
   readyMetrics.value.filter((item) => BUILTIN_METRIC_KEYS.includes(String(item.metricKey || "").toUpperCase()))
@@ -423,6 +501,7 @@ const form = reactive({
   presetName: "",
   taskType: "denoise",
   datasetId: "",
+  evalMode: "preview",
   algorithmIds: [],
   algorithmId: "",
   metrics: [], // 不再使用，改用metrics.value
@@ -439,6 +518,7 @@ try {
     if (typeof cached.taskType === "string") form.taskType = cached.taskType;
     else if (typeof cached.task === "string") form.taskType = toTaskType(cached.task);
     if (cached.datasetId) form.datasetId = cached.datasetId;
+    if (cached.evalMode === "full" || cached.evalMode === "preview") form.evalMode = cached.evalMode;
     if (Array.isArray(cached.algorithmIds)) form.algorithmIds = cached.algorithmIds.filter(Boolean);
     if (cached.algorithmId) form.algorithmId = cached.algorithmId;
     if (!form.algorithmIds.length && form.algorithmId) form.algorithmIds = [form.algorithmId];
@@ -530,6 +610,12 @@ const presetsAll = computed(() => {
 const selectedAlgorithm = computed(() =>
   store.algorithms.find((a) => a.id === form.algorithmId)
 );
+const selectedPairCount = computed(() => {
+  const d = selectedDataset.value;
+  const pairs = (d?.meta?.pairs_by_task) || (d?.raw?.meta?.pairs_by_task) || {};
+  const count = Number(pairs?.[form.taskType] ?? 0);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+});
 
 const PARAM_DOCS = {
   dcp_patch: "暗通道窗口，越大去雾更强，但细节更容易被抹平。",
@@ -572,7 +658,7 @@ const paramDisplayRows = computed(() => {
 });
 
 const selectedDataset = computed(() =>
-  store.datasets.find((d) => d.id === form.datasetId)
+  availableDatasets.value.find((d) => d.id === form.datasetId)
 );
 
 const userSchemeEntries = computed(() => {
@@ -650,6 +736,17 @@ watch(
 );
 
 watch(
+  () => availableDatasets.value.map((d) => d.id).join("|"),
+  () => {
+    if (!form.datasetId) return;
+    const validIds = availableDatasets.value.map((d) => d.id);
+    if (!validIds.includes(form.datasetId)) {
+      form.datasetId = "";
+    }
+  }
+);
+
+watch(
   () => form.algorithmId,
   () => {
     if (applyingPreset.value || !isSingleAlgorithmMode.value) return;
@@ -679,9 +776,18 @@ watch(
 );
 
 onMounted(async () => {
-  try { await store.fetchDatasets(); } catch {}
-  try { await store.fetchAlgorithms(); } catch {}
-  try { await store.fetchPresets(); } catch {}
+  if (store.datasets?.length) store.fetchDatasets().catch(() => {});
+  else {
+    try { await store.fetchDatasets(); } catch {}
+  }
+  if (store.algorithms?.length) store.fetchAlgorithms(500, { force: true }).catch(() => {});
+  else {
+    try { await store.fetchAlgorithms(500, { force: true }); } catch {}
+  }
+  if (store.presets?.length) store.fetchPresets().catch(() => {});
+  else {
+    try { await store.fetchPresets(); } catch {}
+  }
 });
 
 function applyPreset() {
@@ -951,8 +1057,9 @@ async function create() {
         datasetId: form.datasetId,
         algorithmId,
         metrics: [...metrics.value],
-        params: runParams,
+        params: { ...runParams, eval_mode: form.evalMode },
         strictValidate: true,
+        evalMode: form.evalMode,
       });
       creationResults.push(algorithmId);
     }
@@ -1048,6 +1155,8 @@ function goRuns() {
   padding: 24px;
   background-color: #f8fbff;
   min-height: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 /* Header Section */
@@ -1055,20 +1164,28 @@ function goRuns() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.header-left {
+  flex: 1;
 }
 
 .page-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
   color: #1a2f62;
+  line-height: 1.2;
 }
 
 .page-subtitle {
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   color: #64748b;
   font-size: 14px;
+  line-height: 1.6;
 }
 
 .centered-btn {
@@ -1076,6 +1193,16 @@ function goRuns() {
   align-items: center;
   justify-content: center;
   text-align: center;
+  transition: all 0.3s ease;
+  border-radius: 8px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.centered-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
 .centered-btn > span {
@@ -1090,16 +1217,22 @@ function goRuns() {
   border-radius: 16px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-  padding: 20px;
+  padding: 28px;
+  background: white;
 }
 
 .steps-wrapper {
   max-width: 800px;
-  margin: 0 auto 40px;
+  margin: 0 auto 48px;
 }
 
 .custom-steps {
   --el-color-primary: #2f6bff;
+}
+
+.custom-steps :deep(.el-step__title) {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .form-container {
@@ -1109,28 +1242,30 @@ function goRuns() {
 
 /* Step Content */
 .step-header {
-  margin-bottom: 30px;
+  margin-bottom: 32px;
   border-left: 4px solid #2f6bff;
-  padding-left: 16px;
+  padding-left: 20px;
 }
 
 .step-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
   color: #1e293b;
   font-weight: 700;
+  line-height: 1.3;
 }
 
 .step-desc {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   font-size: 14px;
   color: #64748b;
+  line-height: 1.6;
 }
 
 /* Task Cards */
 .task-options {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 16px;
   width: 100%;
 }
@@ -1138,20 +1273,23 @@ function goRuns() {
 .task-card {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 16px;
+  padding: 20px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   background: white;
+  min-height: 120px;
 }
 
 .task-card:hover:not(.disabled) {
   border-color: #2f6bff;
   background-color: #f0f7ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(47, 107, 255, 0.1);
 }
 
 .task-card.active {
@@ -1166,9 +1304,9 @@ function goRuns() {
 }
 
 .task-icon {
-  font-size: 24px;
+  font-size: 28px;
   color: #64748b;
-  transition: color 0.2s;
+  transition: color 0.3s;
 }
 
 .task-card.active .task-icon {
@@ -1177,26 +1315,31 @@ function goRuns() {
 
 .task-info {
   text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .task-label {
   font-weight: 700;
   color: #1e293b;
-  font-size: 14px;
+  font-size: 15px;
+  margin-bottom: 4px;
 }
 
 .task-val {
-  font-size: 11px;
+  font-size: 12px;
   color: #94a3b8;
-  margin-top: 2px;
 }
 
 .active-check {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 12px;
+  right: 12px;
   color: #2f6bff;
   display: none;
+  font-size: 16px;
 }
 
 .task-card.active .active-check {
@@ -1204,29 +1347,85 @@ function goRuns() {
 }
 
 /* Form Styles */
+.modern-form :deep(.el-form-item) {
+  margin-bottom: 28px;
+}
+
 .modern-form :deep(.el-form-item__label) {
   font-weight: 700;
   color: #475569;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
+  font-size: 14px;
 }
 
 .full-width-select {
   width: 100%;
+  border-radius: 8px;
 }
 
 .algorithm-selection-note {
-  margin-top: 10px;
+  margin-top: 12px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.eval-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.eval-mode-card {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid #dbe4f0;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.eval-mode-card:hover {
+  border-color: #2f6bff;
+  box-shadow: 0 8px 20px rgba(47, 107, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.eval-mode-card.active {
+  border-color: #2f6bff;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px #2f6bff inset;
+}
+
+.eval-mode-title {
+  color: #1e293b;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.eval-mode-desc {
   color: #64748b;
   font-size: 13px;
   line-height: 1.6;
 }
 
 .algorithm-batch-panel {
-  margin-top: 14px;
-  padding: 16px 18px;
+  margin-top: 16px;
+  padding: 20px 24px;
   border-radius: 16px;
   border: 1px solid #cfe0ff;
   background: linear-gradient(180deg, #f7faff 0%, #eef5ff 100%);
+  box-shadow: 0 2px 8px rgba(47, 107, 255, 0.05);
 }
 
 .algorithm-batch-head {
@@ -1235,17 +1434,17 @@ function goRuns() {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .algorithm-batch-title {
   color: #1d4ed8;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
 }
 
 .algorithm-batch-count {
-  padding: 6px 12px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: #dbeafe;
   color: #1d4ed8;
@@ -1256,18 +1455,27 @@ function goRuns() {
 .algorithm-batch-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .algorithm-batch-chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 220px;
-  padding: 10px 12px;
+  min-width: 240px;
+  padding: 12px 16px;
   border-radius: 12px;
   background: #ffffff;
   border: 1px solid #d7e5fb;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.algorithm-batch-chip:hover {
+  border-color: #2f6bff;
+  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 .algorithm-batch-name {
@@ -1286,56 +1494,95 @@ function goRuns() {
   color: #475569;
   font-size: 13px;
   line-height: 1.6;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  border: 1px solid rgba(220, 227, 255, 0.8);
 }
 
 .dataset-alert {
-  margin-top: 12px;
+  margin-top: 16px;
+}
+
+.dataset-alert :deep(.el-alert) {
+  border-radius: 8px;
 }
 
 .scan-btn {
-  margin-top: 8px;
+  margin-top: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 8px 20px;
+  transition: all 0.3s ease;
+}
+
+.scan-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
 .preset-box {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .preset-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.preset-actions .el-button {
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 6px 14px;
+  transition: all 0.3s ease;
+}
+
+.preset-actions .el-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
 }
 
 .preset-alert {
-  margin-top: 12px;
+  margin-top: 16px;
+  border-radius: 8px;
 }
 
 .metrics-group {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .metrics-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .metrics-subtitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: #475569;
+  margin-bottom: 8px;
 }
 
 .metrics-subtitle-spaced {
-  margin-top: 6px;
+  margin-top: 12px;
 }
 
 .metrics-empty-tip {
   font-size: 13px;
   color: #94a3b8;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  text-align: center;
 }
 
 .metric-chip {
@@ -1344,19 +1591,22 @@ function goRuns() {
   background: #ffffff;
   color: #64748b;
   border-radius: 14px;
-  min-width: 88px;
-  height: 38px;
-  padding: 0 18px;
+  min-width: 96px;
+  height: 40px;
+  padding: 0 20px;
   font-size: 14px;
-  line-height: 38px;
+  line-height: 40px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 
 .metric-chip:hover:not(:disabled) {
   border-color: #3b82f6;
   color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
 }
 
 .metric-chip.active {
@@ -1367,7 +1617,7 @@ function goRuns() {
 }
 
 .metric-chip.metric-chip-wide {
-  min-width: 152px;
+  min-width: 160px;
 }
 
 .metric-chip:disabled {
@@ -1393,32 +1643,40 @@ function goRuns() {
   background-color: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 16px;
+  padding: 20px;
 }
 
 .param-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
 }
 
 .param-info-card {
   background: white;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 10px;
+  padding: 16px;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.param-info-card:hover {
+  border-color: #2f6bff;
+  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.1);
+  transform: translateY(-1px);
 }
 
 .param-info-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .param-info-key {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   color: #334155;
 }
 
@@ -1426,11 +1684,11 @@ function goRuns() {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
   color: #2563eb;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .param-info-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: #64748b;
   line-height: 1.4;
 }
@@ -1438,22 +1696,49 @@ function goRuns() {
 .readonly-empty {
   color: #94a3b8;
   text-align: center;
-  padding: 20px;
+  padding: 24px;
+  font-size: 14px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
 }
 
 .save-preset-row {
   display: flex;
-  gap: 12px;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.save-preset-row .el-input {
+  flex: 1;
+  min-width: 240px;
+  border-radius: 8px;
+}
+
+.save-preset-row .el-button {
+  border-radius: 8px;
+  font-size: 14px;
+  padding: 0 24px;
+  height: 40px;
+  transition: all 0.3s ease;
+}
+
+.save-preset-row .el-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
 /* Footer & Tips */
 .form-footer {
-  margin-top: 40px;
-  padding-top: 24px;
+  margin-top: 48px;
+  padding-top: 28px;
   border-top: 1px solid #e2e8f0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .footer-left, .footer-right {
@@ -1464,7 +1749,7 @@ function goRuns() {
   flex: 2;
   display: flex;
   justify-content: center;
-  gap: 16px;
+  gap: 20px;
 }
 
 .footer-right {
@@ -1472,34 +1757,131 @@ function goRuns() {
   justify-content: flex-end;
 }
 
+.footer-center .el-button {
+  border-radius: 10px;
+  font-size: 14px;
+  padding: 0 28px;
+  height: 48px;
+  transition: all 0.3s ease;
+  min-width: 120px;
+}
+
+.footer-center .el-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
+}
+
 .launch-btn {
-  padding-left: 32px;
-  padding-right: 32px;
+  padding-left: 36px;
+  padding-right: 36px;
   box-shadow: 0 4px 12px rgba(47, 107, 255, 0.25);
+  font-weight: 600;
+}
+
+.launch-btn:hover {
+  box-shadow: 0 6px 16px rgba(47, 107, 255, 0.3);
+  transform: translateY(-2px);
 }
 
 .page-tips {
-  margin-top: 24px;
+  margin-top: 32px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   color: #64748b;
   font-size: 13px;
   justify-content: center;
+  padding: 16px 24px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.6;
 }
 
 .page-tips .el-icon {
   color: #2f6bff;
+  font-size: 16px;
 }
 
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 0 0 1px #e2e8f0 inset;
+  transition: all 0.3s ease;
 }
 
 :deep(.el-input__wrapper.is-focus),
 :deep(.el-select__wrapper.is-focused) {
   box-shadow: 0 0 0 1px #2f6bff inset !important;
+}
+
+:deep(.el-select__options) {
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+  
+  .header-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .page-title {
+    font-size: 24px;
+  }
+  
+  .main-card {
+    padding: 20px;
+  }
+  
+  .task-options {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  
+  .task-card {
+    padding: 16px;
+    min-height: 100px;
+  }
+  
+  .save-preset-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .save-preset-row .el-input {
+    width: 100%;
+  }
+  
+  .form-footer {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .footer-center {
+    order: -1;
+  }
+  
+  .param-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .algorithm-batch-chip {
+    min-width: 100%;
+  }
+  
+  .metrics-group {
+    justify-content: center;
+  }
 }
 </style>

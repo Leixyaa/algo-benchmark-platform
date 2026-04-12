@@ -29,7 +29,7 @@ export const datasetsApi = {
   async downloadCommunityDataset(datasetId) {
     return request(`/community/datasets/${datasetId}/download`, { method: "POST" });
   },
-  async exportDataset(datasetId) {
-    return downloadBinaryFile(`/datasets/${datasetId}/export`, `${datasetId}.zip`);
+  async exportDataset(datasetId, options = {}) {
+    return downloadBinaryFile(`/datasets/${datasetId}/export`, `${datasetId}.zip`, options);
   },
 };

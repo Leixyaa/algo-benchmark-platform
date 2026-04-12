@@ -11,6 +11,9 @@ export const algorithmSubmissionsApi = {
   publishToCommunity(submissionId, body = {}) {
     return request(`/algorithm-submissions/${submissionId}/publish-community`, { method: "POST", body });
   },
+  unpublishFromCommunity(submissionId) {
+    return request(`/algorithm-submissions/${submissionId}/unpublish-community`, { method: "POST" });
+  },
   downloadArchive(submissionId, filename = "algorithm_package.zip") {
     return downloadBinaryFile(`/algorithm-submissions/${submissionId}/download`, filename);
   },

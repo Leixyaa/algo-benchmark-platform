@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="page">
     <section class="hero-panel">
       <div class="hero-copy">
@@ -7,26 +7,26 @@
         <p class="page-subtitle">围绕真实评测结果做筛选、排序、导出与结论整理，保留统一口径的指标对比，不再提供智能选型入口。</p>
         <div class="hero-meta">
           <div class="meta-pill">
-            <span class="meta-label">褰撳墠浠诲姟</span>
+            <span class="meta-label">当前任务</span>
             <strong>{{ selectedTaskSummary }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">褰撳墠鏁版嵁闆�</span>
+            <span class="meta-label">当前数据集</span>
             <strong>{{ selectedDatasetSummary }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">鎺掑簭鏂瑰紡</span>
+            <span class="meta-label">排序方式</span>
             <strong>{{ selectedRankMetricLabel }}</strong>
           </div>
           <div class="meta-pill">
-            <span class="meta-label">鐪熷疄缁撴灉</span>
-            <strong>{{ tableRows.length }} 鏉�</strong>
+            <span class="meta-label">真实结果</span>
+            <strong>{{ tableRows.length }} 条</strong>
           </div>
         </div>
       </div>
       <div class="header-actions">
-        <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">鍚屾鏁版嵁</el-button>
-        <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">閲嶇疆閰嶇疆</el-button>
+        <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">同步数据</el-button>
+        <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">重置配置</el-button>
       </div>
     </section>
 
@@ -36,26 +36,26 @@
           <div class="card-header">
             <div>
               <div class="card-eyebrow">Filter</div>
-              <div class="card-title">缁撴灉绛涢€�</div>
+              <div class="card-title">结果筛选</div>
             </div>
-            <p class="card-desc">鍏堟敹绐勪换鍔°€佹暟鎹泦鍜屾帓搴忓彛寰勶紝鍐嶇湅鎺ㄨ崘缁撹浼氭洿娓呮銆�</p>
+            <p class="card-desc">先选择任务、数据集和排序口径，再看推荐结论会更清晰。</p>
           </div>
         </template>
         <div class="filter-form">
-          <el-select v-model="task" placeholder="浠诲姟绫诲瀷" class="flex-item">
+          <el-select v-model="task" placeholder="任务类型" class="flex-item">
             <el-option v-for="item in taskOptions" :key="item" :label="item" :value="item" />
           </el-select>
-          <el-select v-model="datasetId" placeholder="璇勬祴鏁版嵁闆�" class="flex-item">
+          <el-select v-model="datasetId" placeholder="评测数据集" class="flex-item">
             <el-option v-for="item in store.datasets" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
-          <el-select v-model="chartMetric" placeholder="鎺掑簭鏂瑰紡" class="flex-item">
+          <el-select v-model="chartMetric" placeholder="排序方式" class="flex-item">
             <el-option v-for="item in availableRankMetrics" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <div class="filter-row-secondary">
-            <el-checkbox v-model="onlyDone">浠呮樉绀哄凡瀹屾垚</el-checkbox>
+            <el-checkbox v-model="onlyDone">仅显示已完成</el-checkbox>
             <div class="filter-footer-actions">
-              <span class="inline-tip">褰撳墠婊¤冻绛涢€夋潯浠剁殑鐪熷疄缁撴灉锛歿{ tableRows.length }} 鏉�</span>
-              <el-button plain class="ghost-btn" @click="reset">閲嶇疆绛涢€�</el-button>
+              <span class="inline-tip">当前满足筛选条件的真实结果：{{ tableRows.length }} 条</span>
+              <el-button plain class="ghost-btn" @click="reset">重置筛选</el-button>
             </div>
           </div>
         </div>
@@ -66,22 +66,22 @@
           <div class="card-header">
             <div>
               <div class="card-eyebrow">Weight</div>
-              <div class="card-title">缁煎悎鍒嗘潈閲�</div>
+              <div class="card-title">综合权重设置</div>
             </div>
-            <p class="card-desc">榛樿缁煎悎鍒嗗彧缁熻璐ㄩ噺鎸囨爣锛岃嚜瀹氫箟鎸囨爣涓庤€楁椂浠嶅彲鍗曠嫭鍙備笌鎺掑簭銆�</p>
+            <p class="card-desc">默认综合分只计算质量指标，自定义指标与耗时仍可单独查看与排序。</p>
           </div>
         </template>
-        <div class="weight-note">榛樿缁煎悎鍒嗗彧浣跨敤璐ㄩ噺鎸囨爣锛歅SNR / SSIM / NIQE銆傝€楁椂淇濈暀鍗曠嫭灞曠ず涓庡崟鐙帓搴忋€�</div>
+        <div class="weight-note">默认综合分只使用质量指标：PSNR / SSIM / NIQE。耗时保持单独展示与单指标排序。</div>
         <div class="weight-grid">
           <div class="weight-item"><span class="weight-label">PSNR</span><el-input-number v-model="wPSNR" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">SSIM</span><el-input-number v-model="wSSIM" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
           <div class="weight-item"><span class="weight-label">NIQE</span><el-input-number v-model="wNIQE" :min="0" :max="10" :step="0.1" size="small" controls-position="right" /></div>
         </div>
         <div class="weight-actions">
-          <el-button plain class="preset-btn" @click="presetQuality">璐ㄩ噺浼樺厛</el-button>
-          <el-button plain class="preset-btn" @click="presetBalanced">鍧囪　鏂规</el-button>
-          <el-button plain class="preset-btn" @click="presetPerception">鎰熺煡浼樺厛</el-button>
-          <span class="weight-sum">鏉冮噸鎬诲拰锛歿{ weightSum.toFixed(2) }}</span>
+          <el-button plain class="preset-btn" @click="presetQuality">质量优先</el-button>
+          <el-button plain class="preset-btn" @click="presetBalanced">均衡方案</el-button>
+          <el-button plain class="preset-btn" @click="presetPerception">感知优先</el-button>
+          <span class="weight-sum">权重总和：{{ weightSum.toFixed(2) }}</span>
         </div>
         <div class="weight-breakdown">
           <span v-for="item in weightBreakdown" :key="item.key" class="weight-chip">{{ item.label }} {{ item.percent }}%</span>
@@ -92,8 +92,8 @@
     <div class="results-layout">
       <div v-if="bestResultRow" class="recommend-card">
         <div class="recommend-top">
-          <div class="recommend-badge">褰撳墠鏈€浼�</div>
-          <div class="recommend-sort-tag">鎸?{{ selectedRankMetricLabel }} 鎺掑簭</div>
+          <div class="recommend-badge">当前最优</div>
+          <div class="recommend-sort-tag">按{{ selectedRankMetricLabel }} 排序</div>
         </div>
         <h3 class="rec-title">{{ bestResultRow.algorithmName }}</h3>
         <p class="rec-summary">{{ bestResultSummary }}</p>
@@ -104,9 +104,9 @@
           <div class="rec-metric"><span class="rec-metric-label">{{ selectedRankMetricLabel }}</span><strong>{{ formatSortableMetricValue(bestResultRow) }}</strong></div>
         </div>
         <div class="export-actions">
-          <el-button type="success" class="success-btn" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">瀵煎嚭缁撹 Markdown</el-button>
-          <el-button plain class="soft-btn" @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">瀵煎嚭瀵规瘮 Excel</el-button>
-          <el-button plain class="soft-btn" @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">瀵煎嚭瀵规瘮 CSV</el-button>
+          <el-button type="success" class="success-btn" @click="exportConclusionMd" :disabled="!store.user.isLoggedIn">导出结论 Markdown</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendXlsx" :disabled="!store.user.isLoggedIn">导出对比 Excel</el-button>
+          <el-button plain class="soft-btn" @click="exportRecommendCsv" :disabled="!store.user.isLoggedIn">导出对比 CSV</el-button>
         </div>
       </div>
 
@@ -115,7 +115,7 @@
           <div class="chart-header">
             <div>
               <div class="card-eyebrow">Chart</div>
-              <span class="chart-title">鎸囨爣鎺掕鍥撅紙Top {{ chartTopN }}锛�</span>
+              <span class="chart-title">指标排行榜（Top {{ chartTopN }}）</span>
             </div>
             <div class="chart-actions">
               <el-select v-model="chartTopN" size="small" class="topn-select">
@@ -123,7 +123,7 @@
                 <el-option :value="10" label="Top 10" />
                 <el-option :value="15" label="Top 15" />
               </el-select>
-              <el-button plain class="soft-btn" size="small" @click="exportChartPng" :disabled="!store.user.isLoggedIn">瀵煎嚭鍥捐〃</el-button>
+              <el-button plain class="soft-btn" size="small" @click="exportChartPng" :disabled="!store.user.isLoggedIn">导出图表</el-button>
             </div>
           </div>
         </template>
@@ -138,30 +138,30 @@
           <div class="table-header">
             <div>
               <div class="card-eyebrow">Details</div>
-              <span class="table-title">瀵规瘮鏄庣粏娓呭崟</span>
+              <span class="table-title">对比详细清单</span>
             </div>
             <div class="table-actions">
-              <span class="sort-hint">褰撳墠鎺掑簭锛歿{ selectedRankMetricLabel }}</span>
-              <el-button plain class="soft-btn" size="small" @click="exportXlsx" :disabled="!store.user.isLoggedIn">瀵煎嚭鍘熷鏁版嵁 Excel</el-button>
+              <span class="sort-hint">当前排序：{{ selectedRankMetricLabel }}</span>
+              <el-button plain class="soft-btn" size="small" @click="exportXlsx" :disabled="!store.user.isLoggedIn">导出原始数据 Excel</el-button>
             </div>
           </div>
         </template>
-        <div class="table-note">榛樿缁煎悎鍒嗗彧缁熻璐ㄩ噺鎸囨爣 PSNR / SSIM / NIQE锛涜€楁椂涓庤嚜瀹氫箟鎸囨爣鍙€氳繃涓婃柟鈥滄帓搴忔柟寮忊€濆垏鎹㈡煡鐪嬨€�</div>
+        <div class="table-note">默认综合分只计算质量指标 PSNR / SSIM / NIQE；耗时与自定义指标可通过上方“排序方式”切换查看。</div>
         <el-table :data="tableRows" stripe class="compare-table" height="500">
-          <el-table-column prop="algorithmName" label="绠楁硶鍚嶇О" min-width="160" fixed="left" />
+          <el-table-column prop="algorithmName" label="算法名称" min-width="160" fixed="left" />
           <el-table-column :label="selectedRankMetricLabel" width="120" align="center">
             <template #default="{ row }"><span class="table-score">{{ formatSortableMetricValue(row) }}</span></template>
           </el-table-column>
           <el-table-column prop="psnr" label="PSNR" width="90" align="center" />
           <el-table-column prop="ssim" label="SSIM" width="90" align="center" />
           <el-table-column prop="niqe" label="NIQE" width="90" align="center" />
-          <el-table-column prop="elapsed" label="鑰楁椂" width="90" align="center" />
-          <el-table-column label="鎺ㄨ崘鍒嗘瀽" min-width="260">
+          <el-table-column prop="elapsed" label="耗时" width="90" align="center" />
+          <el-table-column label="推荐分析" min-width="260">
             <template #default="{ row }"><span class="table-reason">{{ row.reason || '-' }}</span></template>
           </el-table-column>
-          <el-table-column prop="createdAt" label="杩愯鏃堕棿" width="160" />
+          <el-table-column prop="createdAt" label="运行时间" width="160" />
         </el-table>
-        <div v-if="tableRows.length === 0" class="empty-state"><el-empty description="鏆傛棤绗﹀悎鏉′欢鐨勫姣旂粨鏋�" /></div>
+        <div v-if="tableRows.length === 0" class="empty-state"><el-empty description="无符合条件的对比结果" /></div>
       </el-card>
     </div>
   </div>
@@ -196,7 +196,7 @@ const availableRankMetrics = computed(() => {
     { value: "psnr", label: "PSNR", direction: "higher_better" },
     { value: "ssim", label: "SSIM", direction: "higher_better" },
     { value: "niqe", label: "NIQE", direction: "lower_better" },
-    { value: "time", label: "鑰楁椂", direction: "lower_better" },
+    { value: "time", label: "耗时", direction: "lower_better" },
   ];
   const seen = new Set(base.map((item) => item.value));
   for (const item of store.metricsCatalog || []) {
@@ -209,8 +209,17 @@ const availableRankMetrics = computed(() => {
 });
 const selectedRankMetricMeta = computed(() => availableRankMetrics.value.find((item) => item.value === chartMetric.value) || availableRankMetrics.value[0]);
 const selectedRankMetricLabel = computed(() => selectedRankMetricMeta.value?.label || "默认综合分");
-const selectedTaskSummary = computed(() => task.value || "鍏ㄩ儴浠诲姟");
+const selectedTaskSummary = computed(() => task.value || "全部任务");
 const selectedDatasetSummary = computed(() => datasetId.value ? datasetMap.value.get(datasetId.value)?.name || datasetId.value : "全部数据集");
+const weightSum = computed(() => Number(wPSNR.value) + Number(wSSIM.value) + Number(wNIQE.value));
+const weightBreakdown = computed(() => {
+  const sum = weightSum.value || 1;
+  return [
+    { key: "psnr", label: "PSNR", percent: Math.round((Number(wPSNR.value) / sum) * 100) },
+    { key: "ssim", label: "SSIM", percent: Math.round((Number(wSSIM.value) / sum) * 100) },
+    { key: "niqe", label: "NIQE", percent: Math.round((Number(wNIQE.value) / sum) * 100) },
+  ];
+});
 function loadCache() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
@@ -259,7 +268,7 @@ function resetAllConfig() {
 function presetQuality() { wPSNR.value = 4.0; wSSIM.value = 3.8; wNIQE.value = 1.2; }
 function presetBalanced() { wPSNR.value = 3.5; wSSIM.value = 3.5; wNIQE.value = 2.0; }
 function presetPerception() { wPSNR.value = 2.8; wSSIM.value = 2.8; wNIQE.value = 4.2; }
-function refreshAll() { return Promise.allSettled([store.fetchRuns(), store.fetchAlgorithms(), store.fetchDatasets(), store.fetchMetricsCatalog()]); }
+function refreshAll() { return Promise.allSettled([store.fetchRuns(), store.fetchAlgorithms(), store.fetchDatasets(), store.fetchMetrics()]); }
 
 function mapTaskLabelToType(taskLabel) {
   const entry = Object.entries(TASK_LABEL_BY_TYPE).find(([, label]) => label === taskLabel);
@@ -414,11 +423,11 @@ const recommendText = computed(() => {
   const currentValue = getSortMetricValue(top, chartMetric.value);
   if (!Number.isFinite(currentValue)) return "";
   return [
-    `鎺ㄨ崘绠楁硶锛?{top.algorithmName}`,
-    `褰撳墠鎺掑簭锛?{selectedRankMetricLabel.value}=${formatSortMetricValue(currentValue, chartMetric.value)}`,
-    `鎺ㄨ崘鐞嗙敱锛?{top.reason || '-'}`,
-    `缁撹鍙ｅ緞锛?{compareAuthenticityLabel(top)}`,
-    `鎸囨爣鎽樿锛歅SNR=${top.psnr}锛孲SIM=${top.ssim}锛孨IQE=${top.niqe}锛岃€楁椂=${top.elapsed || '-'}`,
+    `推荐算法：${top.algorithmName}`,
+    `当前排序：${selectedRankMetricLabel.value}=${formatSortMetricValue(currentValue, chartMetric.value)}`,
+    `推荐理由：${top.reason || '-'}`,
+    `结论口径：${compareAuthenticityLabel(top)}`,
+    `指标摘要：PSNR=${top.psnr}，SSIM=${top.ssim}，NIQE=${top.niqe}，耗时=${top.elapsed || '-'}`,
   ].join(" ");
 });
 const chartItems = computed(() => {
@@ -497,7 +506,7 @@ function drawChart() {
   if (!items.length) {
     ctx.fillStyle = "#94a3b8";
     ctx.textAlign = "center";
-    ctx.fillText("鏆傛棤鍥捐〃鏁版嵁", cssW / 2, cssH / 2);
+    ctx.fillText("无图表数据", cssW / 2, cssH / 2);
     chartHits = [];
     return;
   }
@@ -588,10 +597,10 @@ function exportXlsx() { exportRecommendXlsx(); }
 
 function exportConclusionMd() {
   const lines = [
-    "# 骞冲彴绠楁硶瀵规瘮缁撹",
+    "# 平台算法对比结论",
     "",
     `- 排序方式：${selectedRankMetricLabel.value}`,
-    `- 榛樿缁煎悎鍒嗗彛寰勶細PSNR=${wPSNR.value}锛孲SIM=${wSSIM.value}锛孨IQE=${wNIQE.value}锛堣€楁椂鍗曠嫭灞曠ず锛屼笉璁″叆榛樿缁煎悎鍒嗭級`,
+    `- 默认综合分口径：PSNR=${wPSNR.value}，SSIM=${wSSIM.value}，NIQE=${wNIQE.value}（耗时单独展示，不纳入默认综合分）`,
     "",
   ];
   if (bestResultRow.value) {
@@ -600,12 +609,12 @@ function exportConclusionMd() {
     lines.push("");
   }
   if (recommendText.value) {
-    lines.push("## 鎺ㄨ崘璇存槑");
+    lines.push("## 推荐说明");
     lines.push(recommendText.value);
     lines.push("");
   }
   for (const row of tableRows.value) {
-    lines.push(`- ${row.algorithmName}锛?{selectedRankMetricLabel.value}=${formatSortableMetricValue(row)}锛?{row.reason || '-'}`);
+    lines.push(`- ${row.algorithmName}：${selectedRankMetricLabel.value}=${formatSortableMetricValue(row)}，${row.reason || '-'}`);
   }
   downloadBlob(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8;" }), `compare_${Date.now()}.md`);
 }
@@ -636,19 +645,24 @@ onMounted(async () => {
 
 <style scoped>
 .page {
-  --page-bg: linear-gradient(180deg, #f4f8fd 0%, #eef4fb 100%);
-  --card-bg: rgba(255, 255, 255, 0.94);
-  --card-border: #dce7f5;
-  --card-shadow: 0 18px 40px rgba(148, 163, 184, 0.12);
-  --text-main: #17315a;
-  --text-soft: #60728f;
-  --text-muted: #7c8ca6;
-  --accent: #2563eb;
-  --accent-deep: #1747c7;
-  --accent-soft: #eff5ff;
-  padding: 28px;
+  --page-bg: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --card-bg: rgba(255, 255, 255, 0.96);
+  --card-border: #e2e8f0;
+  --card-shadow: 0 10px 25px rgba(148, 163, 184, 0.08);
+  --text-main: #1e293b;
+  --text-soft: #64748b;
+  --text-muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-deep: #2563eb;
+  --accent-soft: #dbeafe;
+  --success: #10b981;
+  --success-deep: #059669;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  padding: 24px;
   min-height: 100%;
   background: var(--page-bg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .hero-panel,
@@ -682,8 +696,8 @@ onMounted(async () => {
 }
 
 .hero-panel {
-  padding: 28px 30px;
-  margin-bottom: 18px;
+  padding: 32px 36px;
+  margin-bottom: 24px;
   border-radius: 28px;
   background:
     radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 34%),
@@ -691,6 +705,12 @@ onMounted(async () => {
     rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(220, 231, 245, 0.95);
   box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.hero-panel:hover {
+  box-shadow: 0 15px 30px rgba(148, 163, 184, 0.12);
+  transform: translateY(-2px);
 }
 
 .hero-copy {
@@ -699,7 +719,7 @@ onMounted(async () => {
 
 .hero-kicker,
 .card-eyebrow {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   color: var(--accent);
   font-size: 12px;
   font-weight: 700;
@@ -710,7 +730,7 @@ onMounted(async () => {
 .page-title {
   margin: 0;
   color: var(--text-main);
-  font-size: 36px;
+  font-size: 38px;
   line-height: 1.1;
   font-weight: 800;
 }
@@ -730,21 +750,27 @@ onMounted(async () => {
 
 .page-subtitle {
   max-width: 860px;
-  margin: 14px 0 0;
+  margin: 16px 0 0;
   font-size: 16px;
   line-height: 1.8;
 }
 
 .hero-meta {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
 .meta-pill {
-  min-width: 150px;
-  padding: 12px 16px;
+  min-width: 160px;
+  padding: 14px 18px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(219, 234, 254, 0.9);
+  transition: all 0.2s ease;
+}
+
+.meta-pill:hover {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .meta-label {
@@ -764,8 +790,8 @@ onMounted(async () => {
 .results-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  margin-bottom: 18px;
+  gap: 20px;
+  margin-bottom: 20px;
 }
 
 .config-card,
@@ -774,9 +800,19 @@ onMounted(async () => {
 .table-card-wrapper,
 .recommend-card {
   border: 1px solid var(--card-border);
-  border-radius: 24px;
+  border-radius: 16px;
   background: var(--card-bg);
   box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.config-card:hover,
+.tool-card:hover,
+.chart-card-wrapper:hover,
+.table-card-wrapper:hover,
+.recommend-card:hover {
+  box-shadow: 0 15px 30px rgba(148, 163, 184, 0.12);
+  transform: translateY(-2px);
 }
 
 .card-header {
@@ -805,7 +841,7 @@ onMounted(async () => {
 .card-desc {
   max-width: 280px;
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   text-align: right;
 }
@@ -821,7 +857,7 @@ onMounted(async () => {
 }
 
 .topn-select {
-  width: 108px;
+  width: 112px;
 }
 
 .filter-footer-actions {
@@ -831,12 +867,13 @@ onMounted(async () => {
 .weight-note,
 .table-note,
 .tool-placeholder {
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-radius: 16px;
   background: #f8fbff;
   border: 1px solid #e2ebf7;
   font-size: 14px;
   line-height: 1.7;
+  margin-bottom: 16px;
 }
 
 .tool-warning {
@@ -857,10 +894,16 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px;
+  padding: 18px;
   border-radius: 18px;
   background: #fbfdff;
   border: 1px solid #e2ebf7;
+  transition: all 0.2s ease;
+}
+
+.weight-item:hover {
+  background: #f8fbff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .weight-label {
@@ -878,6 +921,7 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-top: 16px;
 }
 
 .weight-chip {
@@ -889,11 +933,17 @@ onMounted(async () => {
   color: #315ea8;
   font-size: 12px;
   font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.weight-chip:hover {
+  background: #dbeafe;
+  transform: translateY(-1px);
 }
 
 .tool-card,
 .table-card-wrapper {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .tool-row {
@@ -934,18 +984,31 @@ onMounted(async () => {
   border-radius: 999px;
   background: #e8fff1;
   color: #15803d;
-  padding: 6px 12px;
+  padding: 8px 14px;
   font-size: 12px;
   font-weight: 800;
+  transition: all 0.2s ease;
+}
+
+.rank-badge:hover,
+.recommend-badge:hover {
+  background: #dcfce7;
+  transform: translateY(-1px);
 }
 
 .recommend-sort-tag {
-  padding: 6px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
   background: #edf4ff;
   color: #315ea8;
   font-size: 12px;
   font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.recommend-sort-tag:hover {
+  background: #dbeafe;
+  transform: translateY(-1px);
 }
 
 .fast-res-container,
@@ -959,11 +1022,11 @@ onMounted(async () => {
 }
 
 .recommend-card {
-  padding: 24px;
+  padding: 28px;
 }
 
 .rec-title {
-  margin: 14px 0 10px;
+  margin: 16px 0 12px;
   color: var(--text-main);
   font-size: 34px;
   line-height: 1.15;
@@ -971,7 +1034,7 @@ onMounted(async () => {
 }
 
 .rec-summary {
-  margin: 0 0 20px;
+  margin: 0 0 24px;
   color: #4b5d79;
   font-size: 15px;
   line-height: 1.8;
@@ -980,18 +1043,25 @@ onMounted(async () => {
 .rec-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .rec-metric {
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-radius: 18px;
   background: #f8fbff;
   border: 1px solid #e2ebf7;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.rec-metric:hover {
+  background: #edf4ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
 }
 
 .rec-metric-label {
@@ -1006,6 +1076,7 @@ onMounted(async () => {
 .table-score {
   color: var(--accent);
   font-weight: 800;
+  font-size: 18px;
 }
 
 .chart-container {
@@ -1013,12 +1084,15 @@ onMounted(async () => {
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
 }
 
 .main-canvas {
   width: 100%;
   max-width: 100%;
-  height: 320px;
+  height: 340px;
   display: block;
   contain: strict;
 }
@@ -1027,17 +1101,21 @@ onMounted(async () => {
   position: absolute;
   pointer-events: none;
   z-index: 2;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.92);
   color: #fff;
   font-size: 12px;
   transform: translateY(-100%);
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+  transition: all 0.2s ease;
 }
 
 .empty-state {
-  padding-top: 16px;
+  padding: 32px 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .soft-btn,
@@ -1047,10 +1125,13 @@ onMounted(async () => {
 .success-btn,
 .primary-btn,
 .accent-btn {
-  min-height: 40px;
-  border-radius: 999px;
-  font-weight: 700;
+  min-height: 44px;
+  border-radius: 8px;
+  font-weight: 600;
   box-shadow: none;
+  transition: all 0.2s ease;
+  padding: 0 18px;
+  font-size: 14px;
 }
 
 .soft-btn,
@@ -1058,45 +1139,94 @@ onMounted(async () => {
 .preset-btn {
   color: var(--text-main);
   background: rgba(255, 255, 255, 0.95);
-  border-color: #d8e3f4;
+  border-color: #e2e8f0;
+}
+
+.soft-btn:hover,
+.ghost-btn:hover,
+.preset-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .danger-soft-btn {
-  color: #c2410c;
-  background: #fff7ed;
-  border-color: #fed7aa;
+  color: var(--danger);
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.danger-soft-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .primary-btn {
+  color: white;
   border-color: var(--accent);
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+  background: var(--accent);
+}
+
+.primary-btn:hover {
+  background: var(--accent-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
 }
 
 .accent-btn {
-  color: #b45309;
-  border-color: #f5d3a5;
-  background: #fff5e8;
+  color: var(--warning);
+  border-color: #fcd34d;
+  background: #fef3c7;
+}
+
+.accent-btn:hover {
+  background: #fde68a;
+  border-color: #fbbf24;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .success-btn {
-  border-color: #22c55e;
-  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: white;
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.success-btn:hover {
+  background: var(--success-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
 }
 
 :deep(.el-card__header) {
-  padding: 20px 22px;
+  padding: 20px 24px;
   border-bottom: 1px solid #edf2f8;
 }
 
 :deep(.el-card__body) {
-  padding: 22px;
+  padding: 24px;
 }
 
 :deep(.el-select__wrapper) {
   min-height: 44px;
-  border-radius: 14px;
+  border-radius: 8px;
   box-shadow: none;
-  background: #fbfdff;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+:deep(.el-select__wrapper:hover) {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.el-select__wrapper.is-focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 :deep(.el-input-number) {
@@ -1104,21 +1234,62 @@ onMounted(async () => {
 }
 
 :deep(.el-input-number .el-input__wrapper) {
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: none;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+  min-height: 40px;
+}
+
+:deep(.el-input-number .el-input__wrapper:hover) {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.el-input-number .el-input__wrapper.is-focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 :deep(.el-table) {
-  --el-table-header-bg-color: #f8fbff;
-  --el-table-row-hover-bg-color: #f5f9ff;
-  --el-table-border-color: #e4ecf7;
-  border-radius: 16px;
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: #f1f5f9;
+  --el-table-border-color: #e2e8f0;
+  border-radius: 12px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+:deep(.el-table:hover) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 :deep(.el-table th.el-table__cell) {
   color: var(--text-main);
-  font-weight: 800;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+:deep(.el-table td.el-table__cell) {
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+:deep(.el-checkbox__label) {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+:deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: var(--accent);
+  border-color: var(--accent);
 }
 
 @media (max-width: 1200px) {
@@ -1142,7 +1313,7 @@ onMounted(async () => {
 
   .hero-panel,
   .recommend-card {
-    padding: 20px;
+    padding: 24px;
   }
 
   .page-title {
@@ -1159,6 +1330,8 @@ onMounted(async () => {
   .chart-actions,
   .export-actions {
     width: 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .control-box,
@@ -1175,6 +1348,15 @@ onMounted(async () => {
 
   :deep(.el-input-number) {
     width: 100%;
+  }
+
+  .hero-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .meta-pill {
+    min-width: auto;
   }
 }
 </style>

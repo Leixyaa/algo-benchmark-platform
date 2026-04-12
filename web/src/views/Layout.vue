@@ -86,14 +86,15 @@ async function handleLogout() {
 
 watch(
   () => store.user.isLoggedIn,
-  async () => {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+  async (loggedIn) => {
+    if (!loggedIn) return;
+    await store.warmSessionData();
   }
 );
 
 onMounted(async () => {
   try {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+    await store.warmSessionData();
   } catch {
     // ignore
   }
@@ -107,55 +108,78 @@ onMounted(async () => {
 }
 
 .sidebar {
-  border-right: 1px solid #dbe6ff;
+  border-right: 1px solid #e2e8f0;
   background: #ffffff;
-  box-shadow: none;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 18px 14px 14px;
+  gap: 12px;
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .brandIcon {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   color: #ffffff;
-  background: #2f6bff;
-  box-shadow: none;
-  font-weight: 700;
+  background: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  font-weight: 800;
+  font-size: 18px;
+  transition: all 0.2s ease;
+}
+
+.brandIcon:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.2);
 }
 
 .brandTitle {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1f2f57;
+  font-size: 18px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1.2;
 }
 
 .brandSub {
   font-size: 12px;
-  color: #6a7ca9;
+  color: #64748b;
+  line-height: 1.4;
 }
 
 .menu {
   border-right: none;
   background: transparent;
+  padding-top: 16px;
 }
 
 :deep(.el-menu-item) {
-  margin: 6px 10px;
-  border-radius: 10px;
+  margin: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  transition: all 0.2s ease;
+  padding: 12px 16px;
+}
+
+:deep(.el-menu-item:hover) {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
 }
 
 :deep(.el-menu-item.is-active) {
-  color: #2153d3;
+  color: #2563eb;
   font-weight: 700;
-  background: rgba(47, 107, 255, 0.1);
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
 }
 
 .mainWrap {
@@ -167,9 +191,11 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid #dce7ff;
+  padding: 0 32px;
+  border-bottom: 1px solid #e2e8f0;
   background: #ffffff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
 }
 
 .headerRight {
@@ -181,33 +207,40 @@ onMounted(async () => {
 .user-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 8px 12px;
   border-radius: 8px;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
 .user-info:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .username {
   font-size: 14px;
-  color: #1d3263;
-  font-weight: 500;
+  color: #1e293b;
+  font-weight: 600;
 }
 
 .topTitle {
-  font-size: 18px;
-  font-weight: 700;
-  color: #1d3263;
+  font-size: 20px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1.2;
 }
 
 .topSub {
-  margin-top: 3px;
-  font-size: 12px;
-  color: #7083ad;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
 }
 
 .main {
@@ -222,5 +255,48 @@ onMounted(async () => {
   border: none;
   background: transparent;
   box-shadow: none;
+}
+
+:deep(.el-button) {
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+:deep(.el-button:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-button--primary) {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+:deep(.el-button--primary:hover) {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+:deep(.el-button--plain) {
+  color: #1e293b;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+:deep(.el-button--plain:hover) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-avatar) {
+  border: 2px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.user-info:hover :deep(.el-avatar) {
+  border-color: #3b82f6;
 }
 </style>

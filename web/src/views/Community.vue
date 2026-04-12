@@ -51,6 +51,7 @@
     <div v-if="tab === 'algorithms'" class="section">
       <el-table :data="filteredAlgorithms" border stripe class="data-table">
         <el-table-column prop="name" label="算法名称" min-width="220" />
+        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="task" label="任务" width="140" />
         <el-table-column prop="impl" label="实现方式" width="120" />
         <el-table-column prop="version" label="版本" width="100" />
@@ -80,6 +81,7 @@
     <div v-else-if="tab === 'datasets'" class="section">
       <el-table :data="filteredDatasets" border stripe class="data-table">
         <el-table-column prop="name" label="数据集名称" min-width="220" />
+        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="type" label="类型" width="100" />
         <el-table-column prop="size" label="规模" width="140" />
         <el-table-column prop="uploaderId" label="上传者ID" width="140" />
@@ -108,6 +110,7 @@
     <div v-else class="section">
       <el-table :data="filteredMetrics" border stripe class="data-table">
         <el-table-column prop="displayName" label="指标名称" min-width="180" />
+        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="metricKey" label="标识" width="170" />
         <el-table-column label="方向" width="120">
           <template #default="{ row }">
@@ -493,6 +496,19 @@ function getErrorCode(error) {
   );
 }
 
+function isResourceGoneError(error, resourceType = "") {
+  const code = getErrorCode(error);
+  const text = String(error?.message || error || "");
+  if (text.includes("[404]")) return true;
+  if (resourceType === "algorithm") {
+    return code === "E_ALGORITHM_NOT_FOUND" || text.includes("algorithm_not_public");
+  }
+  if (resourceType === "dataset") {
+    return code === "E_DATASET_NOT_FOUND" || text.includes("dataset_not_public") || text.includes("empty_dataset_not_allowed");
+  }
+  return false;
+}
+
 function setCommentDeleting(commentId, loading) {
   const next = new Set(deletingCommentIds.value);
   if (loading) next.add(String(commentId));
@@ -573,9 +589,10 @@ async function loadComments() {
 }
 
 async function syncCommunityState() {
-  await Promise.all([store.fetchAlgorithms(), store.fetchDatasets()]);
-  await store.fetchMetrics();
-  await loadCommunity();
+  await Promise.all([
+    loadCommunity(),
+    store.warmSessionData({ includeNotices: false }),
+  ]);
   if (!detailVisible.value || !detailItem.value?.id) return;
   const sourceList =
     detailType.value === "algorithm"
@@ -596,7 +613,10 @@ async function syncCommunityState() {
 }
 
 async function handleWindowFocus() {
-  await syncCommunityState();
+  await Promise.allSettled([
+    loadCommunity(),
+    store.warmSessionData({ includeNotices: false }),
+  ]);
 }
 
 async function submitComment() {
@@ -718,12 +738,12 @@ async function downloadAlgorithm(row) {
     setLoading(downloadingAlgorithmIds, row.id, true);
     await algorithmsApi.downloadCommunityAlgorithm(row.id);
     locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
-    await store.fetchAlgorithms();
+    await store.fetchAlgorithms(500, { force: true });
     await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的算法库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("algorithm_already_downloaded")) {
-      await store.fetchAlgorithms();
+      await store.fetchAlgorithms(500, { force: true });
       await loadCommunity();
       if (findDownloadedAlgorithmCopy(row)) {
         locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
@@ -731,6 +751,11 @@ async function downloadAlgorithm(row) {
       } else {
         ElMessage({ type: "warning", message: "后端判定该算法已有副本，但当前账号下未找到对应记录，已自动刷新算法库" });
       }
+      return;
+    }
+    if (isResourceGoneError(e, "algorithm")) {
+      await loadCommunity();
+      ElMessage({ type: "warning", message: "该社区算法已下架或不可见，已从列表中同步移除" });
       return;
     }
     ElMessage({ type: "error", message: `下载算法失败：${e?.message || e}` });
@@ -757,6 +782,12 @@ async function downloadDataset(row) {
       await store.fetchDatasets();
       await loadCommunity();
       ElMessage({ type: "info", message: "该数据集已下载到你的数据集库中" });
+      return;
+    }
+    if (isResourceGoneError(e, "dataset")) {
+      await store.fetchDatasets();
+      await loadCommunity();
+      ElMessage({ type: "warning", message: "该社区数据集已下架或源文件失效，已从列表中同步移除" });
       return;
     }
     ElMessage({ type: "error", message: `下载数据集失败：${e?.message || e}` });

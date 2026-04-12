@@ -3,7 +3,7 @@
     <el-aside width="280px" class="sidebar">
       <div class="brand">
         <div class="brandIcon">V</div>
-        <div class="brandTitle">图像复原增强算法评测平台</div>
+        <div class="brandTitle">图像增强与复原算法评测平台</div>
       </div>
 
       <el-menu :default-active="active" router class="menu">
@@ -15,6 +15,15 @@
         <el-menu-item index="/new-run">发起评测</el-menu-item>
         <el-menu-item index="/runs">任务中心</el-menu-item>
         <el-menu-item index="/compare">结果对比</el-menu-item>
+        <el-menu-item index="/notices">
+          我的通知
+          <el-badge
+            v-if="store.user.isLoggedIn && unreadCount > 0"
+            :value="unreadCount"
+            :max="99"
+            class="menu-badge"
+          />
+        </el-menu-item>
         <el-menu-item v-if="store.user.role === 'admin'" index="/admin">管理后台</el-menu-item>
       </el-menu>
     </el-aside>
@@ -23,10 +32,20 @@
       <el-header class="topbar">
         <div class="headerLeft">
           <div class="topTitle">{{ title }}</div>
-          <div class="topSub">聚焦图像复原与增强任务，支持评测、对比与导出</div>
+          <div class="topSub">聚焦图像增强与复原任务，支持评测、对比、推荐与导出</div>
         </div>
 
         <div class="headerRight">
+          <el-button
+            v-if="store.user.isLoggedIn"
+            class="notice-button"
+            plain
+            @click="router.push('/notices')"
+          >
+            我的通知
+            <el-badge v-if="unreadCount > 0" :value="unreadCount" :max="99" class="header-badge" />
+          </el-button>
+
           <el-dropdown v-if="store.user.isLoggedIn">
             <span class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
@@ -38,9 +57,10 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+
           <div v-else class="guest-actions">
-            <el-button type="primary" size="small" @click="$router.push('/login')">登录</el-button>
-            <el-button size="small" plain @click="$router.push('/register')">注册</el-button>
+            <el-button type="primary" size="small" @click="router.push('/login')">登录</el-button>
+            <el-button size="small" plain @click="router.push('/register')">注册</el-button>
           </div>
         </div>
       </el-header>
@@ -64,8 +84,10 @@ import { useAppStore } from "../stores/app";
 const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
+const notifiedIds = new Set();
 
 const active = computed(() => route.path);
+const unreadCount = computed(() => (Array.isArray(store.notices) ? store.notices.length : 0));
 
 const title = computed(() => {
   const map = {
@@ -77,13 +99,22 @@ const title = computed(() => {
     "/new-run": "发起评测",
     "/runs": "任务中心",
     "/compare": "结果对比",
+    "/notices": "我的通知",
     "/admin": "管理后台",
   };
-  return map[route.path] ?? "图像复原增强算法评测平台";
+  return map[route.path] ?? "图像增强与复原算法评测平台";
 });
+
+function noticeType(kind) {
+  const value = String(kind || "").toLowerCase();
+  if (value === "warning") return "warning";
+  if (value === "success") return "success";
+  return "info";
+}
 
 async function handleLogout() {
   store.logout();
+  notifiedIds.clear();
   ElMessage.success("已退出登录");
   router.push("/login");
 }
@@ -98,15 +129,15 @@ async function syncShellData() {
   try {
     const notices = await store.fetchUnreadNotices();
     for (const notice of notices || []) {
+      const noticeId = String(notice?.notice_id || "");
+      if (!noticeId || notifiedIds.has(noticeId)) continue;
+      notifiedIds.add(noticeId);
       ElNotification({
         title: notice?.title || "系统通知",
         message: notice?.content || "",
-        type: notice?.kind === "warning" ? "warning" : "info",
+        type: noticeType(notice?.kind),
         duration: 5000,
       });
-      if (notice?.notice_id) {
-        await store.markNoticeRead(notice.notice_id);
-      }
     }
   } catch {
     // ignore
@@ -119,7 +150,8 @@ async function handleWindowFocus() {
 
 watch(
   () => store.user.isLoggedIn,
-  async () => {
+  async (loggedIn) => {
+    if (!loggedIn) notifiedIds.clear();
     await syncShellData();
   }
 );
@@ -183,6 +215,10 @@ onBeforeUnmount(() => {
   padding: 8px 10px 0;
 }
 
+.menu-badge {
+  margin-left: 10px;
+}
+
 .mainWrap {
   background: #f5f7fb;
 }
@@ -212,6 +248,22 @@ onBeforeUnmount(() => {
 .topSub {
   color: #7586aa;
   font-size: 13px;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notice-button {
+  position: relative;
+  border-color: #d6e3ff;
+  color: #35518c;
+}
+
+.header-badge {
+  margin-left: 10px;
 }
 
 .user-info {

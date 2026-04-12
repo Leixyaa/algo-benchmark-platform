@@ -181,10 +181,28 @@
           </template>
         </el-table-column>
         <el-table-column prop="reviewNote" label="审核说明" min-width="220" show-overflow-tooltip />
-        <el-table-column label="操作" width="210">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button
+                size="small"
+                plain
+                @click="downloadMetricCode(row)"
+                :disabled="!canDownloadMetricCode(row)"
+              >
+                下载代码
+              </el-button>
+              <el-button
+                v-if="canUnpublishMetric(row)"
+                size="small"
+                type="warning"
+                plain
+                @click="unpublishMetric(row)"
+              >
+                下架社区
+              </el-button>
+              <el-button
+                v-else
                 size="small"
                 type="primary"
                 plain
@@ -284,6 +302,35 @@ function canPublishMetric(row) {
   return true;
 }
 
+function canUnpublishMetric(row) {
+  if (!row || row.uploaderId === "system") return false;
+  if (row.sourceMetricId) return false;
+  if (String(row.uploaderId || "") !== String(store.user?.username || "")) return false;
+  return String(row.visibility || "").toLowerCase() === "public";
+}
+
+function canDownloadMetricCode(row) {
+  return Boolean(String(row?.codeText || "").trim());
+}
+
+function downloadMetricCode(row) {
+  const codeText = String(row?.codeText || "");
+  const fileName = String(row?.codeFilename || row?.metricKey || "metric_code.py").trim() || "metric_code.py";
+  if (!codeText) {
+    ElMessage.warning("当前没有可下载的代码内容");
+    return;
+  }
+  const blob = new Blob([codeText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function triggerCodeFileSelect() {
   codeFileInput.value?.click();
 }
@@ -377,11 +424,47 @@ async function publishMetric(row) {
     return;
   }
   try {
-    await store.publishMetricToCommunity(row.id);
+    const alreadyPublished = String(row?.visibility || "").toLowerCase() === "public";
+    const { value } = await ElMessageBox.prompt(
+      "请输入指标在社区中心展示的说明，便于区分同名指标。",
+      alreadyPublished ? "更新社区说明" : "发布到社区",
+      {
+        inputType: "textarea",
+        inputValue: String(row.description || ""),
+        inputPlaceholder: "例如：更关注纹理保真度，适合去噪任务单图排序。",
+        confirmButtonText: alreadyPublished ? "保存" : "发布",
+        cancelButtonText: "取消",
+      }
+    );
+    await store.publishMetricToCommunity(row.id, {
+      community_description: String(value || "").trim(),
+    });
     await store.fetchMetrics();
-    ElMessage.success("指标已发布到社区");
+    ElMessage.success(alreadyPublished ? "社区说明已更新" : "指标已发布到社区");
   } catch (e) {
+    if (e === "cancel" || e === "close") return;
     ElMessage.error(e?.message || "发布指标到社区失败");
+  }
+}
+
+async function unpublishMetric(row) {
+  if (!canUnpublishMetric(row)) {
+    ElMessage.warning("只有已发布到社区的自有指标可以下架");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将指标“${row.displayName}”从社区下架吗？本地指标记录会继续保留。`,
+      "下架社区指标",
+      { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
+    );
+    await store.unpublishMetricFromCommunity(row.id);
+    await store.fetchMetrics();
+    ElMessage.success("指标已从社区下架，本地记录已保留");
+  } catch (e) {
+    if (e !== "cancel" && e !== "close") {
+      ElMessage.error(e?.message || "下架社区指标失败");
+    }
   }
 }
 
@@ -400,7 +483,11 @@ function handleVisibilityChange() {
 }
 
 onMounted(async () => {
-  await refreshMetricsSilently();
+  if (store.metricsCatalog?.length) {
+    refreshMetricsSilently();
+  } else {
+    await refreshMetricsSilently();
+  }
   document.addEventListener("visibilitychange", handleVisibilityChange);
   metricsRefreshTimer = window.setInterval(refreshMetricsSilently, 10000);
 });

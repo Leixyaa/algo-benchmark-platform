@@ -12,6 +12,7 @@ class RunCreate(BaseModel):
     algorithm_id: str
     params: Dict[str, Any] = Field(default_factory=dict)
     strict_validate: bool = False
+    eval_mode: str = "preview"
 
 
 class RunOut(BaseModel):
@@ -251,6 +252,10 @@ class MetricReview(BaseModel):
     status: str
     review_note: str = ""
     runtime_ready: bool = False
+
+
+class MetricPublish(BaseModel):
+    community_description: str = ""
 
 
 class MetricOut(BaseModel):

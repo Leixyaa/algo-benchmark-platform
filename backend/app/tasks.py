@@ -53,6 +53,41 @@ def _simulate_metrics(seed: int) -> Dict[str, float]:
 
 
 BUILTIN_METRICS = ("PSNR", "SSIM", "NIQE")
+PREVIEW_SAMPLE_LIMIT = 5
+
+
+def _normalize_eval_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in {"preview", "full"} else "preview"
+
+
+def _sample_limit_for_run(run: dict[str, Any]) -> int | None:
+    params = run.get("params") if isinstance(run.get("params"), dict) else {}
+    mode = _normalize_eval_mode(params.get("eval_mode"))
+    return PREVIEW_SAMPLE_LIMIT if mode == "preview" else None
+
+
+def _ensure_run_diag_params(
+    run: dict[str, Any],
+    *,
+    eval_mode: str | None = None,
+    sample_limit: int | None = None,
+    pair_total: int | None = None,
+    real_algo: str | None = None,
+    input_dir: str | None = None,
+) -> None:
+    params = run.get("params") if isinstance(run.get("params"), dict) else {}
+    if eval_mode is not None:
+        params["eval_mode"] = eval_mode
+    if sample_limit is not None:
+        params["sample_limit"] = sample_limit
+    if pair_total is not None:
+        params["pair_total"] = pair_total
+    if real_algo:
+        params["real_algo"] = real_algo
+    if input_dir:
+        params["input_dir"] = input_dir
+    run["params"] = params
 
 
 def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict | None:
@@ -68,6 +103,30 @@ def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict | None:
         if item.get("is_active") is None:
             item["is_active"] = allow_use
     return item
+
+
+def _infer_user_package_role(algorithm: dict | None) -> str:
+    if not isinstance(algorithm, dict):
+        return ""
+    explicit = str(algorithm.get("package_role") or "").strip().lower()
+    if explicit:
+        return explicit
+    impl = str(algorithm.get("impl") or "").strip().lower()
+    if impl != "userpackage":
+        return ""
+    owner_id = str(algorithm.get("owner_id") or "system").strip() or "system"
+    visibility = str(algorithm.get("visibility") or "private").strip().lower()
+    source_algorithm_id = str(algorithm.get("source_algorithm_id") or "").strip()
+    source_submission_id = str(algorithm.get("source_submission_id") or "").strip()
+    if owner_id == "system":
+        return "platform"
+    if source_algorithm_id:
+        return "downloaded_community"
+    if visibility == "public" and source_submission_id:
+        return "community"
+    if source_submission_id:
+        return "owner_runtime"
+    return ""
 
 
 def _normalize_selected_metrics(params: dict[str, Any] | None) -> list[str]:
@@ -123,6 +182,18 @@ def _round_metric_value(metric_key: str, value: float) -> float:
     if key == "NIQE":
         return round(float(value), 3)
     return round(float(value), 6)
+
+
+def _read_image_bgr(path: Any) -> np.ndarray | None:
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except Exception:
+        data = np.array([], dtype=np.uint8)
+    if data.size > 0:
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if img is not None and img.size > 0:
+            return img
+    return cv2.imread(str(path), cv2.IMREAD_COLOR)
 
 
 def _compute_metric_sample(
@@ -380,8 +451,8 @@ def _compute_run_for_task_from_pairs(
     processed_count = 0
     for pair in pairs:
         check_cancel()
-        inp_u8 = cv2.imread(str(pair.input_path), cv2.IMREAD_COLOR)
-        gt_u8 = cv2.imread(str(pair.gt_path), cv2.IMREAD_COLOR)
+        inp_u8 = _read_image_bgr(pair.input_path)
+        gt_u8 = _read_image_bgr(pair.gt_path)
         if inp_u8 is None or gt_u8 is None:
             read_fail += 1
             continue
@@ -674,17 +745,18 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 or record_dataset.get("storage_path")
                 or ""
             ).strip() or None
-            # 获取数据集所有者
-            owner_id = run.get("owner_id", "system")
+            source_owner_id = owner_id
+            sample_limit = _sample_limit_for_run(run)
+            eval_mode = _normalize_eval_mode((run.get("params") or {}).get("eval_mode"))
             if is_video_task:
-                pairs = find_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5, storage_path=storage_path)
+                pairs = find_paired_videos(data_root=data_root, owner_id=source_owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=sample_limit, storage_path=storage_path)
             else:
-                pairs = find_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=5, storage_path=storage_path)
+                pairs = find_paired_images(data_root=data_root, owner_id=source_owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", limit=sample_limit, storage_path=storage_path)
             try:
                 if is_video_task:
-                    total_pairs = count_paired_videos(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
+                    total_pairs = count_paired_videos(data_root=data_root, owner_id=source_owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
                 else:
-                    total_pairs = count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
+                    total_pairs = count_paired_images(data_root=data_root, owner_id=source_owner_id, dataset_id=dataset_id, input_dirname=input_dirname, gt_dirname="gt", storage_path=storage_path)
             except Exception:
                 total_pairs = None
             record = run.get("record") if isinstance(run.get("record"), dict) else {}
@@ -694,9 +766,18 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     "input_dir": input_dirname,
                     "pair_used": len(pairs) if pairs else 0,
                     "pair_total": total_pairs,
+                    "eval_mode": eval_mode,
+                    "sample_limit": sample_limit,
                 }
             )
             run["record"] = record
+            _ensure_run_diag_params(
+                run,
+                eval_mode=eval_mode,
+                sample_limit=sample_limit,
+                pair_total=total_pairs,
+                input_dir=input_dirname,
+            )
             save_run(r, run_id, run)
 
             def pick_impl_name() -> str:
@@ -752,6 +833,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     return "VideoBicubic"
                 return "Baseline"
 
+            _ensure_run_diag_params(run, real_algo=pick_impl_name(), input_dir=input_dirname)
+            save_run(r, run_id, run)
+
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
                 nonlocal user_algorithm_runner
                 if is_user_package:
@@ -763,6 +847,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         )
                     algorithm_owner_id = str((alg or {}).get("owner_id") or "system").strip() or "system"
                     run_owner_id = str(run.get("owner_id") or "").strip()
+                    package_role = _infer_user_package_role(alg)
                     is_owner_package = algorithm_owner_id == run_owner_id
                     if algorithm_owner_id not in {"system", run_owner_id}:
                         raise RunFailed(
@@ -770,11 +855,14 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                             "forbidden_access",
                             {"algorithm_id": algorithm_id},
                         )
+                    can_use_runtime = is_owner_package or bool((alg or {}).get("allow_use"))
+                    if package_role == "downloaded_community" and algorithm_owner_id == run_owner_id:
+                        can_use_runtime = True
                     if (
                         not alg
                         or alg.get("is_active") is False
                         or not bool(alg.get("runtime_ready"))
-                        or (not is_owner_package and not bool(alg.get("allow_use")))
+                        or not can_use_runtime
                     ):
                         raise RunFailed(
                             err.E_ALGORITHM_RUNTIME,
@@ -785,6 +873,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                                 "is_active": (alg or {}).get("is_active", True),
                                 "allow_use": bool((alg or {}).get("allow_use")),
                                 "owner_package": is_owner_package,
+                                "package_role": package_role,
                             },
                         )
                     sample_name = getattr(pair, "name", None) or ""
@@ -996,6 +1085,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 run["error_detail"] = None
                 params = run.get("params") or {}
                 params.update(params_patch)
+                params["eval_mode"] = eval_mode
+                params["sample_limit"] = sample_limit
+                params["pair_total"] = total_pairs
                 params["real_algo"] = pick_impl_name()
                 params["input_dir"] = input_dirname
                 run["params"] = params
@@ -1003,6 +1095,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 record = run.get("record") if isinstance(run.get("record"), dict) else {}
                 record["data_mode"] = "paired_videos" if is_video_task else "paired_images"
                 record["pair_used"] = len(pairs)
+                record["pair_total"] = total_pairs
+                record["eval_mode"] = eval_mode
+                record["sample_limit"] = sample_limit
                 record["timing"] = {
                     "algo_elapsed_mean": params.get("algo_elapsed_mean"),
                     "algo_elapsed_sum": params.get("algo_elapsed_sum"),
@@ -1162,6 +1257,14 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["error_code"] = e.code
         run["error_detail"] = e.detail
         record = run.get("record") if isinstance(run.get("record"), dict) else {}
+        _ensure_run_diag_params(
+            run,
+            eval_mode=record.get("eval_mode"),
+            sample_limit=record.get("sample_limit"),
+            pair_total=record.get("pair_total"),
+            real_algo=run.get("params", {}).get("real_algo") if isinstance(run.get("params"), dict) else None,
+            input_dir=record.get("input_dir"),
+        )
         retry_info = record.get("retry") if isinstance(record.get("retry"), dict) else {}
         retry_info.update(
             {

@@ -1,4 +1,4 @@
-﻿// web/src/stores/app.js
+// web/src/stores/app.js
 // Pinia 鍏ㄥ眬 store锛堝墠绔鎺ュ悗绔級
 // - NewRun锛歅OST /runs 鍒涘缓 run
 // - Runs锛氳疆璇?GET /runs/{id}
@@ -55,13 +55,13 @@ function _scopedKey(username) {
 
 // ====================== 浠诲姟绫诲瀷缁熶竴鏄犲皠锛堝敮涓€鐪熺浉锛?======================
 export const TASK_LABEL_BY_TYPE = {
-  denoise: "鍘诲櫔",
+  denoise: "去噪",
   deblur: "去模糊",
-  dehaze: "鍘婚浘",
-  sr: "瓒呭垎杈ㄧ巼",
+  dehaze: "去雾",
+  sr: "超分辨率",
   lowlight: "低照度增强",
-  video_denoise: "瑙嗛鍘诲櫔",
-  video_sr: "瑙嗛瓒呭垎",
+  video_denoise: "视频去噪",
+  video_sr: "视频超分",
 };
 
 export const TASK_TYPE_BY_LABEL = Object.fromEntries(
@@ -504,6 +504,14 @@ export const useAppStore = defineStore("app", {
         metricsCatalog: loaded?.metricsCatalog || [],
         presets: loaded?.presets || [],
         runs: loaded?.runs || [],
+        _datasetsFetchedAt: 0,
+        _algorithmsFetchedAt: 0,
+        _metricsFetchedAt: 0,
+        _datasetsFetchPromise: null,
+        _algorithmsFetchPromise: null,
+        _metricsFetchPromise: null,
+        _sessionWarmAt: 0,
+        _sessionWarmPromise: null,
         // 鍏ㄥ眬鎺у埗
         loading: false,
       };
@@ -511,6 +519,55 @@ export const useAppStore = defineStore("app", {
 
   actions: {
     // --- 鐢ㄦ埛 Actions ---
+    async warmSessionData({ force = false, includeNotices = true } = {}) {
+      const now = Date.now();
+      const minIntervalMs = 3000;
+
+      if (!force && this._sessionWarmPromise) {
+        return this._sessionWarmPromise;
+      }
+
+      if (!force && this._sessionWarmAt && now - this._sessionWarmAt < minIntervalMs) {
+        return {
+          datasets: this.datasets,
+          algorithms: this.algorithms,
+          metrics: this.metricsCatalog,
+          notices: this.notices,
+        };
+      }
+
+      this._sessionWarmPromise = (async () => {
+        const [datasetsResult, algorithmsResult, metricsResult] = await Promise.allSettled([
+          this.fetchDatasets(),
+          this.fetchAlgorithms(),
+          this.fetchMetrics(),
+        ]);
+
+        let notices = this.notices;
+        if (includeNotices && this.user.isLoggedIn) {
+          try {
+            notices = await this.fetchUnreadNotices();
+          } catch {
+            notices = this.notices;
+          }
+        }
+
+        this._sessionWarmAt = Date.now();
+        return {
+          datasets: datasetsResult.status === "fulfilled" ? datasetsResult.value : this.datasets,
+          algorithms: algorithmsResult.status === "fulfilled" ? algorithmsResult.value : this.algorithms,
+          metrics: metricsResult.status === "fulfilled" ? metricsResult.value : this.metricsCatalog,
+          notices,
+        };
+      })();
+
+      try {
+        return await this._sessionWarmPromise;
+      } finally {
+        this._sessionWarmPromise = null;
+      }
+    },
+
     async login(username, password) {
       try {
         const res = await http.post("/login", { username, password });
@@ -520,6 +577,12 @@ export const useAppStore = defineStore("app", {
         this.metricsCatalog = [];
         this.presets = [];
         this.runs = [];
+        this._datasetsFetchedAt = 0;
+        this._algorithmsFetchedAt = 0;
+        this._metricsFetchedAt = 0;
+        this._datasetsFetchPromise = null;
+        this._algorithmsFetchPromise = null;
+        this._metricsFetchPromise = null;
         this.user.username = res.username;
         this.user.token = res.access_token;
         this.user.role = res.role || "user";
@@ -531,17 +594,14 @@ export const useAppStore = defineStore("app", {
         this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
-          await Promise.all([
-            this.fetchDatasets(),
-            this.fetchAlgorithms(),
-            this.fetchMetrics(),
-          ]);
-          await this.fetchUnreadNotices();
-          return true;
-        } catch (e) {
-          throw e;
-        }
-      },
+        Promise.resolve()
+          .then(() => this.warmSessionData({ force: true, includeNotices: true }))
+          .catch(() => {});
+        return true;
+      } catch (e) {
+        throw e;
+      }
+    },
     async register(username, password) {
       try {
         await http.post("/register", { username, password });
@@ -559,6 +619,12 @@ export const useAppStore = defineStore("app", {
         this.metricsCatalog = [];
         this.presets = [];
         this.runs = [];
+        this._datasetsFetchedAt = 0;
+        this._algorithmsFetchedAt = 0;
+        this._metricsFetchedAt = 0;
+        this._datasetsFetchPromise = null;
+        this._algorithmsFetchPromise = null;
+        this._metricsFetchPromise = null;
         this.user.username = res.username;
         this.user.token = res.access_token;
         this.user.role = res.role || "admin";
@@ -570,17 +636,14 @@ export const useAppStore = defineStore("app", {
         this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
-          await Promise.all([
-            this.fetchDatasets(),
-            this.fetchAlgorithms(),
-            this.fetchMetrics(),
-          ]);
-          await this.fetchUnreadNotices();
-          return true;
-        } catch (e) {
-          throw e;
-        }
-      },
+        Promise.resolve()
+          .then(() => this.warmSessionData({ force: true, includeNotices: true }))
+          .catch(() => {});
+        return true;
+      } catch (e) {
+        throw e;
+      }
+    },
     logout() {
       this.stopPollingAll();
       this.user.username = "";
@@ -588,6 +651,14 @@ export const useAppStore = defineStore("app", {
         this.user.role = "user";
         this.user.isLoggedIn = false;
         this.notices = [];
+        this._datasetsFetchedAt = 0;
+        this._algorithmsFetchedAt = 0;
+        this._metricsFetchedAt = 0;
+        this._datasetsFetchPromise = null;
+        this._algorithmsFetchPromise = null;
+        this._metricsFetchPromise = null;
+        this._sessionWarmAt = 0;
+        this._sessionWarmPromise = null;
         clearAuthSession();
         const loaded = loadState(GUEST_SCOPE) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
@@ -615,33 +686,84 @@ export const useAppStore = defineStore("app", {
 
     // ====================== Catalog锛氭暟鎹泦/绠楁硶锛堝悗绔寔涔呭寲锛?======================
     async fetchDatasets(limit = 200) {
-      const list = await datasetsApi.listDatasets({ limit });
-      const currentUsername = String(this.user?.username || "");
-      const mapped = (list ?? [])
-        .filter((x) => {
-          if (!currentUsername) return false;
-          return String(x?.owner_id || "") === currentUsername;
-        })
-        .map((x) => mapDatasetOut(x));
-      this.datasets = mapped;
-      saveState({ datasets: this.datasets });
-      return this.datasets;
+      const now = Date.now();
+      const cacheTtlMs = 5000;
+      if (this._datasetsFetchPromise) return this._datasetsFetchPromise;
+      if (this.datasets.length && this._datasetsFetchedAt && now - this._datasetsFetchedAt < cacheTtlMs) {
+        return this.datasets;
+      }
+      this._datasetsFetchPromise = (async () => {
+        const list = await datasetsApi.listDatasets({ limit });
+        const currentUsername = String(this.user?.username || "");
+        const mapped = (list ?? [])
+          .filter((x) => {
+            if (!currentUsername) return false;
+            return String(x?.owner_id || "") === currentUsername;
+          })
+          .map((x) => mapDatasetOut(x));
+        this.datasets = mapped;
+        this._datasetsFetchedAt = Date.now();
+        saveState({ datasets: this.datasets });
+        return this.datasets;
+      })();
+      try {
+        return await this._datasetsFetchPromise;
+      } finally {
+        this._datasetsFetchPromise = null;
+      }
     },
 
-    async fetchAlgorithms(limit = 500) {
-      const list = await algorithmsApi.listAlgorithms({ limit });
-      const mapped = (list ?? []).map((x) => mapAlgorithmOut(x));
-      this.algorithms = ensureBaselineAlgorithms(mapped);
-      saveState({ algorithms: this.algorithms });
-      return this.algorithms;
+    async fetchAlgorithms(limit = 500, options = {}) {
+      const now = Date.now();
+      const cacheTtlMs = 5000;
+      const force = Boolean(options?.force);
+      if (!force && this._algorithmsFetchPromise) return this._algorithmsFetchPromise;
+      if (!force && this.algorithms.length && this._algorithmsFetchedAt && now - this._algorithmsFetchedAt < cacheTtlMs) {
+        return this.algorithms;
+      }
+      this._algorithmsFetchPromise = (async () => {
+        const list = await algorithmsApi.listAlgorithms({ limit });
+        const mapped = (list ?? []).map((x) => mapAlgorithmOut(x));
+        this.algorithms = ensureBaselineAlgorithms(mapped);
+        this._algorithmsFetchedAt = Date.now();
+        saveState({ algorithms: this.algorithms });
+        return this.algorithms;
+      })();
+      try {
+        return await this._algorithmsFetchPromise;
+      } finally {
+        this._algorithmsFetchPromise = null;
+      }
     },
 
     async fetchMetrics(limit = 500, query = {}) {
-      const list = await metricsApi.listMetrics({ limit, ...query });
-      const mapped = (list ?? []).map((x) => mapMetricOut(x));
-      this.metricsCatalog = mapped;
-      saveState({ metricsCatalog: this.metricsCatalog });
-      return this.metricsCatalog;
+      const hasQuery = query && Object.keys(query).length > 0;
+      const now = Date.now();
+      const cacheTtlMs = 5000;
+      if (!hasQuery && this._metricsFetchPromise) return this._metricsFetchPromise;
+      if (!hasQuery && this.metricsCatalog.length && this._metricsFetchedAt && now - this._metricsFetchedAt < cacheTtlMs) {
+        return this.metricsCatalog;
+      }
+      const runFetch = async () => {
+        const list = await metricsApi.listMetrics({ limit, ...query });
+        const mapped = (list ?? []).map((x) => mapMetricOut(x));
+        if (!hasQuery) {
+          this.metricsCatalog = mapped;
+          this._metricsFetchedAt = Date.now();
+          saveState({ metricsCatalog: this.metricsCatalog });
+          return this.metricsCatalog;
+        }
+        return mapped;
+      };
+      if (hasQuery) {
+        return runFetch();
+      }
+      this._metricsFetchPromise = runFetch();
+      try {
+        return await this._metricsFetchPromise;
+      } finally {
+        this._metricsFetchPromise = null;
+      }
     },
 
     async fetchPresets(limit = 200) {
@@ -874,8 +996,18 @@ export const useAppStore = defineStore("app", {
       saveState({ metricsCatalog: this.metricsCatalog });
     },
 
-    async publishMetricToCommunity(id) {
-      const out = await metricsApi.publishMetricToCommunity(id);
+    async publishMetricToCommunity(id, payload = {}) {
+      const out = await metricsApi.publishMetricToCommunity(id, payload);
+      const metric = mapMetricOut(out);
+      const idx = this.metricsCatalog.findIndex((item) => item.id === id);
+      if (idx >= 0) this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
+      else this.metricsCatalog.unshift(metric);
+      saveState({ metricsCatalog: this.metricsCatalog });
+      return metric;
+    },
+
+    async unpublishMetricFromCommunity(id) {
+      const out = await metricsApi.unpublishMetricFromCommunity(id);
       const metric = mapMetricOut(out);
       const idx = this.metricsCatalog.findIndex((item) => item.id === id);
       if (idx >= 0) this.metricsCatalog[idx] = { ...this.metricsCatalog[idx], ...metric };
@@ -916,6 +1048,8 @@ export const useAppStore = defineStore("app", {
           : {};
       const params = { ...userParams, metrics: payload.metrics ?? [] };
       const strict_validate = Boolean(payload?.strictValidate);
+      const eval_mode = String(payload?.evalMode || params.eval_mode || "preview").trim().toLowerCase() === "full" ? "full" : "preview";
+      params.eval_mode = eval_mode;
 
       const out = await runsApi.createRun({
         task_type,
@@ -923,6 +1057,7 @@ export const useAppStore = defineStore("app", {
         algorithm_id: payload.algorithmId,
         params,
         strict_validate,
+        eval_mode,
       });
 
       const run = this._mapRunOut(out);
@@ -1086,4 +1221,3 @@ export const useAppStore = defineStore("app", {
     },
   },
 });
-

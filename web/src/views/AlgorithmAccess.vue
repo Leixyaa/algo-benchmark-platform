@@ -144,10 +144,18 @@
                   size="small"
                   type="primary"
                   plain
-                  :disabled="Boolean(row.communityAlgorithmId)"
                   @click="publishToCommunity(row)"
                 >
-                  {{ row.communityAlgorithmId ? "已发布社区" : "发布到社区" }}
+                  {{ row.communityAlgorithmId ? "更新社区说明" : "发布到社区" }}
+                </el-button>
+                <el-button
+                  v-if="row.communityAlgorithmId"
+                  size="small"
+                  type="warning"
+                  plain
+                  @click="unpublishFromCommunity(row)"
+                >
+                  下架社区
                 </el-button>
                 <el-button
                   size="small"
@@ -353,12 +361,48 @@ function setSubmissionDeleting(id, loading) {
 
 async function publishToCommunity(row) {
   try {
-    const out = await algorithmSubmissionsApi.publishToCommunity(row.id, {});
+    const alreadyPublished = Boolean(row?.communityAlgorithmId);
+    const { value } = await ElMessageBox.prompt(
+      "请输入算法在社区中心展示的说明，便于区分同名算法。",
+      alreadyPublished ? "更新社区说明" : "发布到社区",
+      {
+        inputType: "textarea",
+        inputValue: String(row.description || ""),
+        inputPlaceholder: "例如：Retinex 去雾实验版，适合轻雾图像，参数偏保守。",
+        confirmButtonText: alreadyPublished ? "保存" : "发布",
+        cancelButtonText: "取消",
+      }
+    );
+    const out = await algorithmSubmissionsApi.publishToCommunity(row.id, {
+      community_description: String(value || "").trim(),
+    });
     submissions.value = submissions.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
     await store.fetchAlgorithms();
-    ElMessage.success("已发布到社区算法");
+    ElMessage.success(alreadyPublished ? "社区说明已更新" : "已发布到社区算法");
   } catch (e) {
+    if (e === "cancel" || e === "close") return;
     ElMessage.error(e?.message || "发布到社区失败");
+  }
+}
+
+async function unpublishFromCommunity(row) {
+  if (!row?.id || !row.communityAlgorithmId) {
+    ElMessage.warning("当前算法接入申请未发布到社区");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将算法“${row.name}”从社区下架吗？接入申请和你的用户算法会继续保留。`,
+      "下架社区算法",
+      { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
+    );
+    const out = await algorithmSubmissionsApi.unpublishFromCommunity(row.id);
+    submissions.value = submissions.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
+    await store.fetchAlgorithms();
+    ElMessage.success("算法已从社区下架，本地接入记录已保留");
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage.error(e?.message || "下架社区失败");
   }
 }
 

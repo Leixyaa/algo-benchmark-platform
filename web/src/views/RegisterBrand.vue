@@ -9,19 +9,32 @@
       <div class="header">
         <div class="logo">V</div>
         <h2>注册账号</h2>
-        <p>创建您的私有图像复原增强算法评测空间</p>
+        <p>创建您的私有图像增强与复原算法评测空间</p>
       </div>
 
-      <el-form :model="form" label-position="top" @keyup.enter="handleRegister" size="large">
+      <el-form :model="form" label-position="top" size="large" @keyup.enter="handleRegister">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入用户名" prefix-icon="User" clearable />
+          <el-input
+            v-model="form.username"
+            placeholder="请输入用户名"
+            prefix-icon="User"
+            clearable
+          />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            prefix-icon="Lock"
+            show-password
+          />
         </el-form-item>
 
         <div class="actions">
-          <el-button type="primary" :loading="loading" @click="handleRegister" class="submit-btn">注册并登录</el-button>
+          <el-button type="primary" :loading="loading" class="submit-btn" @click="handleRegister">
+            注册并登录
+          </el-button>
           <router-link to="/login" class="back-link">返回登录</router-link>
         </div>
       </el-form>
@@ -45,6 +58,15 @@ const form = reactive({
   password: "",
 });
 
+function getRegisterErrorMessage(error) {
+  const detail = error?.detail;
+  const raw = typeof detail === "string" ? detail : error?.message || String(error || "");
+  if (raw.includes("user_already_exists")) return "该用户名已注册，请更换用户名或直接登录";
+  if (raw.includes("admin_username_reserved")) return "该用户名为系统保留账号，请更换其他用户名";
+  if (raw.includes("username_required")) return "请输入用户名";
+  return raw || "注册失败";
+}
+
 async function handleRegister() {
   if (!form.username.trim() || !form.password.trim()) {
     return ElMessage.warning("请输入用户名和密码");
@@ -56,8 +78,8 @@ async function handleRegister() {
     await store.login(form.username, form.password);
     ElMessage.success("注册成功");
     router.push("/");
-  } catch (e) {
-    ElMessage.error(e?.detail || e?.message || "注册失败");
+  } catch (error) {
+    ElMessage.error(getRegisterErrorMessage(error));
   } finally {
     loading.value = false;
   }

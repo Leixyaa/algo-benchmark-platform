@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="page">
     <div class="header-section">
       <h2 class="title">&#31639;&#27861;&#24211;</h2>
@@ -42,7 +42,7 @@
               <template #default="{ row }">
                 <el-dropdown v-if="canManagePlatformAlgorithm(row)" trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -75,11 +75,13 @@
               <template #default="{ row }">
                 <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item command="use">{{ TEXT.use }}</el-dropdown-item>
+                      <el-dropdown-item command="community">{{ isSelfPublishedAlgorithm(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
+                      <el-dropdown-item v-if="isSelfPublishedAlgorithm(row)" command="unpublish-community">下架社区</el-dropdown-item>
                       <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
                       <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
                     </el-dropdown-menu>
@@ -116,7 +118,7 @@
               <template #default="{ row }">
                 <el-dropdown trigger="click" @command="(cmd) => handleAlgorithmAction(row, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    {{ TEXT.manage }}<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -265,6 +267,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
 import { algorithmsApi } from "../api/algorithms";
+import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
@@ -391,20 +394,39 @@ const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a
 function isUserRuntimeAlgorithm(row) {
   const role = getPackageRole(row);
   if (role === "owner_runtime") return true;
-  if (role === "community" || role === "downloaded_community") return false;
+  if (role === "downloaded_community") return false;
+  if (role === "community") return !String(row?.sourceSubmissionId || "").trim();
   return !hasAlgorithmCommunitySource(row);
 }
 function hasAlgorithmCommunitySource(row) {
   const role = getPackageRole(row);
-  if (role === "community" || role === "downloaded_community") return true;
+  if (role === "downloaded_community") return true;
   return Boolean(String(row?.sourceUploaderId || "").trim() || String(row?.sourceAlgorithmId || "").trim());
 }
 const filteredOwnedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => isUserRuntimeAlgorithm(a)));
-const filteredDownloadedAlgorithms = computed(() => filteredUserAlgorithms.value.filter((a) => hasAlgorithmCommunitySource(a)));
+const filteredDownloadedAlgorithms = computed(() =>
+  filteredUserAlgorithms.value.filter((a) => getPackageRole(a) === "downloaded_community")
+);
 
+function getSubmissionId(row) {
+  return String(row?.sourceSubmissionId || row?.raw?.source_submission_id || "").trim();
+}
+function findSubmissionCommunityAlgorithm(row) {
+  const submissionId = getSubmissionId(row);
+  if (!submissionId) return null;
+  const currentUser = String(store.user?.username || "").trim();
+  return (
+    (store.algorithms || []).find((item) => {
+      if (String(item?.uploaderId || "").trim() !== currentUser) return false;
+      if (getPackageRole(item) !== "community") return false;
+      return getSubmissionId(item) === submissionId;
+    }) || null
+  );
+}
 function isSelfPublishedAlgorithm(row) {
   if (!row) return false;
   if (String(row?.uploaderId || "") !== String(store.user?.username || "")) return false;
+  if (getSubmissionId(row)) return Boolean(findSubmissionCommunityAlgorithm(row));
   if (hasAlgorithmCommunitySource(row)) return false;
   return String(row?.visibility || "").toLowerCase() === "public";
 }
@@ -893,10 +915,14 @@ function _updatePresetOptions() {
 }
 
 onMounted(async () => {
-  try {
-    await store.fetchAlgorithms();
-  } catch {
-    // ignore
+  if (store.algorithms?.length) {
+    store.fetchAlgorithms().catch(() => {});
+  } else {
+    try {
+      await store.fetchAlgorithms();
+    } catch {
+      // ignore
+    }
   }
   _updatePresetOptions();
 });
@@ -1209,6 +1235,10 @@ async function handleAlgorithmAction(row, command) {
     await uploadAlgorithmToCommunity(row);
     return;
   }
+  if (command === "unpublish-community") {
+    await unpublishAlgorithmFromCommunity(row);
+    return;
+  }
   if (command === "export") {
     await exportAlgorithmToLocal(row);
     return;
@@ -1241,24 +1271,61 @@ async function handlePlatformAlgorithmAction(row, command) {
   }
 }
 
+async function unpublishAlgorithmFromCommunity(row) {
+  const submissionId = getSubmissionId(row);
+  if (!row?.id || !isSelfPublishedAlgorithm(row)) {
+    ElMessage({ type: "warning", message: "当前算法未发布到社区" });
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将算法“${row.name}”从社区下架吗？本地用户算法会继续保留。`,
+      "下架社区算法",
+      { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
+    );
+    if (submissionId) {
+      await algorithmSubmissionsApi.unpublishFromCommunity(submissionId);
+    } else {
+      await store.updateAlgorithm(row.id, {
+        visibility: "private",
+        allowUse: false,
+        allowDownload: false,
+      });
+    }
+    await store.fetchAlgorithms();
+    ElMessage({ type: "success", message: "算法已从社区下架，本地记录已保留" });
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: "下架社区失败：" + String((e && e.message) || e) });
+  }
+}
+
 async function exportAlgorithmToLocal(row) {
   const algorithmId = String(row?.id || "");
   if (!algorithmId) return;
   if (exportingAlgorithms.value.has(algorithmId)) return;
+  let progressNotice = null;
   try {
     const nextExporting = new Set(exportingAlgorithms.value);
     nextExporting.add(algorithmId);
     exportingAlgorithms.value = nextExporting;
-    ElMessage({ type: "info", message: "正在准备下载算法，请稍候..." });
+    progressNotice = ElMessage({
+      type: "info",
+      message: "正在下载算法，请稍候...",
+      duration: 0,
+    });
     const fallbackFilename = row?.archiveFilename || row?.raw?.archive_filename || `${algorithmId}.json`;
     const result = await algorithmsApi.exportAlgorithm(algorithmId, fallbackFilename);
+    progressNotice?.close?.();
     ElMessage({
       type: "success",
-      message: result?.savedWithPicker ? "算法已保存到你选择的位置" : "算法已开始下载到本地",
+      message: result?.savedWithPicker ? "算法已保存到你选择的位置" : "算法下载完成，浏览器已开始保存",
     });
   } catch (e) {
+    progressNotice?.close?.();
     ElMessage({ type: "error", message: "下载到本地失败：" + String((e && e.message) || e) });
   } finally {
+    progressNotice?.close?.();
     const nextExporting = new Set(exportingAlgorithms.value);
     nextExporting.delete(algorithmId);
     exportingAlgorithms.value = nextExporting;
@@ -1267,10 +1334,11 @@ async function exportAlgorithmToLocal(row) {
 
 async function uploadAlgorithmToCommunity(row) {
   if (!row?.id) return;
+  const submissionId = getSubmissionId(row);
   const alreadyPublished = isSelfPublishedAlgorithm(row);
   try {
     const { value } = await ElMessageBox.prompt(
-      "请输入算法在社区中心展示的描述。",
+      "请输入算法在社区中心展示的描述，便于区分同名算法。",
       alreadyPublished ? "更新社区信息" : "上传到社区",
       {
         inputType: "textarea",
@@ -1280,12 +1348,19 @@ async function uploadAlgorithmToCommunity(row) {
         cancelButtonText: "取消",
       }
     );
-    await store.updateAlgorithm(row.id, {
-      description: String(value || "").trim(),
-      visibility: "public",
-      allowUse: true,
-      allowDownload: true,
-    });
+    if (submissionId) {
+      await algorithmSubmissionsApi.publishToCommunity(submissionId, {
+        community_description: String(value || "").trim(),
+      });
+    } else {
+      await store.updateAlgorithm(row.id, {
+        description: String(value || "").trim(),
+        visibility: "public",
+        allowUse: true,
+        allowDownload: true,
+      });
+    }
+    await store.fetchAlgorithms();
     ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "算法已上传到社区" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
@@ -1313,17 +1388,20 @@ async function resetToBuiltins() {
 <style scoped>
 .page {
   padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .header-section {
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
 .title {
-  margin: 0 0 12px;
-  font-size: 24px;
+  margin: 0 0 16px;
+  font-size: 28px;
   font-weight: 700;
   color: #1f2f57;
+  line-height: 1.2;
 }
 
 .subtitle {
@@ -1331,51 +1409,64 @@ async function resetToBuiltins() {
   font-size: 14px;
   line-height: 1.6;
   max-width: 800px;
+  margin: 0;
 }
 
 .centered-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.centered-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
 .action-btn {
-  min-width: 132px;
-  height: 42px;
-  padding: 0 18px;
+  min-width: 140px;
+  height: 44px;
+  padding: 0 20px;
   border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .action-bar {
   background: #f8faff;
-  padding: 24px;
+  padding: 28px;
   border-radius: 16px;
   border: 1px solid #e6eeff;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .history-tip {
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  border-radius: 14px;
+  margin-bottom: 16px;
+  padding: 16px 20px;
+  border-radius: 12px;
   border: 1px solid #dbe7ff;
   background: #f7faff;
   color: #5d6c8c;
-  line-height: 1.7;
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .toolbar-left {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   flex: 1;
   flex-wrap: wrap;
 }
@@ -1384,33 +1475,36 @@ async function resetToBuiltins() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
-  padding-top: 20px;
+  padding-top: 24px;
   border-top: 1px dashed #dce7ff;
 }
 
 .filter-left {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
   flex: 1;
 }
 
 .reset-btn {
   margin-left: auto;
+  min-width: 100px;
 }
 
 .filter-box {
-  width: 160px;
+  width: 180px;
+  border-radius: 8px;
 }
 
 .filter-input {
-  width: 300px;
+  width: 320px;
+  border-radius: 8px;
 }
 
 .section {
-  margin-bottom: 40px;
+  margin-bottom: 48px;
 }
 
 .section-title {
@@ -1419,68 +1513,109 @@ async function resetToBuiltins() {
   gap: 8px;
   font-size: 18px;
   color: #1f2f57;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
   font-weight: 700;
 }
 
 .data-table {
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s ease;
+}
+
+.data-table:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 }
 
 .data-table :deep(.el-table__body-wrapper) {
   overflow-x: auto;
 }
 
+.data-table :deep(.el-table__header th) {
+  background-color: #f8faff;
+  font-weight: 600;
+  color: #1f2f57;
+  padding: 12px 16px;
+}
+
+.data-table :deep(.el-table__row) {
+  transition: background-color 0.2s ease;
+}
+
+.data-table :deep(.el-table__row:hover) {
+  background-color: #f8faff !important;
+}
+
 .readonly-tag {
   margin-left: 8px;
+  font-size: 12px;
 }
 
 .table-action-btn {
-  min-width: 84px;
+  min-width: 96px;
   justify-content: center;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .pagination-row {
-  margin-top: 20px;
+  margin-top: 24px;
   display: flex;
   justify-content: flex-end;
 }
 
+.pagination-row :deep(.el-pagination) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 鍙傛暟璇︽儏寮圭獥 */
 .param-desc {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+
+.param-desc :deep(.el-descriptions__label) {
+  font-weight: 600;
+  color: #1f2f57;
 }
 
 .param-section-title {
   font-size: 16px;
   font-weight: 700;
   color: #1f2f57;
-  margin: 20px 0 10px;
-  padding-left: 10px;
+  margin: 24px 0 12px;
+  padding-left: 12px;
   border-left: 4px solid #409eff;
 }
 
 .param-explain-list {
   background: #f5f7fa;
-  padding: 16px;
-  border-radius: 8px;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
 }
 
 .param-kv-list {
   background: #f8faff;
   border: 1px solid #dce7ff;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
 }
 
 .param-kv-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 4px;
+  gap: 12px;
+  padding: 12px 8px;
   border-bottom: 1px dashed #e6eeff;
+  transition: background-color 0.2s ease;
+}
+
+.param-kv-item:hover {
+  background-color: rgba(64, 158, 255, 0.05);
 }
 
 .param-kv-item:last-child {
@@ -1488,42 +1623,48 @@ async function resetToBuiltins() {
 }
 
 .param-kv-key {
-  min-width: 220px;
-  font-weight: 700;
+  min-width: 240px;
+  font-weight: 600;
   color: #1f2f57;
+  font-size: 14px;
 }
 
 .param-kv-type {
-  min-width: 56px;
+  min-width: 64px;
   font-size: 12px;
   color: #409eff;
   background: #ecf5ff;
   border-radius: 999px;
   text-align: center;
-  padding: 2px 8px;
+  padding: 4px 12px;
+  font-weight: 500;
 }
 
 .param-kv-val {
   color: #303133;
   word-break: break-all;
+  font-size: 14px;
+  flex: 1;
 }
 
 .explain-item {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
+  padding: 8px 0;
 }
 
 .explain-label {
-  font-weight: 700;
+  font-weight: 600;
   color: #1f2f57;
-  margin-right: 4px;
+  margin-right: 8px;
 }
 
 .explain-key {
   color: #6a7ca9;
   font-family: monospace;
-  margin-right: 8px;
+  margin-right: 12px;
+  font-size: 13px;
 }
 
 .explain-usage {
@@ -1533,78 +1674,117 @@ async function resetToBuiltins() {
 /* 鏂板/缂栬緫寮圭獥甯冨眬 */
 .algorithm-form-container {
   display: flex;
-  gap: 30px;
+  gap: 32px;
+  flex-wrap: wrap;
 }
 
 .form-left {
   flex: 1;
-  max-width: 400px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+.form-left :deep(.el-form-item) {
+  margin-bottom: 20px;
+}
+
+.form-left :deep(.el-form-item__label) {
+  font-weight: 500;
+  color: #1f2f57;
+  margin-bottom: 8px;
+}
+
+.form-left :deep(.el-select),
+.form-left :deep(.el-input) {
+  border-radius: 8px;
+  width: 100%;
 }
 
 .form-right {
   flex: 1.5;
+  min-width: 400px;
   display: flex;
   flex-direction: column;
   background: #f8faff;
-  padding: 20px;
+  padding: 24px;
   border-radius: 12px;
   border: 1px solid #e6eeff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .param-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 .param-title {
   font-weight: 700;
   color: #1f2f57;
+  font-size: 16px;
 }
 
 .param-actions {
-  margin-bottom: 15px;
+  margin-bottom: 20px;
+}
+
+.param-actions :deep(.el-button-group) {
+  gap: 8px;
+}
+
+.param-actions :deep(.el-button) {
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .param-editor {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .param-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.param-row :deep(.el-input),
+.param-row :deep(.el-select) {
+  border-radius: 6px;
 }
 
 .param-doc-panel {
   background: white;
-  padding: 15px;
-  border-radius: 8px;
+  padding: 20px;
+  border-radius: 12px;
   border: 1px solid #dce7ff;
+  flex: 1;
 }
 
 .doc-title {
   font-weight: 700;
   color: #1f2f57;
-  margin-bottom: 10px;
-  font-size: 13px;
+  margin-bottom: 12px;
+  font-size: 14px;
 }
 
 .doc-list {
-  max-height: 150px;
+  max-height: 200px;
   overflow-y: auto;
 }
 
 .doc-item {
-  margin-bottom: 6px;
-  font-size: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 6px 0;
 }
 
 .doc-label {
-  font-weight: 700;
+  font-weight: 600;
   color: #409eff;
-  margin-right: 8px;
+  margin-right: 12px;
 }
 
 .doc-usage {
@@ -1614,12 +1794,47 @@ async function resetToBuiltins() {
 .form-hint {
   font-size: 12px;
   color: #909399;
-  margin-top: 4px;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .page {
+    padding: 16px;
+  }
+  
+  .title {
+    font-size: 24px;
+  }
+  
+  .action-bar {
+    padding: 20px;
+  }
+  
+  .toolbar-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .filter-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .filter-box,
+  .filter-input {
+    width: 100%;
+  }
+  
+  .algorithm-form-container {
+    flex-direction: column;
+  }
+  
+  .form-left,
+  .form-right {
+    max-width: 100%;
+    min-width: 100%;
+  }
 }
 </style>
-
-
-
-
-
-

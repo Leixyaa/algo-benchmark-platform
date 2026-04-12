@@ -87,14 +87,15 @@ async function handleLogout() {
 
 watch(
   () => store.user.isLoggedIn,
-  async () => {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+  async (loggedIn) => {
+    if (!loggedIn) return;
+    await store.warmSessionData();
   }
 );
 
 onMounted(async () => {
   try {
-    await Promise.all([store.fetchDatasets(), store.fetchAlgorithms()]);
+    await store.warmSessionData();
   } catch {
     // ignore
   }

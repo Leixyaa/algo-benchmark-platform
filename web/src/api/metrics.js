@@ -13,8 +13,11 @@ export const metricsApi = {
   deleteMetric(metricId) {
     return request(`/metrics/${metricId}`, { method: "DELETE" });
   },
-  publishMetricToCommunity(metricId) {
-    return request(`/metrics/${metricId}/publish-community`, { method: "POST" });
+  publishMetricToCommunity(metricId, body = {}) {
+    return request(`/metrics/${metricId}/publish-community`, { method: "POST", body });
+  },
+  unpublishMetricFromCommunity(metricId) {
+    return request(`/metrics/${metricId}/unpublish-community`, { method: "POST" });
   },
   downloadCommunityMetric(metricId) {
     return request(`/community/metrics/${metricId}/download`, { method: "POST" });

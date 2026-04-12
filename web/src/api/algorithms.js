@@ -20,7 +20,7 @@ export const algorithmsApi = {
   async downloadCommunityAlgorithm(algorithmId) {
     return request(`/community/algorithms/${algorithmId}/download`, { method: "POST" });
   },
-  async exportAlgorithm(algorithmId, filename = "") {
-    return downloadBinaryFile(`/algorithms/${algorithmId}/export`, filename || `${algorithmId}.json`);
+  async exportAlgorithm(algorithmId, filename = "", options = {}) {
+    return downloadBinaryFile(`/algorithms/${algorithmId}/export`, filename || `${algorithmId}.json`, options);
   },
 };

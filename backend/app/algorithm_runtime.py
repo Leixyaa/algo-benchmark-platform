@@ -18,6 +18,18 @@ import numpy as np
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 
 
+def _read_image_bgr(path: Path) -> np.ndarray | None:
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except Exception:
+        data = np.array([], dtype=np.uint8)
+    if data.size > 0:
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if image is not None and image.size > 0:
+            return image
+    return cv2.imread(str(path), cv2.IMREAD_COLOR)
+
+
 class AlgorithmRuntimeError(Exception):
     def __init__(self, message: str, detail: dict[str, Any] | None = None):
         super().__init__(message)
@@ -118,7 +130,7 @@ class UserAlgorithmImageRunner:
         if resolved_output is None:
             detail["output_path"] = str(output_path)
             raise AlgorithmRuntimeError("algorithm_output_missing", detail)
-        pred = cv2.imread(str(resolved_output), cv2.IMREAD_COLOR)
+        pred = _read_image_bgr(resolved_output)
         detail["output_path"] = str(resolved_output)
         if pred is None or pred.size == 0:
             raise AlgorithmRuntimeError("algorithm_output_unreadable", detail)

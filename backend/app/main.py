@@ -50,6 +50,7 @@ from .schemas import (
     MetricCreate,
     MetricPatch,
     MetricReview,
+    MetricPublish,
     MetricOut,
     AlgorithmSubmissionCreate,
     AlgorithmSubmissionReview,
@@ -114,11 +115,17 @@ app = FastAPI(title="鍥惧儚澶嶅師澧炲己绠楁硶璇勬祴骞冲彴 API"
 
 _ADMIN_USERNAME = os.getenv("ABP_ADMIN_USERNAME", "admin").strip() or "admin"
 _ADMIN_PASSWORD = os.getenv("ABP_ADMIN_PASSWORD", "Admin@123456")
+RUN_EVAL_MODES = {"preview", "full"}
 
 
 def _normalize_user_role(user: Optional[dict]) -> str:
     role = str((user or {}).get("role") or "user").strip().lower()
     return "admin" if role == "admin" else "user"
+
+
+def _normalize_eval_mode(value: str | None) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in RUN_EVAL_MODES else "preview"
 
 
 def _ensure_admin_account(r) -> dict:
@@ -409,7 +416,20 @@ def _normalize_storage_path(storage_path: str | None) -> str | None:
 def _dataset_dir_from_record(dataset: dict) -> Path:
     storage_path = _normalize_storage_path((dataset or {}).get("storage_path"))
     if storage_path:
-        return Path(storage_path)
+        raw_path = Path(storage_path)
+        if raw_path.is_absolute():
+            return raw_path
+        repo_root = Path(__file__).resolve().parents[2]
+        backend_root = Path(__file__).resolve().parents[1]
+        candidates = [
+            repo_root / raw_path,
+            backend_root / raw_path,
+            _dataset_storage_root() / raw_path,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return (repo_root / raw_path).resolve(strict=False)
     owner_id = str((dataset or {}).get("owner_id") or "system")
     dataset_id = str((dataset or {}).get("dataset_id") or "")
     return _resolve_dataset_dir(owner_id, dataset_id)
@@ -449,9 +469,16 @@ def _make_unique_algorithm_name(r, base_name: str) -> str:
     return f"{base} #{idx}"
 
 
-def _algorithm_name_exists_for_owner(r, owner_id: str, name: str, exclude_id: str | None = None) -> bool:
+def _algorithm_name_exists_for_owner(
+    r,
+    owner_id: str,
+    name: str,
+    exclude_id: str | None = None,
+    ignore_submission_id: str | None = None,
+) -> bool:
     owner = str(owner_id or "").strip()
     wanted = _normalize_algorithm_name(name)
+    ignored_submission_id = str(ignore_submission_id or "").strip()
     if not owner or not wanted:
         return False
     for x in list_algorithms(r, limit=5000, owner_id=owner, include_public=True) or []:
@@ -460,19 +487,43 @@ def _algorithm_name_exists_for_owner(r, owner_id: str, name: str, exclude_id: st
             continue
         if str(x.get("owner_id") or "").strip() != owner:
             continue
+        if ignored_submission_id and str(x.get("source_submission_id") or "").strip() == ignored_submission_id:
+            continue
         if _normalize_algorithm_name(x.get("name") or "") == wanted:
             return True
     return False
 
 
-def _make_owner_unique_algorithm_name(r, owner_id: str, base_name: str, exclude_id: str | None = None) -> str:
+def _make_owner_unique_algorithm_name(
+    r,
+    owner_id: str,
+    base_name: str,
+    exclude_id: str | None = None,
+    ignore_submission_id: str | None = None,
+) -> str:
     base = str(base_name or "涓嬭浇绠楁硶").strip() or "涓嬭浇绠楁硶"
-    if not _algorithm_name_exists_for_owner(r, owner_id, base, exclude_id=exclude_id):
+    if not _algorithm_name_exists_for_owner(
+        r,
+        owner_id,
+        base,
+        exclude_id=exclude_id,
+        ignore_submission_id=ignore_submission_id,
+    ):
         return base
     idx = 2
-    while _algorithm_name_exists_for_owner(r, owner_id, f"{base} #{idx}", exclude_id=exclude_id):
+    while _algorithm_name_exists_for_owner(
+        r,
+        owner_id,
+        f"{base} #{idx}",
+        exclude_id=exclude_id,
+        ignore_submission_id=ignore_submission_id,
+    ):
         idx += 1
     return f"{base} #{idx}"
+
+
+def _algorithm_submission_display_name(submission: dict, fallback: str = "") -> str:
+    return str(submission.get("name") or fallback or "用户接入算法").strip() or "用户接入算法"
 
 
 def _repair_submission_community_algorithm_names(r, owner_id: str | None = None) -> None:
@@ -493,12 +544,7 @@ def _repair_submission_community_algorithm_names(r, owner_id: str | None = None)
             continue
         if not re.fullmatch(rf"{re.escape(expected_name)}\s+#\d+", current_name):
             continue
-        repaired_name = _make_owner_unique_algorithm_name(
-            r,
-            submission_owner,
-            expected_name,
-            exclude_id=community_algorithm_id,
-        )
+        repaired_name = _algorithm_submission_display_name(submission, expected_name)
         if repaired_name != current_name:
             algorithm["name"] = repaired_name
             save_algorithm(r, community_algorithm_id, algorithm)
@@ -554,7 +600,8 @@ def _pin_dataset_and_algorithm_owners(r) -> None:
     for data in list_all_datasets(r, limit=5000):
         if not isinstance(data, dict) or "dataset_id" not in data:
             continue
-        # 鍙湁褰撴病鏈夋墍鏈夎€呮椂锛屾墠璁剧疆涓虹郴缁熸墍鏈夎€?        if not data.get("owner_id"):
+        # 缺少 owner_id 的历史数据补为 system
+        if not data.get("owner_id"):
             data["owner_id"] = "system"
             save_dataset(r, str(data.get("dataset_id") or ""), data)
 
@@ -900,6 +947,20 @@ def _is_submission_community_algorithm(algorithm: dict | None, submission_id: st
     return str(algorithm.get("visibility") or "").strip().lower() == "public" and not str(algorithm.get("source_algorithm_id") or "").strip()
 
 
+def _is_userpackage_download_runtime_ready(algorithm: dict | None) -> bool:
+    if not isinstance(algorithm, dict):
+        return False
+    impl = str(algorithm.get("impl") or "").strip().lower()
+    if impl != "userpackage":
+        return False
+    task_type = str(algorithm.get("task_type") or "").strip().lower()
+    if task_type.startswith("video_"):
+        return False
+    archive_path = str(algorithm.get("archive_path") or "").strip()
+    archive_filename = str(algorithm.get("archive_filename") or "").strip()
+    return bool(archive_path or archive_filename)
+
+
 def _ensure_submission_owner_algorithm_synced(r, submission: dict) -> dict:
     cur = dict(submission or {})
     submission_id = str(cur.get("submission_id") or "").strip()
@@ -972,8 +1033,19 @@ def _algorithm_archive_response(archive_path: Path, filename: str):
     return StreamingResponse(
         open(archive_path, "rb"),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{quote(safe_name)}"; filename*=UTF-8\'\'{quote(safe_name)}'},
+        headers=_attachment_headers(safe_name),
     )
+
+
+def _attachment_headers(filename: str) -> dict[str, str]:
+    safe_name = Path(str(filename or "").strip() or "download.bin").name or "download.bin"
+    ascii_name = re.sub(r'[^A-Za-z0-9._-]+', "_", safe_name).strip("._") or "download"
+    suffix = Path(safe_name).suffix
+    if suffix and not ascii_name.endswith(suffix):
+        ascii_name = f"{ascii_name}{suffix}"
+    return {
+        "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_name)}'
+    }
 
 
 def _resolve_algorithm_archive_response(r, algorithm: dict):
@@ -1081,6 +1153,7 @@ def _upsert_algorithm_submission_owner_algorithm(r, submission: dict, runtime_re
                 owner_id,
                 str(submission.get("name") or existing.get("name") or existing_id).strip() or existing_id,
                 exclude_id=existing_id,
+                ignore_submission_id=submission_id,
             )
             existing["impl"] = "UserPackage"
             existing["version"] = str(submission.get("version") or existing.get("version") or "v1").strip() or "v1"
@@ -1105,7 +1178,12 @@ def _upsert_algorithm_submission_owner_algorithm(r, submission: dict, runtime_re
     data = {
         "algorithm_id": algorithm_id,
         "task": TASK_LABEL_BY_TYPE.get(task_type, ""),
-        "name": _make_owner_unique_algorithm_name(r, owner_id, str(submission.get("name") or submission_id).strip() or submission_id),
+        "name": _make_owner_unique_algorithm_name(
+            r,
+            owner_id,
+            str(submission.get("name") or submission_id).strip() or submission_id,
+            ignore_submission_id=submission_id,
+        ),
         "impl": "UserPackage",
         "version": str(submission.get("version") or "v1").strip() or "v1",
         "description": str(submission.get("description") or ""),
@@ -1147,12 +1225,7 @@ def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: st
         existing = load_algorithm(r, existing_id)
         if existing and _is_submission_community_algorithm(existing, submission_id, owner_id):
             existing["task"] = TASK_LABEL_BY_TYPE.get(str(submission.get("task_type") or "").strip().lower(), existing.get("task"))
-            existing["name"] = _make_owner_unique_algorithm_name(
-                r,
-                owner_id,
-                str(submission.get("name") or existing.get("name") or existing_id).strip() or existing_id,
-                exclude_id=existing_id,
-            )
+            existing["name"] = _algorithm_submission_display_name(submission, existing.get("name") or existing_id)
             existing["impl"] = "UserPackage"
             existing["version"] = str(submission.get("version") or existing.get("version") or "v1").strip() or "v1"
             existing["description"] = final_description
@@ -1173,7 +1246,7 @@ def _publish_algorithm_submission_to_community(r, submission: dict, owner_id: st
             return existing_id
 
     algorithm_id = _make_unique_algorithm_id(r, f"submission_{submission_id}", owner_id)
-    name = _make_owner_unique_algorithm_name(r, owner_id, str(submission.get("name") or submission_id).strip() or submission_id)
+    name = _algorithm_submission_display_name(submission, submission_id)
     task_type = str(submission.get("task_type") or "").strip().lower()
     data = {
         "algorithm_id": algorithm_id,
@@ -1249,7 +1322,8 @@ def _ensure_catalog_defaults(r):
     # 鎵ц鍒濆鍖栭€昏緫
     created = time.time()
     
-    # 1. 榛樿鏁版嵁闆?    demo_ds_id = "ds_demo"
+    # 1. 默认数据集
+    demo_ds_id = "ds_demo"
     demo_ds_dir = _dataset_storage_root() / "system" / demo_ds_id
     demo_type = "图像"
     demo_size = "0 张"
@@ -1273,7 +1347,8 @@ def _ensure_catalog_defaults(r):
     if not cur_ds:
         save_dataset(r, demo_ds_id, demo_ds)
     else:
-        # 淇涔辩爜鎴栫己澶卞瓧娈?        need_patch = False
+        # 修复乱码或缺失字段
+        need_patch = False
         for k in ("name", "type", "size"):
             v = str(cur_ds.get(k) or "")
             if not v or "?" in v or "\ufffd" in v:
@@ -1405,11 +1480,39 @@ def _normalize_dataset_import_layout(ds_dir: Path, overwrite: bool) -> None:
     shutil.rmtree(root, ignore_errors=True)
 
 
+def _dir_contains_files(root: Path) -> bool:
+    if not root.exists():
+        return False
+    for p in root.rglob("*"):
+        if p.is_file():
+            return True
+    return False
+
+
+def _import_dataset_zip_bytes_into_dir(zip_bytes: bytes, ds_dir: Path, overwrite: bool) -> None:
+    with tempfile.TemporaryDirectory(prefix="abp_ds_import_") as tmp_dir:
+        stage_dir = Path(tmp_dir) / "stage"
+        _safe_extract_zip_bytes(zip_bytes, stage_dir)
+        _normalize_dataset_import_layout(stage_dir, overwrite=True)
+        if _dir_contains_files(ds_dir) and not overwrite:
+            err.api_error(
+                409,
+                err.E_DATASET_IMPORT_REQUIRES_OVERWRITE,
+                "dataset_import_requires_overwrite",
+                hint="当前数据集目录已存在文件。若要重新导入并替换现有内容，请勾选“导入时覆盖原有目录内容”。",
+                dataset_dir=str(ds_dir),
+            )
+        if overwrite and ds_dir.exists():
+            shutil.rmtree(ds_dir, ignore_errors=True)
+        ds_dir.mkdir(parents=True, exist_ok=True)
+        _merge_tree(stage_dir, ds_dir, overwrite=True)
+
+
 def _validate_text_encoding(v: str, field: str) -> str:
     s = (v or "").strip()
     if not s:
         return s
-    if "\ufffd" in s or re.search(r"[?锛焆{3,}", s):
+    if "\ufffd" in s or re.search(r"[?锛焆]{3,}", s):
         err.api_error(
             400,
             err.E_TEXT_ENCODING_INVALID,
@@ -1467,7 +1570,8 @@ def _get_dataset_cache_key(dataset_id: str) -> str:
 
 
 def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tuple[str, str, dict]:
-    # 灏濊瘯浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
+    # 优先使用用户独立目录结构
+    user_dir = data_root / owner_id
     ds_dir = user_dir / dataset_id
     
     # 濡傛灉鐢ㄦ埛鐩綍涓嶅瓨鍦紝灏濊瘯浣跨敤鏃х殑鐩綍缁撴瀯锛堢洿鎺ュ湪data涓嬶級
@@ -1889,6 +1993,353 @@ def _delete_algorithm_record_with_related_state(r, algorithm: dict) -> None:
                 delete_preset(r, str(preset.get("preset_id") or ""))
 
 
+def _delete_metric_record_with_related_state(r, metric: dict) -> None:
+    metric_id = str((metric or {}).get("metric_id") or "").strip()
+    if not metric_id:
+        return
+    delete_metric(r, metric_id)
+
+
+def _remove_algorithm_download_copies(
+    r,
+    *,
+    source_algorithm_id: str,
+    source_owner_id: str,
+    notice_title: str = "",
+    notice_message: str = "",
+) -> list[str]:
+    source_algorithm_id = str(source_algorithm_id or "").strip()
+    source_owner_id = str(source_owner_id or "").strip()
+    if not source_algorithm_id or not source_owner_id:
+        return []
+    affected_users: list[str] = []
+    for item in list(_list_all_algorithm_records(r)):
+        item_owner = str(item.get("owner_id") or "").strip()
+        if item_owner in {"", "system", source_owner_id}:
+            continue
+        if str(item.get("source_algorithm_id") or "").strip() != source_algorithm_id:
+            continue
+        if str(item.get("source_owner_id") or "").strip() != source_owner_id:
+            continue
+        _delete_algorithm_record_with_related_state(r, item)
+        if item_owner:
+            affected_users.append(item_owner)
+            if notice_title and notice_message:
+                _create_notice(r, item_owner, notice_title, notice_message, kind="warning")
+    return affected_users
+
+
+def _remove_dataset_download_copies(
+    r,
+    *,
+    source_dataset_id: str,
+    source_owner_id: str,
+    notice_title: str = "",
+    notice_message: str = "",
+) -> list[str]:
+    source_dataset_id = str(source_dataset_id or "").strip()
+    source_owner_id = str(source_owner_id or "").strip()
+    if not source_dataset_id or not source_owner_id:
+        return []
+    affected_users: list[str] = []
+    for item in list(_list_all_dataset_records(r)):
+        item_owner = str(item.get("owner_id") or "").strip()
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        item_source_dataset_id = str(item.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "").strip()
+        item_source_owner_id = str(item.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "").strip()
+        if item_owner in {"", "system", source_owner_id}:
+            continue
+        if item_source_dataset_id != source_dataset_id or item_source_owner_id != source_owner_id:
+            continue
+        _delete_dataset_record_with_related_state(r, item, delete_disk=True)
+        if item_owner:
+            affected_users.append(item_owner)
+            if notice_title and notice_message:
+                _create_notice(r, item_owner, notice_title, notice_message, kind="warning")
+    return affected_users
+
+
+def _remove_metric_download_copies(
+    r,
+    *,
+    source_metric_id: str,
+    source_owner_id: str,
+    notice_title: str = "",
+    notice_message: str = "",
+) -> list[str]:
+    source_metric_id = str(source_metric_id or "").strip()
+    source_owner_id = str(source_owner_id or "").strip()
+    if not source_metric_id or not source_owner_id:
+        return []
+    affected_users: list[str] = []
+    for item in list(_list_all_metric_records(r)):
+        item_owner = str(item.get("owner_id") or "").strip()
+        if item_owner in {"", "system", source_owner_id}:
+            continue
+        if str(item.get("source_metric_id") or "").strip() != source_metric_id:
+            continue
+        if str(item.get("source_owner_id") or "").strip() != source_owner_id:
+            continue
+        _delete_metric_record_with_related_state(r, item)
+        if item_owner:
+            affected_users.append(item_owner)
+            if notice_title and notice_message:
+                _create_notice(r, item_owner, notice_title, notice_message, kind="warning")
+    return affected_users
+
+
+def _purge_submission_related_algorithms(r, submission: dict, *, keep_algorithm_ids: set[str] | None = None) -> list[str]:
+    submission_id = str((submission or {}).get("submission_id") or "").strip()
+    if not submission_id:
+        return []
+    keep = {str(x).strip() for x in (keep_algorithm_ids or set()) if str(x).strip()}
+    affected_users: list[str] = []
+    for item in list(_list_all_algorithm_records(r)):
+        algorithm_id = str(item.get("algorithm_id") or "").strip()
+        if algorithm_id in keep:
+            continue
+        if str(item.get("owner_id") or "").strip() == "system":
+            continue
+        if str(item.get("source_submission_id") or "").strip() != submission_id:
+            continue
+        item_owner = str(item.get("owner_id") or "").strip()
+        _delete_algorithm_record_with_related_state(r, item)
+        if item_owner:
+            affected_users.append(item_owner)
+    return affected_users
+
+
+def _reconcile_algorithm_records(r) -> None:
+    submissions = _list_all_algorithm_submissions(r)
+    algorithms = _list_all_algorithm_records(r)
+    system_platform_by_submission_id: dict[str, str] = {}
+    for item in algorithms:
+        if str(item.get("owner_id") or "").strip() != "system":
+            continue
+        submission_id = str(item.get("source_submission_id") or "").strip()
+        if not submission_id:
+            continue
+        system_platform_by_submission_id.setdefault(submission_id, str(item.get("algorithm_id") or "").strip())
+
+    for submission in submissions:
+        submission_id = str(submission.get("submission_id") or "").strip()
+        if not submission_id:
+            continue
+        desired_name = _algorithm_submission_display_name(submission, submission_id)
+        platform_algorithm_id = str(submission.get("platform_algorithm_id") or "").strip()
+        if not platform_algorithm_id:
+            platform_algorithm_id = system_platform_by_submission_id.get(submission_id, "")
+        platform_algorithm = load_algorithm(r, platform_algorithm_id) if platform_algorithm_id else None
+        if platform_algorithm and str(platform_algorithm.get("owner_id") or "").strip() == "system":
+            removed_users = _purge_submission_related_algorithms(r, submission, keep_algorithm_ids={platform_algorithm_id})
+            changed = False
+            if str(submission.get("platform_algorithm_id") or "").strip() != platform_algorithm_id:
+                submission["platform_algorithm_id"] = platform_algorithm_id
+                changed = True
+            if str(submission.get("owner_algorithm_id") or "").strip():
+                submission["owner_algorithm_id"] = None
+                changed = True
+            if str(submission.get("community_algorithm_id") or "").strip():
+                submission["community_algorithm_id"] = None
+                changed = True
+            if changed:
+                save_algorithm_submission(r, submission_id, submission)
+            source_name = desired_name or platform_algorithm_id
+            for user_id in sorted({x for x in removed_users if x and x != str(submission.get("owner_id") or "").strip()}):
+                _create_notice(
+                    r,
+                    user_id,
+                    "关联算法已切换为平台算法",
+                    f"你下载或持有的算法“{source_name}”已被平台收录，旧副本已清理，请直接使用平台算法。",
+                    kind="info",
+                )
+            continue
+
+        for item in list(_list_all_algorithm_records(r)):
+            if str(item.get("owner_id") or "").strip() == "system":
+                continue
+            if str(item.get("source_submission_id") or "").strip() != submission_id:
+                continue
+            if str(item.get("name") or "").strip() == desired_name:
+                continue
+            current_name = str(item.get("name") or "").strip()
+            if current_name == desired_name or re.fullmatch(rf"{re.escape(desired_name)}\s+#\d+", current_name):
+                item["name"] = desired_name
+                save_algorithm(r, str(item.get("algorithm_id") or "").strip(), item)
+
+    algorithms = _list_all_algorithm_records(r)
+    for item in algorithms:
+        if str(item.get("owner_id") or "").strip() != "system":
+            continue
+        source_algorithm_id = str(item.get("source_algorithm_id") or "").strip()
+        source_owner_id = str(item.get("source_owner_id") or "").strip()
+        if not source_algorithm_id or not source_owner_id or source_owner_id == "system":
+            continue
+        if str(item.get("source_submission_id") or "").strip():
+            continue
+        source = load_algorithm(r, source_algorithm_id)
+        if source and str(source.get("owner_id") or "").strip() == source_owner_id:
+            _delete_algorithm_record_with_related_state(r, source)
+        _remove_algorithm_download_copies(r, source_algorithm_id=source_algorithm_id, source_owner_id=source_owner_id)
+
+    for item in list(_list_all_algorithm_records(r)):
+        source_algorithm_id = str(item.get("source_algorithm_id") or "").strip()
+        source_owner_id = str(item.get("source_owner_id") or "").strip()
+        if not source_algorithm_id or not source_owner_id:
+            continue
+        source = load_algorithm(r, source_algorithm_id)
+        if not source or str(source.get("owner_id") or "").strip() != source_owner_id:
+            continue
+        desired_name = str(source.get("name") or "").strip()
+        current_name = str(item.get("name") or "").strip()
+        if not desired_name or current_name == desired_name:
+            changed = False
+        elif re.fullmatch(rf"{re.escape(desired_name)}\s+#\d+", current_name):
+            item["name"] = desired_name
+            changed = True
+        else:
+            changed = False
+        if _infer_user_package_role(item) == "downloaded_community":
+            expected_runtime_ready = _is_userpackage_download_runtime_ready(item)
+            if bool(item.get("runtime_ready")) != expected_runtime_ready:
+                item["runtime_ready"] = expected_runtime_ready
+                changed = True
+            if item.get("is_active") is False:
+                item["is_active"] = True
+                changed = True
+        if changed:
+            save_algorithm(r, str(item.get("algorithm_id") or "").strip(), item)
+
+    for item in list(_list_all_algorithm_records(r)):
+        if str(item.get("owner_id") or "").strip() == "system":
+            continue
+        source_algorithm_id = str(item.get("source_algorithm_id") or "").strip()
+        source_owner_id = str(item.get("source_owner_id") or "").strip()
+        if not source_algorithm_id or not source_owner_id:
+            continue
+        source = load_algorithm(r, source_algorithm_id)
+        if source_owner_id == "system":
+            invalid = not source or str(source.get("owner_id") or "").strip() != "system" or not _is_algorithm_active(source)
+        else:
+            invalid = (
+                not source
+                or str(source.get("owner_id") or "").strip() != source_owner_id
+                or str(source.get("visibility") or "private").strip().lower() != "public"
+                or not bool(source.get("allow_download"))
+            )
+        if invalid:
+            _delete_algorithm_record_with_related_state(r, item)
+
+
+def _reconcile_dataset_records(r) -> None:
+    for item in list(_list_all_dataset_records(r)):
+        if str(item.get("owner_id") or "").strip() == "system":
+            continue
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        source_dataset_id = str(item.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "").strip()
+        source_owner_id = str(item.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "").strip()
+        if not source_dataset_id or not source_owner_id:
+            continue
+        source = load_dataset(r, source_dataset_id)
+        invalid = (
+            not source
+            or str(source.get("owner_id") or "").strip() != source_owner_id
+            or str(source.get("visibility") or "private").strip().lower() != "public"
+            or not bool(source.get("allow_download"))
+            or not _dataset_has_files(_dataset_dir_from_record(source))
+        )
+        if invalid:
+            _delete_dataset_record_with_related_state(r, item, delete_disk=True)
+
+
+def _reconcile_metric_records(r) -> None:
+    for item in list(_list_all_metric_records(r)):
+        if str(item.get("owner_id") or "").strip() == "system":
+            continue
+        source_metric_id = str(item.get("source_metric_id") or "").strip()
+        source_owner_id = str(item.get("source_owner_id") or "").strip()
+        if not source_metric_id or not source_owner_id:
+            continue
+        source = load_metric(r, source_metric_id)
+        invalid = (
+            not source
+            or str(source.get("owner_id") or "").strip() != source_owner_id
+            or str(source.get("visibility") or "private").strip().lower() != "public"
+            or not bool(source.get("allow_download"))
+            or str(source.get("status") or "").strip().lower() != "approved"
+        )
+        if invalid:
+            _delete_metric_record_with_related_state(r, item)
+
+
+def _run_reconcile_job(r, name: str, fn, *, min_interval_s: float = 8.0, force: bool = False) -> None:
+    job_name = str(name or "").strip().lower()
+    if not job_name:
+        return
+    now = time.time()
+    key = f"reconcile_job:{job_name}"
+    if not force:
+        try:
+            last_raw = r.get(key)
+            last_ts = float(last_raw) if last_raw is not None else 0.0
+        except Exception:
+            last_ts = 0.0
+        if last_ts > 0 and (now - last_ts) < float(min_interval_s):
+            return
+    fn(r)
+    try:
+        r.set(key, str(now))
+    except Exception:
+        pass
+
+
+def _metric_key_available_for_owner(r, owner_id: str, metric_key: str) -> bool:
+    wanted = str(metric_key or "").strip().upper()
+    if not wanted:
+        return False
+    if wanted in {"PSNR", "SSIM", "NIQE"}:
+        return True
+    for item in _list_all_metric_records(r):
+        item_owner = str(item.get("owner_id") or "").strip() or "system"
+        if item_owner not in {"system", str(owner_id or "").strip()}:
+            continue
+        if str(item.get("metric_key") or "").strip().upper() != wanted:
+            continue
+        if str(item.get("status") or "").strip().lower() != "approved":
+            continue
+        if not bool(item.get("runtime_ready")):
+            continue
+        return True
+    return False
+
+
+def _cleanup_invalid_runs_for_owner(r, owner_id: str | None) -> None:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return
+    for run in list_runs(r, limit=5000, owner_id=owner) or []:
+        run_id = str(run.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        if str(run.get("owner_id") or "").strip() != owner:
+            continue
+        algorithm_id = str(run.get("algorithm_id") or "").strip()
+        dataset_id = str(run.get("dataset_id") or "").strip()
+        algorithm = load_algorithm(r, algorithm_id) if algorithm_id else None
+        dataset = load_dataset(r, dataset_id) if dataset_id else None
+        metrics = []
+        if isinstance(run.get("params"), dict) and isinstance(run["params"].get("metrics"), list):
+            metrics = [str(x).strip() for x in run["params"].get("metrics") if str(x).strip()]
+        invalid = not algorithm or not dataset
+        if not invalid:
+            for metric_key in metrics:
+                if not _metric_key_available_for_owner(r, owner, metric_key):
+                    invalid = True
+                    break
+        if invalid:
+            delete_run(r, run_id)
+
+
 class _StreamingZipBuffer:
     def __init__(self):
         self._chunks: list[bytes] = []
@@ -1959,6 +2410,16 @@ def _dataset_has_files(dataset_dir: Path) -> bool:
         if path.is_file():
             return True
     return False
+
+
+def _dataset_is_publicly_available(dataset: dict | None) -> bool:
+    if not isinstance(dataset, dict):
+        return False
+    if not bool(dataset.get("allow_download")):
+        return False
+    if str(dataset.get("visibility") or "private").strip().lower() != "public":
+        return False
+    return _dataset_has_files(_dataset_dir_from_record(dataset))
 
 
 def _list_all_dataset_records(r) -> list[dict]:
@@ -2039,7 +2500,8 @@ def _normalize_algorithm_runtime_state(algorithm: dict | None) -> dict:
             if not str(item.get("source_owner_id") or "").strip():
                 item["source_owner_id"] = owner_id
         elif role == "downloaded_community":
-            item["runtime_ready"] = False
+            item["allow_use"] = True
+            item["runtime_ready"] = _is_userpackage_download_runtime_ready(item)
             if item.get("is_active") is None:
                 item["is_active"] = True
             item["package_role"] = "downloaded_community"
@@ -2126,12 +2588,14 @@ def _assert_pinned_user(current_user: dict) -> None:
 def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _run_reconcile_job(r, "datasets", _reconcile_dataset_records)
     # 绠＄悊椤靛彧杩斿洖褰撳墠鐢ㄦ埛鑷繁鐨勬暟鎹泦锛涚ぞ鍖洪〉鍗曠嫭杩斿洖鍏紑璧勬簮
     owner_id = _username_of(current_user) or None
     include_public = str(scope or "manage").lower() == "community"
     if include_public:
         owner_id = None
-        return list_datasets(r, limit=limit, owner_id=owner_id, include_public=True)
+        items = list_datasets(r, limit=limit, owner_id=owner_id, include_public=True)
+        return [item for item in items if str(item.get("owner_id") or "") == "system" or _dataset_is_publicly_available(item)][:limit]
 
     if not owner_id:
         return []
@@ -2199,6 +2663,7 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch, current_user: dict = D
     
     _assert_resource_access(cur, current_user, allow_system=True)
         
+    was_public = str(cur.get("visibility", "private")).strip().lower() == "public"
     if payload.name is not None:
         cur["name"] = _validate_text_encoding(payload.name, "dataset.name")
     if payload.type is not None:
@@ -2217,6 +2682,15 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch, current_user: dict = D
     if not isinstance(cur.get("meta"), dict):
         cur["meta"] = {}
     save_dataset(r, dataset_id, cur)
+    if was_public and not is_public and str(cur.get("owner_id") or "").strip() != "system":
+        source_name = str(cur.get("name") or dataset_id).strip() or dataset_id
+        _remove_dataset_download_copies(
+            r,
+            source_dataset_id=dataset_id,
+            source_owner_id=str(cur.get("owner_id") or "").strip(),
+            notice_title="社区数据集已下架",
+            notice_message=f"你下载的社区数据集“{source_name}”已被发布者下架，副本已从你的数据集库中移除。",
+        )
     return DatasetOut(**cur)
 
 
@@ -2297,6 +2771,17 @@ def remove_dataset(dataset_id: str, delete_disk: bool = Query(False), current_us
     
     _assert_resource_access(cur, current_user, allow_system=True)
     dataset_dir = _dataset_dir_from_record(cur)
+    owner_id = str(cur.get("owner_id") or "").strip()
+    source_dataset_id = str(cur.get("source_dataset_id") or "").strip()
+    if owner_id and owner_id != "system" and not source_dataset_id:
+        source_name = str(cur.get("name") or dataset_id).strip() or dataset_id
+        _remove_dataset_download_copies(
+            r,
+            source_dataset_id=dataset_id,
+            source_owner_id=owner_id,
+            notice_title="社区数据集已删除",
+            notice_message=f"你下载的社区数据集“{source_name}”已被发布者删除，副本已从你的数据集库中移除。",
+        )
     deleted_disk = False
     delete_dataset(r, dataset_id)
     r.delete(_get_dataset_cache_key(dataset_id))
@@ -2330,7 +2815,7 @@ def export_dataset(dataset_id: str, current_user: dict = Depends(get_current_use
     return StreamingResponse(
         _stream_zipped_directory(dataset_dir),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=_attachment_headers(filename),
     )
 
 
@@ -2348,6 +2833,20 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
         err.api_error(403, err.E_HTTP, "dataset_not_public", dataset_id=dataset_id)
     if not bool(source.get("allow_download")) and source_owner != "system":
         err.api_error(403, err.E_HTTP, "dataset_download_not_allowed", dataset_id=dataset_id)
+    if not _dataset_has_files(_dataset_dir_from_record(source)):
+        if source_owner != "system" and visibility == "public":
+            source["visibility"] = "private"
+            source["allow_use"] = False
+            source["allow_download"] = False
+            save_dataset(r, dataset_id, source)
+            _remove_dataset_download_copies(
+                r,
+                source_dataset_id=dataset_id,
+                source_owner_id=source_owner,
+                notice_title="社区数据集已下架",
+                notice_message=f"你下载的社区数据集“{str(source.get('name') or dataset_id).strip() or dataset_id}”源文件已失效，副本已从你的数据集库中移除。",
+            )
+        err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
 
     target_owner = _username_of(current_user)
     if source_owner == target_owner:
@@ -2362,8 +2861,6 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
 
     target_dataset_id = _make_unique_dataset_id(r, dataset_id, target_owner)
     source_dir = _dataset_dir_from_record(source)
-    if not _dataset_has_files(source_dir):
-        err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
     target_dir = _dataset_storage_root() / target_owner / target_dataset_id
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     if target_dir.exists():
@@ -2372,6 +2869,16 @@ def download_dataset_to_user_library(dataset_id: str, current_user: dict = Depen
         shutil.copytree(source_dir, target_dir)
     else:
         target_dir.mkdir(parents=True, exist_ok=True)
+    if not _dataset_has_files(target_dir):
+        shutil.rmtree(target_dir, ignore_errors=True)
+        err.api_error(
+            500,
+            err.E_HTTP,
+            "dataset_download_copy_missing_files",
+            dataset_id=dataset_id,
+            source_dir=str(source_dir),
+            target_dir=str(target_dir),
+        )
 
     copied = dict(source)
     copied["dataset_id"] = target_dataset_id
@@ -2472,13 +2979,15 @@ def _get_dataset_fs_hash(owner_id: str, dataset_id: str) -> str:
     hasher = hashlib.md5()
     
     if ds_dir.exists():
-        # 閬嶅巻鐩綍锛岃绠楁枃浠惰矾寰勫拰淇敼鏃堕棿鐨勫搱甯屽€?        for root, dirs, files in os.walk(ds_dir):
+        # 遍历目录，计算文件路径和修改时间的哈希
+        for root, dirs, files in os.walk(ds_dir):
             for file in sorted(files):
                 file_path = os.path.join(root, file)
                 try:
                     # 鑾峰彇鏂囦欢淇敼鏃堕棿
                     mtime = os.path.getmtime(file_path)
-                    # 鏇存柊鍝堝笇鍊?                    hasher.update(f"{file_path}:{mtime}".encode('utf-8'))
+                    # 更新哈希值
+                    hasher.update(f"{file_path}:{mtime}".encode('utf-8'))
                 except:
                     pass
     
@@ -2597,11 +3106,14 @@ def scan_dataset(
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     _assert_resource_access(cur, current_user, allow_system=True)
     
-    # 鑾峰彇鏁版嵁闆嗙増鏈?    version_key = _get_dataset_version_key(dataset_id)
+    # 获取数据集版本
+    version_key = _get_dataset_version_key(dataset_id)
     current_version = r.get(version_key) or "0"
     
-    # 鑾峰彇鏁版嵁闆嗘墍鏈夎€?    owner_id = cur.get("owner_id", "system")
-    # 妫€鏌ユ枃浠剁郴缁熷彉鍖?    fs_hash_key = _get_dataset_fs_hash_key(dataset_id)
+    # 获取数据集所有者
+    owner_id = cur.get("owner_id", "system")
+    # 检查文件系统变化
+    fs_hash_key = _get_dataset_fs_hash_key(dataset_id)
     ds_dir = _dataset_dir_from_record(cur)
     current_fs_hash = _get_dataset_fs_hash_by_dir(ds_dir)
     cached_fs_hash = r.get(fs_hash_key)
@@ -2638,13 +3150,16 @@ def scan_dataset(
         data_root = Path(__file__).resolve().parents[1] / "data"
         # 纭繚鏁版嵁鐩綍瀛樺湪
         data_root.mkdir(parents=True, exist_ok=True)
-        # 鑾峰彇鏁版嵁闆嗘墍鏈夎€?        owner_id = cur.get("owner_id", "system")
-        # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?        user_dir = data_root / owner_id
+        # 获取数据集所有者
+        owner_id = cur.get("owner_id", "system")
+        # 使用用户独立目录结构
+        user_dir = data_root / owner_id
         user_dir.mkdir(parents=True, exist_ok=True)
         ds_dir.parent.mkdir(parents=True, exist_ok=True)
         t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
         
-        # 缂撳瓨缁撴灉锛屽寘鍚増鏈俊鎭?        import json
+        # 缓存结果，包含版本信息
+        import json
         cache_data = {
             "version": current_version,
             "type": t,
@@ -2698,14 +3213,13 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     except Exception:
         err.api_error(400, err.E_BAD_BASE64, "bad_base64")
 
-    # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
-    # 纭繚鏁版嵁鐩綍瀛樺湪
+    data_root = Path(__file__).resolve().parents[1] / "data"
+    # 使用用户独立目录结构
+    user_dir = data_root / owner_id
+    # 确保数据目录存在
     ds_dir = _dataset_dir_from_record(cur)
     ds_dir.parent.mkdir(parents=True, exist_ok=True)
-    if payload.overwrite and ds_dir.exists():
-        shutil.rmtree(ds_dir)
-    _safe_extract_zip_bytes(zip_bytes, ds_dir)
-    _normalize_dataset_import_layout(ds_dir, overwrite=bool(payload.overwrite))
+    _import_dataset_zip_bytes_into_dir(zip_bytes, ds_dir, overwrite=True)
 
     cur["storage_path"] = str(ds_dir)
     t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
@@ -2726,7 +3240,8 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     # 澧炲姞鏁版嵁闆嗙増鏈彿锛屼娇缂撳瓨澶辨晥
     _increment_dataset_version(r, dataset_id)
     
-    # 娓呴櫎缂撳瓨锛岀‘淇濅笅娆℃壂鎻忚幏鍙栨渶鏂版暟鎹?    cache_key = _get_dataset_cache_key(dataset_id)
+    # 清除缓存，确保下次扫描获取最新数据
+    cache_key = _get_dataset_cache_key(dataset_id)
     r.delete(cache_key)
     
     return DatasetOut(**cur)
@@ -2764,14 +3279,12 @@ def import_dataset_zip_file(
         err.api_error(400, err.E_BAD_BASE64, "bad_zip_file")
 
     data_root = Path(__file__).resolve().parents[1] / "data"
-    # 浣跨敤鐢ㄦ埛鐙湁鐨勭洰褰曠粨鏋?    user_dir = data_root / owner_id
+    # 使用用户独立目录结构
+    user_dir = data_root / owner_id
     # 纭繚鏁版嵁鐩綍瀛樺湪
     ds_dir = _dataset_dir_from_record(cur)
     ds_dir.parent.mkdir(parents=True, exist_ok=True)
-    if overwrite and ds_dir.exists():
-        shutil.rmtree(ds_dir)
-    _safe_extract_zip_bytes(zip_bytes, ds_dir)
-    _normalize_dataset_import_layout(ds_dir, overwrite=overwrite)
+    _import_dataset_zip_bytes_into_dir(zip_bytes, ds_dir, overwrite=True)
 
     cur["storage_path"] = str(ds_dir)
     t, size, meta = _scan_dataset_dir_on_disk(ds_dir)
@@ -2790,7 +3303,8 @@ def import_dataset_zip_file(
     # 澧炲姞鏁版嵁闆嗙増鏈彿锛屼娇缂撳瓨澶辨晥
     _increment_dataset_version(r, dataset_id)
     
-    # 娓呴櫎缂撳瓨锛岀‘淇濅笅娆℃壂鎻忚幏鍙栨渶鏂版暟鎹?    cache_key = _get_dataset_cache_key(dataset_id)
+    # 清除缓存，确保下次扫描获取最新数据
+    cache_key = _get_dataset_cache_key(dataset_id)
     r.delete(cache_key)
     
     return DatasetOut(**cur)
@@ -2801,6 +3315,7 @@ def import_dataset_zip_file(
 def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user: Optional[dict] = Depends(get_current_user_optional)):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _run_reconcile_job(r, "algorithms", _reconcile_algorithm_records)
     include_public = str(scope or "manage").lower() == "community"
     owner_id = None if include_public else (current_user["username"] if current_user else None)
     is_admin = _normalize_user_role(current_user) == "admin"
@@ -2903,6 +3418,7 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: di
 
     _assert_algorithm_manage_access(cur, current_user)
         
+    was_public = str(cur.get("visibility", "private")).strip().lower() == "public"
     if payload.task is not None:
         cur["task"] = _normalize_algorithm_task_label(payload.task)
     if payload.name is not None:
@@ -2924,6 +3440,20 @@ def patch_algorithm(algorithm_id: str, payload: AlgorithmPatch, current_user: di
     cur["allow_use"] = is_public
     cur["allow_download"] = is_public
     save_algorithm(r, algorithm_id, cur)
+    if (
+        was_public
+        and not is_public
+        and str(cur.get("owner_id") or "").strip() != "system"
+        and not str(cur.get("source_algorithm_id") or "").strip()
+    ):
+        source_name = str(cur.get("name") or algorithm_id).strip() or algorithm_id
+        _remove_algorithm_download_copies(
+            r,
+            source_algorithm_id=algorithm_id,
+            source_owner_id=str(cur.get("owner_id") or "").strip(),
+            notice_title="社区算法已下架",
+            notice_message=f"你下载的社区算法“{source_name}”已被发布者下架，副本已从你的算法库中移除。",
+        )
     return AlgorithmOut(**cur)
 
 
@@ -2976,6 +3506,14 @@ def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
         ):
             community_algorithm_id = str(submission.get("community_algorithm_id") or "").strip()
             if community_algorithm_id and community_algorithm_id != algorithm_id:
+                source_name = str(cur.get("name") or community_algorithm_id).strip() or community_algorithm_id
+                _remove_algorithm_download_copies(
+                    r,
+                    source_algorithm_id=community_algorithm_id,
+                    source_owner_id=owner_id,
+                    notice_title="社区算法已删除",
+                    notice_message=f"你下载的社区算法“{source_name}”已被发布者删除，副本已从你的算法库中移除。",
+                )
                 community_algorithm = load_algorithm(r, community_algorithm_id)
                 if community_algorithm and str(community_algorithm.get("owner_id") or "").strip() == owner_id:
                     _delete_algorithm_record_with_related_state(r, community_algorithm)
@@ -2997,6 +3535,16 @@ def remove_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
                     shutil.rmtree(_algorithm_submission_dir(owner_id, submission_id), ignore_errors=True)
                 except Exception:
                     pass
+
+    if owner_id != "system" and not submission_id and not str(cur.get("source_algorithm_id") or "").strip():
+        source_name = str(cur.get("name") or algorithm_id).strip() or algorithm_id
+        _remove_algorithm_download_copies(
+            r,
+            source_algorithm_id=algorithm_id,
+            source_owner_id=owner_id,
+            notice_title="社区算法已删除",
+            notice_message=f"你下载的社区算法“{source_name}”已被发布者删除，副本已从你的算法库中移除。",
+        )
 
     _delete_algorithm_record_with_related_state(r, cur)
     return {"ok": True, "algorithm_id": algorithm_id, "archived": False}
@@ -3036,7 +3584,7 @@ def export_algorithm(algorithm_id: str, current_user: dict = Depends(get_current
     return StreamingResponse(
         io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=_attachment_headers(filename),
     )
 
 
@@ -3109,7 +3657,7 @@ def download_algorithm_submission_archive(submission_id: str, current_user: dict
     return StreamingResponse(
         open(archive_path, "rb"),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=_attachment_headers(filename),
     )
 
 
@@ -3174,6 +3722,37 @@ def publish_algorithm_submission_to_community(
     )
     cur["community_algorithm_id"] = community_algorithm_id
     cur["community_published_at"] = time.time()
+    save_algorithm_submission(r, submission_id, cur)
+    return _algorithm_submission_to_out(cur)
+
+
+@app.post("/algorithm-submissions/{submission_id}/unpublish-community", response_model=AlgorithmSubmissionOut)
+def unpublish_algorithm_submission_from_community(submission_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    cur = load_algorithm_submission(r, submission_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_not_found", submission_id=submission_id)
+    owner_id = _username_of(current_user)
+    if str(cur.get("owner_id") or "") != owner_id:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    community_algorithm_id = str(cur.get("community_algorithm_id") or "").strip()
+    if not community_algorithm_id:
+        err.api_error(409, err.E_HTTP, "algorithm_submission_not_published", submission_id=submission_id)
+    source_name = str(cur.get("algorithm_name") or community_algorithm_id).strip() or community_algorithm_id
+    _remove_algorithm_download_copies(
+        r,
+        source_algorithm_id=community_algorithm_id,
+        source_owner_id=owner_id,
+        notice_title="社区算法已下架",
+        notice_message=f"你下载的社区算法“{source_name}”已被发布者下架，副本已从你的算法库中移除。",
+    )
+    community_algorithm = load_algorithm(r, community_algorithm_id)
+    if community_algorithm:
+        if not _is_submission_community_algorithm(community_algorithm, submission_id, owner_id):
+            err.api_error(409, err.E_HTTP, "algorithm_submission_community_mismatch", submission_id=submission_id)
+        _delete_algorithm_record_with_related_state(r, community_algorithm)
+    cur["community_algorithm_id"] = None
+    cur["community_published_at"] = None
     save_algorithm_submission(r, submission_id, cur)
     return _algorithm_submission_to_out(cur)
 
@@ -3258,7 +3837,10 @@ def admin_promote_algorithm_submission_to_platform(
     cur["platform_algorithm_id"] = _promote_algorithm_submission_to_platform(r, cur, runtime_ready=True)
     cur["promoted_by"] = _username_of(current_user)
     cur["promoted_at"] = time.time()
+    cur["owner_algorithm_id"] = None
+    cur["community_algorithm_id"] = None
     save_algorithm_submission(r, submission_id, cur)
+    _purge_submission_related_algorithms(r, cur, keep_algorithm_ids={str(cur.get("platform_algorithm_id") or "").strip()})
 
     owner_id = str(cur.get("owner_id") or "").strip()
     if owner_id:
@@ -3282,6 +3864,7 @@ def get_metrics(
 ):
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _run_reconcile_job(r, "metrics", _reconcile_metric_records)
     username = _username_of(current_user)
     scope_value = str(scope or "manage").strip().lower()
     status_value = str(status or "").strip().lower()
@@ -3363,6 +3946,7 @@ def patch_metric(metric_id: str, payload: MetricPatch, current_user: dict = Depe
     if not cur:
         err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
     _assert_metric_manage_access(cur, current_user)
+    was_public = str(cur.get("visibility") or "private").strip().lower() == "public"
     if payload.metric_key is not None:
         fallback_name = payload.display_name or payload.name or cur.get("display_name") or cur.get("name")
         cur["metric_key"] = _resolve_metric_key_for_patch(r, metric_id, payload.metric_key, fallback_name)
@@ -3396,6 +3980,20 @@ def patch_metric(metric_id: str, payload: MetricPatch, current_user: dict = Depe
         cur["allow_download"] = False
         cur["community_published_at"] = None
     save_metric(r, metric_id, cur)
+    if (
+        was_public
+        and str(cur.get("visibility") or "private").strip().lower() != "public"
+        and str(cur.get("owner_id") or "").strip() != "system"
+        and not str(cur.get("source_metric_id") or "").strip()
+    ):
+        source_name = str(cur.get("display_name") or cur.get("name") or metric_id).strip() or metric_id
+        _remove_metric_download_copies(
+            r,
+            source_metric_id=metric_id,
+            source_owner_id=str(cur.get("owner_id") or "").strip(),
+            notice_title="社区指标已下架",
+            notice_message=f"你下载的社区指标“{source_name}”已被发布者下架，副本已从你的指标库中移除。",
+        )
     return MetricOut(**cur)
 
 
@@ -3407,12 +4005,26 @@ def remove_metric(metric_id: str, current_user: dict = Depends(get_current_user)
     if not cur:
         err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
     _assert_metric_manage_access(cur, current_user)
+    owner_id = str(cur.get("owner_id") or "").strip()
+    if owner_id and owner_id != "system" and not str(cur.get("source_metric_id") or "").strip():
+        source_name = str(cur.get("display_name") or cur.get("name") or metric_id).strip() or metric_id
+        _remove_metric_download_copies(
+            r,
+            source_metric_id=metric_id,
+            source_owner_id=owner_id,
+            notice_title="社区指标已删除",
+            notice_message=f"你下载的社区指标“{source_name}”已被发布者删除，副本已从你的指标库中移除。",
+        )
     delete_metric(r, metric_id)
     return {"ok": True, "metric_id": metric_id}
 
 
 @app.post("/metrics/{metric_id}/publish-community", response_model=MetricOut)
-def publish_metric_to_community(metric_id: str, current_user: dict = Depends(get_current_user)):
+def publish_metric_to_community(
+    metric_id: str,
+    payload: MetricPublish | None = Body(None),
+    current_user: dict = Depends(get_current_user),
+):
     r = make_redis()
     _ensure_catalog_defaults(r)
     cur = load_metric(r, metric_id)
@@ -3426,11 +4038,46 @@ def publish_metric_to_community(metric_id: str, current_user: dict = Depends(get
     implementation_type = str(cur.get("implementation_type") or "").strip().lower()
     if implementation_type == "python" and not bool(cur.get("runtime_ready")):
         err.api_error(409, err.E_HTTP, "metric_not_runtime_ready", metric_id=metric_id)
+    community_description = _validate_text_encoding(
+        (payload.community_description if payload else "") or "",
+        "metric.community_description",
+    ).strip()
+    if community_description:
+        cur["description"] = community_description
     cur["visibility"] = "public"
     cur["allow_download"] = True
     cur["community_published_at"] = cur.get("community_published_at") or time.time()
     cur["download_count"] = int(cur.get("download_count") or 0)
     save_metric(r, metric_id, cur)
+    return MetricOut(**cur)
+
+
+@app.post("/metrics/{metric_id}/unpublish-community", response_model=MetricOut)
+def unpublish_metric_from_community(metric_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    _ensure_catalog_defaults(r)
+    cur = load_metric(r, metric_id)
+    if not cur:
+        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
+    owner_id = _username_of(current_user)
+    if str(cur.get("owner_id") or "") != owner_id:
+        err.api_error(403, err.E_HTTP, "forbidden_access")
+    if str(cur.get("source_metric_id") or "").strip():
+        err.api_error(409, err.E_HTTP, "metric_community_copy_readonly", metric_id=metric_id)
+    if str(cur.get("visibility") or "private").strip().lower() != "public":
+        err.api_error(409, err.E_HTTP, "metric_not_published", metric_id=metric_id)
+    cur["visibility"] = "private"
+    cur["allow_download"] = False
+    cur["community_published_at"] = None
+    save_metric(r, metric_id, cur)
+    source_name = str(cur.get("display_name") or cur.get("name") or metric_id).strip() or metric_id
+    _remove_metric_download_copies(
+        r,
+        source_metric_id=metric_id,
+        source_owner_id=owner_id,
+        notice_title="社区指标已下架",
+        notice_message=f"你下载的社区指标“{source_name}”已被发布者下架，副本已从你的指标库中移除。",
+    )
     return MetricOut(**cur)
 
 
@@ -3556,9 +4203,8 @@ def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = D
     copied["name"] = target_name
     copied["created_at"] = time.time()
     copied["visibility"] = "private"
-    copied["allow_use"] = False
+    copied["allow_use"] = True
     copied["allow_download"] = False
-    copied["runtime_ready"] = False
     copied["is_active"] = True
     source["download_count"] = int(source.get("download_count") or 0) + 1
     save_algorithm(r, algorithm_id, source)
@@ -3566,6 +4212,9 @@ def download_algorithm_to_user_library(algorithm_id: str, current_user: dict = D
     copied["source_owner_id"] = source_owner
     if str(copied.get("impl") or "").strip().lower() == "userpackage":
         copied["package_role"] = "downloaded_community"
+        copied["runtime_ready"] = _is_userpackage_download_runtime_ready(copied)
+    else:
+        copied["runtime_ready"] = bool(source.get("runtime_ready"))
     save_algorithm(r, target_algorithm_id, copied)
     return AlgorithmOut(**copied)
 
@@ -3700,6 +4349,7 @@ def admin_list_community_algorithms(current_user: dict = Depends(get_current_use
     _require_admin(current_user)
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _reconcile_algorithm_records(r)
     items = list_algorithms(r, limit=5000, owner_id=None, include_public=True) or []
     out = []
     for item in items:
@@ -3735,14 +4385,14 @@ def admin_list_community_datasets(current_user: dict = Depends(get_current_user)
     _require_admin(current_user)
     r = make_redis()
     _ensure_catalog_defaults(r)
+    _reconcile_dataset_records(r)
     items = list_datasets(r, limit=5000, owner_id=None, include_public=True) or []
     out = []
     for item in items:
       owner_id = str(item.get("owner_id") or "system")
-      visibility = str(item.get("visibility") or "private").lower()
       if owner_id == "system":
           continue
-      if visibility != "public":
+      if not _dataset_is_publicly_available(item):
           continue
       out.append(DatasetOut(**item))
     return out
@@ -3828,6 +4478,22 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
             and str(existing.get("source_owner_id") or "") == source_owner
         ):
             if _is_algorithm_active(existing):
+                source_submission_id = str(source.get("source_submission_id") or "").strip()
+                if source_submission_id:
+                    submission = load_algorithm_submission(r, source_submission_id)
+                    if submission:
+                        submission["platform_algorithm_id"] = str(existing.get("algorithm_id") or "")
+                        submission["owner_algorithm_id"] = None
+                        submission["community_algorithm_id"] = None
+                        save_algorithm_submission(r, source_submission_id, submission)
+                        _purge_submission_related_algorithms(r, submission, keep_algorithm_ids={str(existing.get("algorithm_id") or "")})
+                else:
+                    _remove_algorithm_download_copies(
+                        r,
+                        source_algorithm_id=algorithm_id,
+                        source_owner_id=source_owner,
+                    )
+                    _delete_algorithm_record_with_related_state(r, source)
                 return AlgorithmOut(**existing)
             restored = dict(existing)
             restored["task"] = source.get("task")
@@ -3845,6 +4511,22 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
             restored["updated_at"] = time.time()
             restored["package_role"] = "platform"
             save_algorithm(r, str(existing.get("algorithm_id") or ""), restored)
+            source_submission_id = str(source.get("source_submission_id") or "").strip()
+            if source_submission_id:
+                submission = load_algorithm_submission(r, source_submission_id)
+                if submission:
+                    submission["platform_algorithm_id"] = str(existing.get("algorithm_id") or "")
+                    submission["owner_algorithm_id"] = None
+                    submission["community_algorithm_id"] = None
+                    save_algorithm_submission(r, source_submission_id, submission)
+                    _purge_submission_related_algorithms(r, submission, keep_algorithm_ids={str(existing.get("algorithm_id") or "")})
+            else:
+                _remove_algorithm_download_copies(
+                    r,
+                    source_algorithm_id=algorithm_id,
+                    source_owner_id=source_owner,
+                )
+                _delete_algorithm_record_with_related_state(r, source)
             return AlgorithmOut(**restored)
 
     promoted = dict(source)
@@ -3861,12 +4543,28 @@ def admin_promote_community_algorithm(algorithm_id: str, current_user: dict = De
     promoted["source_owner_id"] = source_owner
     promoted["package_role"] = "platform"
     save_algorithm(r, promoted["algorithm_id"], promoted)
+    source_submission_id = str(source.get("source_submission_id") or "").strip()
+    if source_submission_id:
+        submission = load_algorithm_submission(r, source_submission_id)
+        if submission:
+            submission["platform_algorithm_id"] = promoted["algorithm_id"]
+            submission["owner_algorithm_id"] = None
+            submission["community_algorithm_id"] = None
+            save_algorithm_submission(r, source_submission_id, submission)
+            _purge_submission_related_algorithms(r, submission, keep_algorithm_ids={str(promoted["algorithm_id"])})
+    else:
+        _remove_algorithm_download_copies(
+            r,
+            source_algorithm_id=algorithm_id,
+            source_owner_id=source_owner,
+        )
+        _delete_algorithm_record_with_related_state(r, source)
 
     if source_owner:
         _create_notice(
             r,
             source_owner,
-            "绀惧尯绠楁硶宸茶骞冲彴鏀跺綍",
+            "社区算法已被平台收录",
             f"你上传的社区算法“{str(source.get('name') or algorithm_id).strip() or algorithm_id}”已被管理员收录进平台标准算法库。",
             kind="success",
         )
@@ -3890,25 +4588,13 @@ def admin_takedown_dataset(dataset_id: str, current_user: dict = Depends(get_cur
     cur["allow_use"] = False
     cur["allow_download"] = False
     save_dataset(r, dataset_id, cur)
-    for item in _list_all_dataset_records(r):
-        item_owner = str(item.get("owner_id") or "").strip()
-        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
-        if item_owner in {"", "system", source_owner}:
-            continue
-        if str(meta.get("downloaded_from_dataset_id") or "") != dataset_id:
-            continue
-        if str(meta.get("downloaded_from_owner_id") or "") != source_owner:
-            continue
-        deleted_disk = _delete_dataset_record_with_related_state(r, item, delete_disk=True)
-        if item_owner:
-            suffix = "，对应磁盘文件也已清理。" if deleted_disk else "。"
-            _create_notice(
-                r,
-                item_owner,
-                "社区数据集已下架",
-                f"你下载的社区数据集“{source_name}”已被管理员下架，副本已从你的数据集库中移除{suffix}",
-                kind="warning",
-            )
+    _remove_dataset_download_copies(
+        r,
+        source_dataset_id=dataset_id,
+        source_owner_id=source_owner,
+        notice_title="社区数据集已下架",
+        notice_message=f"你下载的社区数据集“{source_name}”已被管理员下架，副本已从你的数据集库中移除。",
+    )
     return DatasetOut(**cur)
 
 
@@ -4081,6 +4767,9 @@ def remove_preset(preset_id: str, current_user: dict = Depends(get_current_user)
 @app.post("/runs", response_model=RunOut)
 def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user)):
     r = make_redis()
+    _run_reconcile_job(r, "algorithms", _reconcile_algorithm_records, force=True)
+    _run_reconcile_job(r, "datasets", _reconcile_dataset_records, force=True)
+    _run_reconcile_job(r, "metrics", _reconcile_metric_records, force=True)
     task_type = (payload.task_type or "").strip().lower()
     dataset_id = (payload.dataset_id or "").strip()
     algorithm_id = (payload.algorithm_id or "").strip()
@@ -4103,6 +4792,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
     _assert_resource_access(alg, current_user, allow_system=True)
 
     requested_params = dict(payload.params or {})
+    requested_params["eval_mode"] = _normalize_eval_mode(getattr(payload, "eval_mode", None) or requested_params.get("eval_mode"))
     requested_metrics_raw = requested_params.get("metrics")
     runnable_metric_keys = {str(item.get("metric_key") or "").upper() for item in _list_runnable_metrics(r, task_type)}
     if isinstance(requested_metrics_raw, list):
@@ -4130,12 +4820,16 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         )
     if str(alg.get("impl") or "").strip().lower() == "userpackage":
         algorithm_owner_id = str(alg.get("owner_id") or "system").strip() or "system"
+        package_role = _infer_user_package_role(alg)
         is_owner_package = algorithm_owner_id == owner_id
         if algorithm_owner_id not in {"system", owner_id}:
             err.api_error(403, err.E_HTTP, "forbidden_access")
         if task_type.startswith("video_"):
             err.api_error(409, err.E_ALGORITHM_RUNTIME, "algorithm_package_video_not_supported", algorithm_id=algorithm_id, task_type=task_type)
-        if alg.get("is_active") is False or not bool(alg.get("runtime_ready")) or (not is_owner_package and not bool(alg.get("allow_use"))):
+        can_use_runtime = is_owner_package or bool(alg.get("allow_use"))
+        if package_role == "downloaded_community" and algorithm_owner_id == owner_id:
+            can_use_runtime = True
+        if alg.get("is_active") is False or not bool(alg.get("runtime_ready")) or not can_use_runtime:
             err.api_error(
                 409,
                 err.E_ALGORITHM_RUNTIME,
@@ -4145,6 +4839,7 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
                 is_active=alg.get("is_active", True),
                 allow_use=bool(alg.get("allow_use")),
                 owner_package=is_owner_package,
+                package_role=package_role,
             )
 
     from .vision.dataset_access import count_paired_images, count_paired_videos
@@ -4246,6 +4941,7 @@ def get_runs(
 ):
     r = make_redis()
     owner_id = _username_of(current_user) or None
+    _cleanup_invalid_runs_for_owner(r, owner_id)
     runs = list_runs(r, limit=limit, owner_id=owner_id)
 
     def ok(x: dict) -> bool:
@@ -4281,6 +4977,7 @@ def export_runs(
 
     r = make_redis()
     owner_id = _username_of(current_user) or None
+    _cleanup_invalid_runs_for_owner(r, owner_id)
     runs = list_runs(r, limit=limit, owner_id=owner_id)
 
     # ===== 绛涢€夊綋鍓嶅鍑鸿寖鍥?=====
@@ -4418,7 +5115,7 @@ def export_runs(
         return StreamingResponse(
             gen(),
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers=_attachment_headers(filename),
         )
 
     # ===== XLSX =====
@@ -4437,7 +5134,7 @@ def export_runs(
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=_attachment_headers(filename),
     )
 
 
@@ -4513,6 +5210,12 @@ def get_run(run_id: str, current_user: dict = Depends(get_current_user)):
     if not run:
         err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
     _assert_resource_access(run, current_user, allow_system=True)
+    owner_id = str(run.get("owner_id") or "").strip()
+    if owner_id:
+        _cleanup_invalid_runs_for_owner(r, owner_id)
+        run = load_run(r, run_id)
+        if not run:
+            err.api_error(404, err.E_RUN_NOT_FOUND, "run_not_found", run_id=run_id)
     return _sanitize_run_for_api(run)
 
 
@@ -4547,5 +5250,3 @@ def cancel_run(run_id: str, current_user: dict = Depends(get_current_user)):
     save_run(r, run_id, run)
     celery_app.control.revoke(run_id, terminate=False)
     return {"ok": True, "run_id": run_id, "status": "canceling"}
-
-

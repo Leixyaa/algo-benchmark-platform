@@ -22,7 +22,6 @@
           <el-select v-model="selectedDatasetId" placeholder="请选择数据集" class="select-box" filterable>
             <el-option v-for="d in ownedDatasets" :key="d.id" :label="`${d.name} (${d.id})`" :value="d.id" />
           </el-select>
-          <el-checkbox v-model="overwriteOnImport" label="导入时覆盖原有目录内容" class="checkbox compact-checkbox" />
         </div>
         <el-button
           type="success"
@@ -43,12 +42,12 @@
             <el-table-column prop="name" label="名称" min-width="180" />
             <el-table-column prop="type" label="类型" width="110">
               <template #default="{ row }">
-                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
+                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || '-' }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="size" label="规模" width="190">
               <template #default="{ row }">
-                <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+                <span class="size-cell" :title="row.size || '-'">{{ row.size || '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="createdAt" label="创建时间" width="180" />
@@ -56,12 +55,13 @@
               <template #default="{ row }">
                 <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id) || exportingDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    {{ exportingDatasets.has(row.id) ? "下载中" : "管理" }}<el-icon v-if="!exportingDatasets.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="id">查看/修改ID</el-dropdown-item>
+                      <el-dropdown-item command="id">查看/修改 ID</el-dropdown-item>
                       <el-dropdown-item command="community">{{ isSelfPublishedDataset(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
+                      <el-dropdown-item v-if="isSelfPublishedDataset(row)" command="unpublish-community">下架社区</el-dropdown-item>
                       <el-dropdown-item command="export">下载到本地</el-dropdown-item>
                       <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
                       <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
@@ -82,12 +82,12 @@
             <el-table-column prop="name" label="名称" min-width="180" />
             <el-table-column prop="type" label="类型" width="110">
               <template #default="{ row }">
-                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || "-" }}</el-tag>
+                <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || '-' }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="size" label="规模" width="190">
               <template #default="{ row }">
-                <span class="size-cell" :title="row.size || '-'">{{ row.size || "-" }}</span>
+                <span class="size-cell" :title="row.size || '-'">{{ row.size || '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
@@ -96,7 +96,7 @@
               <template #default="{ row }">
                 <el-dropdown trigger="click" @command="(cmd) => handleDatasetAction(row.id, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="scanningDatasets.has(row.id) || exportingDatasets.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    管理<el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    {{ exportingDatasets.has(row.id) ? "下载中" : "管理" }}<el-icon v-if="!exportingDatasets.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -120,7 +120,7 @@
         <el-form-item label="数据集名称">
           <el-input v-model="form.name" placeholder="例如：RESIDE Indoor 测试集" />
         </el-form-item>
-        <el-form-item label="数据类型">
+        <el-form-item label="数据集类型">
           <el-select v-model="form.type" style="width: 100%">
             <el-option label="图像" value="图像" />
             <el-option label="视频" value="视频" />
@@ -138,7 +138,6 @@
     </el-dialog>
   </div>
 </template>
-
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
@@ -152,7 +151,6 @@ const store = useAppStore();
 const showCreate = ref(false);
 const activeDatasetTab = ref("owned");
 const selectedDatasetId = ref("");
-const overwriteOnImport = ref(true);
 const importTargetId = ref("");
 const fileInputRef = ref(null);
 const scanningDatasets = ref(new Set());
@@ -198,7 +196,23 @@ function isDatasetEmpty(dataset) {
   return false;
 }
 
+function isDatasetGoneError(error) {
+  const text = String(error?.message || error || "");
+  const code = String(
+    error?.detail?.error_code ||
+      error?.data?.detail?.error_code ||
+      error?.data?.error_code ||
+      error?.error_code ||
+      ""
+  );
+  return text.includes("[404]") || code === "E_DATASET_NOT_FOUND";
+}
+
 onMounted(async () => {
+  if (store.datasets?.length) {
+    store.fetchDatasets().catch(() => {});
+    return;
+  }
   try {
     await store.fetchDatasets();
   } catch {
@@ -232,13 +246,13 @@ function closeCreate() {
 function showDatasetLayoutGuide() {
   ElMessageBox.alert(
     [
-      "1) 推荐目录包含 gt 与任务输入目录，如 hazy/noisy/blur/lr/dark。",
+      "1) 推荐目录包含 gt 与任务输入目录，例如 hazy / noisy / blur / lr / dark。",
       "2) 视频任务依靠创建 Run 时选择 video_denoise 或 video_sr 区分。",
-      "3) 视频任务要求输入目录与 gt 目录中的视频文件同名配对。",
+      "3) 视频任务要求输入目录中的视频文件与 gt 目录中的视频文件同名配对。",
       "4) 推荐统一通过 ZIP 上传数据集，由平台自动管理存储目录。",
-      "5) 本机数据若不能直接访问，请先使用 ZIP 导入。",
+      "5) 现在 ZIP 导入会默认替换当前数据集目录内容，请确认后再导入。",
     ].join("\n"),
-    "目录与上线说明",
+    "目录与导入说明",
     { confirmButtonText: "我知道了" }
   );
 }
@@ -306,8 +320,8 @@ async function remove(id) {
 
 async function handleDatasetAction(id, command) {
   const owned = ownedDatasets.value.some((item) => item.id === id);
-  if (!owned && ["id", "community", "scan", "zip"].includes(command)) {
-    ElMessage({ type: "warning", message: "社区数据集不能修改，请先下载后在用户数据集中管理" });
+  if (!owned && ["id", "community", "unpublish-community", "scan", "zip"].includes(command)) {
+    ElMessage({ type: "warning", message: "社区数据集不能直接修改，请先下载后在用户数据集中管理" });
     return;
   }
   if (command === "id") {
@@ -316,6 +330,10 @@ async function handleDatasetAction(id, command) {
   }
   if (command === "community") {
     await uploadDatasetToCommunity(id);
+    return;
+  }
+  if (command === "unpublish-community") {
+    await unpublishDatasetFromCommunity(id);
     return;
   }
   if (command === "scan") {
@@ -335,6 +353,30 @@ async function handleDatasetAction(id, command) {
   }
 }
 
+async function unpublishDatasetFromCommunity(id) {
+  const current = ownedDatasets.value.find((item) => item.id === id);
+  if (!current || !isSelfPublishedDataset(current)) {
+    ElMessage({ type: "warning", message: "当前数据集未发布到社区" });
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将数据集“${current.name}”从社区下架吗？本地数据集记录会继续保留。`,
+      "下架社区数据集",
+      { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
+    );
+    await store.updateDataset(id, {
+      visibility: "private",
+      allowUse: false,
+      allowDownload: false,
+    });
+    ElMessage({ type: "success", message: "数据集已从社区下架，本地记录已保留" });
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `下架社区失败：${e?.message || e}` });
+  }
+}
+
 async function exportDatasetToLocal(id) {
   if (!id) return;
   if (exportingDatasets.value.has(id)) return;
@@ -343,19 +385,32 @@ async function exportDatasetToLocal(id) {
     ElMessage({ type: "warning", message: "空数据集不能下载到本地，请先导入 ZIP 或补充有效文件" });
     return;
   }
+  let progressMessage = null;
   try {
     const nextExporting = new Set(exportingDatasets.value);
     nextExporting.add(id);
     exportingDatasets.value = nextExporting;
-    ElMessage({ type: "info", message: "正在准备下载数据集，请稍候..." });
+    progressMessage = ElMessage({
+      type: "info",
+      message: `正在下载数据集 ${id}，请稍候...`,
+      duration: 0,
+    });
     const result = await datasetsApi.exportDataset(id);
+    progressMessage?.close?.();
     ElMessage({
       type: "success",
-      message: result?.savedWithPicker ? "数据集已保存到你选择的位置" : "数据集已开始下载到本地",
+      message: result?.savedWithPicker ? "数据集已保存到你选择的位置" : "数据集下载完成，浏览器已开始保存",
     });
   } catch (e) {
+    progressMessage?.close?.();
+    if (isDatasetGoneError(e)) {
+      await store.fetchDatasets();
+      ElMessage({ type: "warning", message: "该数据集记录已失效，已从列表中同步移除" });
+      return;
+    }
     ElMessage({ type: "error", message: `下载到本地失败：${e?.message || e}` });
   } finally {
+    progressMessage?.close?.();
     const nextExporting = new Set(exportingDatasets.value);
     nextExporting.delete(id);
     exportingDatasets.value = nextExporting;
@@ -375,7 +430,7 @@ async function uploadDatasetToCommunity(id) {
   }
   try {
     const { value } = await ElMessageBox.prompt(
-      "请输入数据集在社区中心展示的描述",
+      "请输入数据集在社区中心展示的描述，便于区分同名数据集",
       alreadyPublished ? "更新社区信息" : "上传到社区",
       {
         inputType: "textarea",
@@ -408,7 +463,7 @@ async function editDatasetId(id) {
   try {
     const { value } = await ElMessageBox.prompt(
       `当前数据集 ID：${current.id}`,
-      "查看/修改ID（测试开发）",
+      "查看/修改 ID（测试开发）",
       {
         inputValue: current.id,
         confirmButtonText: "保存",
@@ -419,15 +474,15 @@ async function editDatasetId(id) {
     );
     const nextId = String(value || "").trim();
     if (!nextId || nextId === current.id) {
-      ElMessage({ type: "info", message: "数据集ID未修改" });
+      ElMessage({ type: "info", message: "数据集 ID 未修改" });
       return;
     }
     const updated = await store.changeDatasetId(current.id, nextId);
     selectedDatasetId.value = updated?.id || nextId;
-    ElMessage({ type: "success", message: "数据集ID已更新" });
+    ElMessage({ type: "success", message: "数据集 ID 已更新" });
   } catch (action) {
     if (action !== "cancel" && action !== "close") {
-      ElMessage({ type: "error", message: `修改ID失败：${action?.message || action}` });
+      ElMessage({ type: "error", message: `修改 ID 失败：${action?.message || action}` });
     }
   }
 }
@@ -447,7 +502,7 @@ function ensureFileInput() {
 
     try {
       await ElMessageBox.confirm(
-        `将向数据集 ${dsId} 导入 ZIP，${overwriteOnImport.value ? "会覆盖目录中的现有内容" : "不会先清空目录"}，是否继续？`,
+        `将向数据集 ${dsId} 导入 ZIP，并自动替换当前目录内容，是否继续？`,
         "导入确认",
         {
           type: "warning",
@@ -467,14 +522,19 @@ function ensureFileInput() {
         `/datasets/${encodeURIComponent(dsId)}/import_zip_file`,
         {
           method: "POST",
-          query: { overwrite: overwriteOnImport.value ? "true" : "false" },
           body: fd,
         }
       );
       const ct = (res.headers.get("content-type") || "").toLowerCase();
       const out = ct.includes("application/json") ? await res.json() : await res.text();
       if (!res.ok) {
-        throw new Error(typeof out === "string" ? out : JSON.stringify(out));
+        const detail = out && typeof out === "object" ? (out.detail || out) : null;
+        const message =
+          detail?.message ||
+          detail?.error_message ||
+          detail?.error ||
+          (typeof out === "string" ? out : JSON.stringify(out));
+        throw new Error(String(message || "ZIP 导入失败"));
       }
       await store.fetchDatasets();
       await scanOne(dsId, { silentStart: true });
@@ -541,11 +601,11 @@ async function scanCurrent() {
 function formatScanTaskSummary(meta) {
   const pairs = meta?.pairs_by_task && typeof meta.pairs_by_task === "object" ? meta.pairs_by_task : {};
   const labels = {
-    dehaze: "去雾图片",
-    denoise: "去噪图片",
-    deblur: "去模糊图片",
-    sr: "超分图片",
-    lowlight: "低照度图片",
+    dehaze: "去雾图像",
+    denoise: "去噪图像",
+    deblur: "去模糊图像",
+    sr: "超分图像",
+    lowlight: "低照度图像",
     video_denoise: "视频去噪",
     video_sr: "视频超分",
   };
@@ -553,7 +613,7 @@ function formatScanTaskSummary(meta) {
   const items = Object.entries(pairs)
     .filter(([, count]) => Number(count || 0) > 0)
     .map(([key, count]) => `${labels[key] || key} ${count}${unitOf(key)}`);
-  return items.join("，");
+  return items.join("；");
 }
 
 function guessTypeFromDatasetId(datasetId) {
@@ -584,8 +644,8 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
       "扫描类型确认",
       {
         type: "warning",
-        confirmButtonText: `切换为${inferred || "扫描类型"}`,
-        cancelButtonText: `保持${currentType || "当前类型"}`,
+        confirmButtonText: `切换为 ${inferred || "扫描类型"}`,
+        cancelButtonText: `保持 ${currentType || "当前类型"}`,
       }
     );
   } catch {
@@ -612,7 +672,24 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 
 <style scoped>
 .page {
+  --page-bg: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --card-bg: rgba(255, 255, 255, 0.96);
+  --card-border: #e2e8f0;
+  --card-shadow: 0 10px 25px rgba(148, 163, 184, 0.08);
+  --text-main: #1e293b;
+  --text-soft: #64748b;
+  --text-muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-deep: #2563eb;
+  --accent-soft: #dbeafe;
+  --success: #10b981;
+  --success-deep: #059669;
+  --warning: #f59e0b;
+  --danger: #ef4444;
   padding: 24px;
+  min-height: 100%;
+  background: var(--page-bg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .header-section {
@@ -621,30 +698,40 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 
 .title {
   margin: 0 0 12px;
-  font-size: 24px;
-  font-weight: 700;
-  color: #1f2f57;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.1;
 }
 
 .subtitle {
-  color: #5b6b8b;
+  color: var(--text-soft);
   line-height: 1.7;
+  font-size: 16px;
+  max-width: 800px;
 }
 
 .action-bar {
   margin-bottom: 24px;
-  padding: 18px;
-  background: #f8fbff;
-  border: 1px solid #dce7ff;
+  padding: 24px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.action-bar:hover {
+  box-shadow: 0 15px 30px rgba(148, 163, 184, 0.12);
+  transform: translateY(-2px);
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
+  margin-bottom: 20px;
   flex-wrap: wrap;
 }
 
@@ -665,13 +752,15 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 .selector-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
 .label {
-  color: #334466;
-  font-weight: 600;
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .select-box {
@@ -683,8 +772,11 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 }
 
 .section-title {
-  margin: 0 0 12px;
-  color: #1f2f57;
+  margin: 0 0 16px;
+  color: var(--text-main);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
 }
 
 .data-table {
@@ -692,19 +784,34 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.data-table:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
 }
 
 .centered-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.2s ease;
 }
 
 .action-btn {
-  min-width: 132px;
-  height: 42px;
+  min-width: 140px;
+  height: 44px;
   padding: 0 18px;
-  border-radius: 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
 }
 
 .guide-btn,
@@ -713,11 +820,11 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 }
 
 .scan-btn {
-  min-width: 148px;
+  min-width: 160px;
 }
 
 .compact-checkbox {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 4px;
   display: inline-flex;
   align-items: center;
@@ -736,13 +843,21 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 }
 
 .table-action-btn {
-  min-width: 84px;
+  min-width: 90px;
   justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  height: 36px;
+}
+
+.table-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .page :deep(.scan-result-box) {
   width: min(680px, calc(100vw - 32px));
-  border-radius: 18px;
+  border-radius: 12px;
 }
 
 .page :deep(.scan-result-dialog) {
@@ -756,22 +871,161 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   align-items: flex-start;
   gap: 8px;
   line-height: 1.7;
-  color: #334466;
+  color: var(--text-soft);
   word-break: break-word;
 }
 
 .page :deep(.scan-result-label) {
   min-width: 72px;
-  color: #1f2f57;
+  color: var(--text-main);
   font-weight: 700;
 }
 
 .data-table :deep(.el-table__cell) {
-  height: 68px;
+  height: 64px;
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .data-table :deep(.cell) {
   white-space: nowrap;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.data-table :deep(.el-table th.el-table__cell) {
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+:deep(.el-select__wrapper) {
+  min-height: 44px;
+  border-radius: 8px;
+  box-shadow: none;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+:deep(.el-select__wrapper:hover) {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.el-select__wrapper.is-focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+:deep(.el-button) {
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  font-weight: 600;
+}
+
+:deep(.el-button:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-dialog) {
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-dialog__header) {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 20px 24px;
+}
+
+:deep(.el-dialog__title) {
+  color: var(--text-main);
+  font-weight: 800;
+  font-size: 18px;
+}
+
+:deep(.el-dialog__body) {
+  padding: 24px;
+}
+
+:deep(.el-dialog__footer) {
+  padding: 0 24px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+:deep(.el-form-item) {
+  margin-bottom: 20px;
+}
+
+:deep(.el-form-item__label) {
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+:deep(.el-input__wrapper) {
+  border-radius: 8px;
+  box-shadow: none;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+  min-height: 44px;
+}
+
+:deep(.el-input__wrapper:hover) {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+:deep(.el-select) {
+  width: 100%;
+}
+
+:deep(.el-tabs__header) {
+  margin-bottom: 0;
+  padding: 0 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+:deep(.el-tabs__item) {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 16px 24px;
+  color: var(--text-soft);
+  transition: all 0.2s ease;
+}
+
+:deep(.el-tabs__item:hover) {
+  color: var(--accent);
+}
+
+:deep(.el-tabs__item.is-active) {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+:deep(.el-tabs__content) {
+  padding: 16px;
+}
+
+:deep(.el-empty__description) {
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 @media (max-width: 768px) {
@@ -779,9 +1033,37 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
     padding: 16px;
   }
 
+  .title {
+    font-size: 24px;
+  }
+
+  .subtitle {
+    font-size: 14px;
+  }
+
+  .action-bar {
+    padding: 20px;
+  }
+
   .select-box {
     width: 100%;
     min-width: 220px;
   }
+
+  .toolbar,
+  .selector-row,
+  .selector-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-btn {
+    width: 100%;
+  }
+
+  :deep(.el-dialog) {
+    width: 90% !important;
+  }
 }
 </style>
+

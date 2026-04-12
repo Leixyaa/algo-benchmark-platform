@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { ElMessage } from "element-plus";
 
 import Layout from "../views/LayoutBrand2.vue";
 import Community from "../views/Community.vue";
@@ -9,6 +10,7 @@ import Metrics from "../views/Metrics.vue";
 import NewRun from "../views/NewRun.vue";
 import Compare from "../views/Compare.vue";
 import Runs from "../views/Runs.vue";
+import Notices from "../views/Notices.vue";
 import Login from "../views/LoginBrand.vue";
 import Register from "../views/RegisterBrand.vue";
 import AdminLogin from "../views/AdminLoginBrand.vue";
@@ -31,6 +33,7 @@ const routes = [
       { path: "new-run", component: NewRun },
       { path: "compare", component: Compare },
       { path: "runs", name: "Runs", component: Runs },
+      { path: "notices", component: Notices },
       { path: "admin", component: Admin },
     ],
   },
@@ -39,6 +42,26 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+router.beforeEach((to, from, next) => {
+  if (to.path !== "/admin") {
+    next();
+    return;
+  }
+
+  const role =
+    sessionStorage.getItem("userRole") ||
+    localStorage.getItem("userRole") ||
+    "user";
+
+  if (role === "admin") {
+    next();
+    return;
+  }
+
+  ElMessage.warning("权限不足，普通用户不能进入管理后台");
+  next(from.path && from.path !== "/admin" ? from.fullPath : "/community");
 });
 
 export default router;

@@ -29,6 +29,7 @@ E_RUN_NOT_FOUND = "E_RUN_NOT_FOUND"
 E_EXPORT_FORMAT = "E_EXPORT_FORMAT"
 E_TASK_NOT_SUPPORTED = "E_TASK_NOT_SUPPORTED"
 E_TEXT_ENCODING_INVALID = "E_TEXT_ENCODING_INVALID"
+E_DATASET_IMPORT_REQUIRES_OVERWRITE = "E_DATASET_IMPORT_REQUIRES_OVERWRITE"
 
 E_READ_IMAGE_FAIL = "E_READ_IMAGE_FAIL"
 E_CANCELED = "E_CANCELED"
@@ -64,6 +65,7 @@ ERROR_DEFS: dict[str, ErrorDef] = {
     E_EXPORT_FORMAT: ErrorDef(E_EXPORT_FORMAT, "format_must_be_csv_or_xlsx", retryable=False),
     E_TASK_NOT_SUPPORTED: ErrorDef(E_TASK_NOT_SUPPORTED, "task_type_not_supported", retryable=False),
     E_TEXT_ENCODING_INVALID: ErrorDef(E_TEXT_ENCODING_INVALID, "text_encoding_invalid", retryable=False),
+    E_DATASET_IMPORT_REQUIRES_OVERWRITE: ErrorDef(E_DATASET_IMPORT_REQUIRES_OVERWRITE, "dataset_import_requires_overwrite", retryable=False),
     E_READ_IMAGE_FAIL: ErrorDef(E_READ_IMAGE_FAIL, "\u8bfb\u53d6\u56fe\u7247\u5931\u8d25", retryable=False),
     E_CANCELED: ErrorDef(E_CANCELED, "\u5df2\u53d6\u6d88", retryable=False),
 }

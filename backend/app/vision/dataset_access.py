@@ -34,7 +34,7 @@ def find_paired_images(
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
-    limit: int = 5,
+    limit: int | None = 5,
     storage_path: str | None = None,
 ) -> list[PairedImage]:
     if not str(storage_path or "").strip():
@@ -89,7 +89,7 @@ def find_paired_videos(
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
-    limit: int = 5,
+    limit: int | None = 5,
     storage_path: str | None = None,
 ) -> list[PairedVideo]:
     if not str(storage_path or "").strip():

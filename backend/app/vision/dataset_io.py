@@ -54,6 +54,17 @@ def _pair_token(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", stem)
 
 
+def _pair_token_full(name: str) -> str:
+    stem = Path(name).stem.strip().lower()
+    if not stem:
+        return ""
+    stem = re.sub(r"[_-]?(gt|groundtruth|reference|target)$", "", stem)
+    stem = re.sub(r"^(input|src|img|image|frame)[_-]?", "", stem)
+    stem = re.sub(r"[_-]?(hazy|noisy|blur|blurry|dark|lowlight|lr|lq|input|src)$", "", stem)
+    stem = stem.strip("_- ")
+    return re.sub(r"[^a-z0-9]+", "", stem)
+
+
 def _fuzzy_match_score(a: str, b: str) -> int:
     """
     计算两个标记之间的模糊匹配得分。
@@ -92,7 +103,7 @@ def _fuzzy_match_score(a: str, b: str) -> int:
 
 
 def _best_fuzzy_match(input_name: str, gt_candidates: set[str]) -> str | None:
-    input_token = _pair_token(input_name)
+    input_token = _pair_token_full(input_name)
     if not input_token or not gt_candidates:
         return None
     
@@ -130,7 +141,7 @@ def find_paired_images(
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
-    limit: int = 5,
+    limit: int | None = 5,
 ) -> List[PairedImage]:
     """
     在 `backend/data/<owner_id>/<dataset_id>/<input_dirname>` 与 GT 目录间查找可用配对。
@@ -171,7 +182,7 @@ def find_paired_images(
     for gp in gt_dir.rglob("*"):
         if not _is_img(gp):
             continue
-        k = _pair_token(gp.name)
+        k = _pair_token_full(gp.name)
         if not k or k in gt_by_token:
             continue
         gt_by_token[k] = gp
@@ -180,13 +191,14 @@ def find_paired_images(
 
     pairs: List[PairedImage] = []
     used_gt = set()
-    for ip in sorted(input_files)[: max(limit * 5, 50)]:
+    scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
+    for ip in sorted(input_files)[:scan_cap]:
         k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()) - used_gt)
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_img(gp):
             pairs.append(PairedImage(input_path=ip, gt_path=gp, name=ip.name))
             used_gt.add(k)
-            if len(pairs) >= limit:
+            if limit is not None and len(pairs) >= limit:
                 break
 
     return pairs
@@ -229,7 +241,7 @@ def count_paired_images(
     if not input_dir.exists():
         return 0
 
-    gt_keys = {_pair_token(p.name) for p in gt_dir.rglob("*") if _is_img(p)}
+    gt_keys = {_pair_token_full(p.name) for p in gt_dir.rglob("*") if _is_img(p)}
     gt_keys.discard("")
     if not gt_keys:
         return 0
@@ -252,7 +264,7 @@ def find_paired_videos(
     dataset_id: str,
     input_dirname: str,
     gt_dirname: str = "gt",
-    limit: int = 5,
+    limit: int | None = 5,
 ) -> List[PairedVideo]:
     # 尝试使用用户独有的目录结构
     user_dir = data_root / owner_id
@@ -288,7 +300,7 @@ def find_paired_videos(
     for gp in gt_dir.rglob("*"):
         if not _is_video(gp):
             continue
-        k = _pair_token(gp.name)
+        k = _pair_token_full(gp.name)
         if not k or k in gt_by_token:
             continue
         gt_by_token[k] = gp
@@ -297,13 +309,14 @@ def find_paired_videos(
 
     pairs: List[PairedVideo] = []
     used_gt = set()
-    for ip in sorted(input_files)[: max(limit * 5, 50)]:
+    scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
+    for ip in sorted(input_files)[:scan_cap]:
         k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()) - used_gt)
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_video(gp):
             pairs.append(PairedVideo(input_path=ip, gt_path=gp, name=ip.name))
             used_gt.add(k)
-            if len(pairs) >= limit:
+            if limit is not None and len(pairs) >= limit:
                 break
     return pairs
 
@@ -341,7 +354,7 @@ def count_paired_videos(
     if not input_dir.exists():
         return 0
 
-    gt_keys = {_pair_token(p.name) for p in gt_dir.rglob("*") if _is_video(p)}
+    gt_keys = {_pair_token_full(p.name) for p in gt_dir.rglob("*") if _is_video(p)}
     gt_keys.discard("")
     if not gt_keys:
         return 0

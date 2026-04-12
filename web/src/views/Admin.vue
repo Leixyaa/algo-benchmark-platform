@@ -25,9 +25,18 @@
           <el-table-column prop="uploaderId" label="上传者ID" width="140" />
           <el-table-column prop="downloadCount" label="下载量" width="100" />
           <el-table-column prop="createdAt" label="发布时间" width="180" />
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="320">
             <template #default="{ row }">
               <el-button size="small" plain @click="openResourceDetail('algorithm', row)">详情</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                @click="promoteCommunityAlgorithm(row)"
+                :loading="promotingAlgorithmIds.has(row.id)"
+              >
+                收录为平台算法
+              </el-button>
               <el-button
                 size="small"
                 type="danger"
@@ -533,6 +542,7 @@ const loadingAlgorithmIds = ref(new Set());
 const loadingDatasetIds = ref(new Set());
 const deletingCommentIds = ref(new Set());
 const resolvingReportIds = ref(new Set());
+const promotingAlgorithmIds = ref(new Set());
 const promotingSubmissionIds = ref(new Set());
 const clearingReports = ref(false);
 const reviewingMetricIds = ref(new Set());
@@ -867,6 +877,23 @@ async function takedownAlgorithm(row) {
 }
 
 
+async function promoteCommunityAlgorithm(row) {
+  try {
+    setLoading(promotingAlgorithmIds, row.id, true);
+    await adminApi.promoteCommunityAlgorithm(row.id);
+    await Promise.all([
+      loadAll(),
+      store.fetchAlgorithms(500, { force: true }),
+    ]);
+    ElMessage.success("已收录为平台算法");
+  } catch (e) {
+    ElMessage.error(e?.message || "收录失败");
+  } finally {
+    setLoading(promotingAlgorithmIds, row.id, false);
+  }
+}
+
+
 
 async function promoteAlgorithmSubmission(row) {
   try {
@@ -875,7 +902,7 @@ async function promoteAlgorithmSubmission(row) {
     algorithmSubmissions.value = (algorithmSubmissions.value || []).map((item) =>
       item.id === row.id ? mapAlgorithmSubmission(out) : item
     );
-    await store.fetchAlgorithms();
+    await store.fetchAlgorithms(500, { force: true });
     ElMessage.success("已收录为平台算法");
   } catch (e) {
     ElMessage.error(e?.message || "收录失败");
@@ -1013,7 +1040,7 @@ async function takedownDataset(row) {
   try {
     setLoading(loadingDatasetIds, row.id, true);
     await adminApi.takedownDataset(row.id);
-    datasets.value = datasets.value.filter((item) => item.id !== row.id);
+    await loadAll();
     ElMessage.success("数据集已下架");
   } catch (e) {
     ElMessage.error(e?.message || "数据集下架失败");
