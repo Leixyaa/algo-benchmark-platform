@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Algo Benchmark Platform Desktop</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eef3ff;
+        --panel: rgba(255, 255, 255, 0.88);
+        --text: #15213a;
+        --muted: #5b6682;
+        --accent: #1f6feb;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(31, 111, 235, 0.18), transparent 32%),
+          radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.12), transparent 28%),
+          linear-gradient(135deg, #f8fbff, var(--bg));
+        color: var(--text);
+      }
+
+      .panel {
+        width: min(560px, calc(100vw - 48px));
+        padding: 36px;
+        border-radius: 24px;
+        background: var(--panel);
+        box-shadow: 0 24px 72px rgba(32, 53, 88, 0.14);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(31, 111, 235, 0.1);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      h1 {
+        margin: 18px 0 12px;
+        font-size: 32px;
+        line-height: 1.15;
+      }
+
+      p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 15px;
+      }
+
+      .loading {
+        margin-top: 26px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 rgba(31, 111, 235, 0.35);
+        animation: pulse 1.5s infinite;
+      }
+
+      code {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(21, 33, 58, 0.08);
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(0.92);
+          box-shadow: 0 0 0 0 rgba(31, 111, 235, 0.35);
+        }
+        70% {
+          transform: scale(1);
+          box-shadow: 0 0 0 16px rgba(31, 111, 235, 0);
+        }
+        100% {
+          transform: scale(0.92);
+          box-shadow: 0 0 0 0 rgba(31, 111, 235, 0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <div class="badge">ABP DESKTOP</div>
+      <h1>Connecting to Algo Benchmark Platform</h1>
+      <p>The desktop shell reuses your current frontend and backend services, so the evaluation workflow stays unchanged.</p>
+      <p>If the window does not open the app after a while, run <code>scripts/manual_up_desktop.ps1</code> first.</p>
+      <div class="loading">
+        <span class="dot"></span>
+        <span>Waiting for local services...</span>
+      </div>
+    </main>
+  </body>
+</html>

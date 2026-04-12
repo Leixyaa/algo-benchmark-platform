@@ -20,10 +20,10 @@
 
         <div class="protocol-card">
           <div class="protocol-title">算法运行接入协议</div>
-          <div class="protocol-line">1. 第一版仅支持图像任务：去噪、去模糊、去雾、超分、低光增强；暂不支持视频去噪 / 视频超分。</div>
+          <div class="protocol-line">1. 当前支持图像任务与视频任务；视频任务第一版按首帧评测口径接入，支持视频去噪 / 视频超分。</div>
           <div class="protocol-line">2. 代码包只支持单个 `.py` 文件或 `.zip`；zip 内优先使用 `infer.py`，没有 `infer.py` 时必须只包含一个 `.py` 文件。</div>
           <div class="protocol-line">3. 固定命令行协议：`python infer.py --input &lt;input_image&gt; --output &lt;output_image&gt;`。</div>
-          <div class="protocol-line">4. 代码必须从 `--input` 读取一张图片，并把处理后的图片写入 `--output` 指定的输出图片路径。</div>
+          <div class="protocol-line">4. 图像任务直接对输入图像执行；视频任务第一版会抽取输入视频首帧，按同一图像协议执行并参与评测。</div>
           <div class="protocol-line">5. 后端不会 import 用户代码，只会在管理员审核并勾选“接入运行链路”后，用 subprocess 隔离执行并设置超时。</div>
         </div>
 

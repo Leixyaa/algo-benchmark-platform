@@ -374,7 +374,6 @@ function isVisiblePlatformAlgorithm(alg) {
     if (impl === "userpackage") {
       return (
         (role === "owner_runtime" || role === "downloaded_community") &&
-        !String(taskType || "").startsWith("video_") &&
         Boolean(alg?.runtimeReady || alg?.raw?.runtime_ready)
       );
     }
@@ -386,7 +385,6 @@ function isVisiblePlatformAlgorithm(alg) {
   if (impl === "userpackage") {
     return (
       role === "platform" &&
-      !String(taskType || "").startsWith("video_") &&
       Boolean(alg?.allowUse || alg?.raw?.allow_use) &&
       (alg?.runtimeReady ?? alg?.raw?.runtime_ready) !== false
     );

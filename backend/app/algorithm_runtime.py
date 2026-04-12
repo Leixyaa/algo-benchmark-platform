@@ -16,6 +16,7 @@ import numpy as np
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
 
 def _read_image_bgr(path: Path) -> np.ndarray | None:
@@ -41,6 +42,17 @@ class AlgorithmRuntimeError(Exception):
 class AlgorithmRuntimeResult:
     image_bgr_u8: np.ndarray
     detail: dict[str, Any]
+
+
+def _read_first_frame_bgr(path: Path) -> np.ndarray | None:
+    cap = cv2.VideoCapture(str(path))
+    try:
+        ok, frame = cap.read()
+    finally:
+        cap.release()
+    if not ok or frame is None or frame.size == 0:
+        return None
+    return frame
 
 
 class UserAlgorithmImageRunner:
@@ -131,6 +143,100 @@ class UserAlgorithmImageRunner:
             detail["output_path"] = str(output_path)
             raise AlgorithmRuntimeError("algorithm_output_missing", detail)
         pred = _read_image_bgr(resolved_output)
+        detail["output_path"] = str(resolved_output)
+        if pred is None or pred.size == 0:
+            raise AlgorithmRuntimeError("algorithm_output_unreadable", detail)
+        return AlgorithmRuntimeResult(image_bgr_u8=pred, detail=detail)
+
+
+class UserAlgorithmVideoRunner:
+    def __init__(self, algorithm: dict[str, Any], *, timeout_s: float = 60.0):
+        self.algorithm = algorithm if isinstance(algorithm, dict) else {}
+        self.archive_path = _resolve_archive_path(self.algorithm)
+        self.timeout = max(1.0, float(timeout_s or 60.0))
+        self._tmp_ctx = tempfile.TemporaryDirectory(prefix="abp_alg_video_")
+        self._tmp_dir = Path(self._tmp_ctx.name)
+        self.script_path = _prepare_script(self.archive_path, self._tmp_dir)
+        self._sample_index = 0
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._tmp_ctx.cleanup()
+        self._closed = True
+
+    def __enter__(self) -> UserAlgorithmVideoRunner:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        self.close()
+        return False
+
+    def run(self, input_video_path: str | Path, *, sample_name: str = "") -> AlgorithmRuntimeResult:
+        if self._closed:
+            raise AlgorithmRuntimeError(
+                "algorithm_runtime_closed",
+                {"algorithm_id": str((self.algorithm or {}).get("algorithm_id") or "")},
+            )
+        source_path = Path(str(input_video_path or "")).resolve()
+        if not source_path.exists() or not source_path.is_file():
+            raise AlgorithmRuntimeError("algorithm_input_video_missing", {"input_path": str(source_path), "sample_name": sample_name})
+
+        self._sample_index += 1
+        sample_dir = self._tmp_dir / "samples" / f"sample_{self._sample_index:04d}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        output_path = sample_dir / "output.mp4"
+
+        cmd = [sys.executable, str(self.script_path), "--input", str(source_path), "--output", str(output_path)]
+        env = os.environ.copy()
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        start = time.time()
+        try:
+            completed = subprocess.run(
+                cmd,
+                cwd=str(self.script_path.parent),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AlgorithmRuntimeError(
+                "algorithm_script_timeout",
+                {
+                    "timeout_s": self.timeout,
+                    "script": str(self.script_path),
+                    "stdout": _short_text(exc.stdout or ""),
+                    "stderr": _short_text(exc.stderr or ""),
+                    "sample_name": sample_name,
+                    "sample_index": self._sample_index,
+                    "mode": "subprocess_video",
+                },
+            ) from exc
+        elapsed = time.time() - start
+
+        detail = {
+            "archive_path": str(self.archive_path),
+            "script": str(self.script_path),
+            "command": " ".join(cmd),
+            "returncode": int(completed.returncode),
+            "elapsed_s": round(float(elapsed), 6),
+            "stdout": _short_text(completed.stdout),
+            "stderr": _short_text(completed.stderr),
+            "sample_name": sample_name,
+            "sample_index": self._sample_index,
+            "mode": "subprocess_video",
+            "input_path": str(source_path),
+        }
+        if completed.returncode != 0:
+            raise AlgorithmRuntimeError("algorithm_script_failed", detail)
+
+        resolved_output = _find_output_video(output_path=output_path)
+        if resolved_output is None:
+            detail["output_path"] = str(output_path)
+            raise AlgorithmRuntimeError("algorithm_output_missing", detail)
+        pred = _read_first_frame_bgr(resolved_output)
         detail["output_path"] = str(resolved_output)
         if pred is None or pred.size == 0:
             raise AlgorithmRuntimeError("algorithm_output_unreadable", detail)
@@ -236,6 +342,27 @@ def _find_output_image(input_path: Path, output_path: Path) -> Path | None:
         return None
     same_name = [p for p in deduped if p.name.lower() == input_path.name.lower()]
     return same_name[0] if same_name else deduped[0]
+
+
+def _find_output_video(output_path: Path) -> Path | None:
+    if output_path.is_file() and output_path.suffix.lower() in VIDEO_EXTS:
+        return output_path.resolve()
+    candidates: list[Path] = []
+    if output_path.is_dir():
+        candidates.extend(sorted((p for p in output_path.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_EXTS), key=lambda p: str(p).lower()))
+    parent = output_path.parent
+    if parent.exists():
+        candidates.extend(sorted((p for p in parent.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXTS), key=lambda p: str(p).lower()))
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for item in candidates:
+        resolved = item.resolve()
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(resolved)
+    return deduped[0] if deduped else None
 
 
 def execute_user_algorithm_image(

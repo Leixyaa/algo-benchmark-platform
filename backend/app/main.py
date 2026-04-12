@@ -953,9 +953,6 @@ def _is_userpackage_download_runtime_ready(algorithm: dict | None) -> bool:
     impl = str(algorithm.get("impl") or "").strip().lower()
     if impl != "userpackage":
         return False
-    task_type = str(algorithm.get("task_type") or "").strip().lower()
-    if task_type.startswith("video_"):
-        return False
     archive_path = str(algorithm.get("archive_path") or "").strip()
     archive_filename = str(algorithm.get("archive_filename") or "").strip()
     return bool(archive_path or archive_filename)
@@ -4824,8 +4821,6 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         is_owner_package = algorithm_owner_id == owner_id
         if algorithm_owner_id not in {"system", owner_id}:
             err.api_error(403, err.E_HTTP, "forbidden_access")
-        if task_type.startswith("video_"):
-            err.api_error(409, err.E_ALGORITHM_RUNTIME, "algorithm_package_video_not_supported", algorithm_id=algorithm_id, task_type=task_type)
         can_use_runtime = is_owner_package or bool(alg.get("allow_use"))
         if package_role == "downloaded_community" and algorithm_owner_id == owner_id:
             can_use_runtime = True

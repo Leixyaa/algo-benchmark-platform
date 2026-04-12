@@ -17,7 +17,7 @@ from .celery_app import celery_app
 from .store import make_redis, load_run, save_run, load_dataset, load_algorithm, list_metrics
 from . import errors as err
 from .metric_runtime import execute_python_metric
-from .algorithm_runtime import AlgorithmRuntimeError, UserAlgorithmImageRunner
+from .algorithm_runtime import AlgorithmRuntimeError, UserAlgorithmImageRunner, UserAlgorithmVideoRunner
 
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
@@ -696,6 +696,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     save_run(r, run_id, run)
 
     user_algorithm_runner: UserAlgorithmImageRunner | None = None
+    user_algorithm_video_runner: UserAlgorithmVideoRunner | None = None
 
     try:
         def check_cancel():
@@ -837,14 +838,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             save_run(r, run_id, run)
 
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
-                nonlocal user_algorithm_runner
+                nonlocal user_algorithm_runner, user_algorithm_video_runner
                 if is_user_package:
-                    if is_video_task:
-                        raise RunFailed(
-                            err.E_ALGORITHM_RUNTIME,
-                            "algorithm_package_video_not_supported",
-                            {"algorithm_id": algorithm_id, "task_type": task_type},
-                        )
                     algorithm_owner_id = str((alg or {}).get("owner_id") or "system").strip() or "system"
                     run_owner_id = str(run.get("owner_id") or "").strip()
                     package_role = _infer_user_package_role(alg)
@@ -879,9 +874,17 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     sample_name = getattr(pair, "name", None) or ""
                     timeout_s = _get_num(algo_params, "user_algorithm_timeout_s", 30.0, 1.0, 300.0)
                     try:
-                        if user_algorithm_runner is None:
-                            user_algorithm_runner = UserAlgorithmImageRunner(alg, timeout_s=timeout_s)
-                        result = user_algorithm_runner.run(inp_u8, sample_name=sample_name)
+                        if is_video_task:
+                            if user_algorithm_video_runner is None:
+                                user_algorithm_video_runner = UserAlgorithmVideoRunner(alg, timeout_s=timeout_s)
+                            result = user_algorithm_video_runner.run(getattr(pair, "input_path"), sample_name=sample_name)
+                            detail = dict(result.detail or {})
+                            detail["task_type"] = task_type
+                            result = type(result)(image_bgr_u8=result.image_bgr_u8, detail=detail)
+                        else:
+                            if user_algorithm_runner is None:
+                                user_algorithm_runner = UserAlgorithmImageRunner(alg, timeout_s=timeout_s)
+                            result = user_algorithm_runner.run(inp_u8, sample_name=sample_name)
                     except AlgorithmRuntimeError as exc:
                         raise RunFailed(err.E_ALGORITHM_RUNTIME, exc.message, exc.detail) from exc
                     user_runtime_details.append(result.detail)
@@ -1348,5 +1351,10 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         if user_algorithm_runner is not None:
             try:
                 user_algorithm_runner.close()
+            except Exception:
+                pass
+        if user_algorithm_video_runner is not None:
+            try:
+                user_algorithm_video_runner.close()
             except Exception:
                 pass
