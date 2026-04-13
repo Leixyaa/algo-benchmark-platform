@@ -8,7 +8,7 @@ import socket
 import platform
 import tracemalloc
 import math
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import numpy as np
 import hashlib
@@ -315,6 +315,225 @@ def _read_first_frame(video_path: str) -> np.ndarray | None:
     if not ok or frame is None:
         return None
     return frame
+
+
+def _video_metric_max_frames(algo_params: dict[str, Any]) -> int:
+    """视频任务：指标按帧聚合时最多读取的帧数（防止超长视频拖垮评测）。"""
+    return _get_int(algo_params, "video_metric_max_frames", 360, 8, 7200)
+
+
+def _mean_video_sample_from_frames(
+    frame_samples: list[dict[str, Any]],
+    sample_name: str,
+    selected_metrics: list[str],
+) -> dict[str, Any]:
+    if not frame_samples:
+        return {"name": sample_name}
+    out: dict[str, Any] = {"name": sample_name}
+    for key in selected_metrics:
+        vals = [float(fs[key]) for fs in frame_samples if key in fs and isinstance(fs.get(key), (int, float))]
+        if vals:
+            out[key] = _round_metric_value(key, float(np.mean(vals)))
+    return out
+
+
+def _eval_builtin_video_pair_frames(
+    pair: Any,
+    compute_pred: Callable[..., np.ndarray],
+    *,
+    check_cancel: Callable[[], None],
+    selected_metrics: list[str],
+    metric_defs: dict[str, dict[str, Any]],
+    task_type: str,
+    sample_name: str,
+    max_frames: int,
+) -> tuple[
+    list[float],
+    list[float],
+    list[float],
+    dict[str, list[float]],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    dict[str, Any],
+    int,
+]:
+    """
+    内置视频算法：对输入 / GT 视频同步逐帧推理并按帧计算指标，再对每帧指标做平均写入汇总行。
+    返回各列表为「本段视频各帧」的展开值，便于全局按帧加权平均；最后一个 dict 为该段视频的均值样例行。
+    """
+    psnr_list: list[float] = []
+    ssim_list: list[float] = []
+    niqe_list: list[float] = []
+    custom_metric_values: dict[str, list[float]] = {}
+    metric_elapsed_list: list[float] = []
+    metric_psnr_ssim_elapsed_list: list[float] = []
+    metric_niqe_elapsed_list: list[float] = []
+    metric_custom_elapsed_list: list[float] = []
+    algo_elapsed_list: list[float] = []
+    frame_samples: list[dict[str, Any]] = []
+
+    cap_in = cv2.VideoCapture(str(getattr(pair, "input_path", "")))
+    cap_gt = cv2.VideoCapture(str(getattr(pair, "gt_path", "")))
+    if not cap_in.isOpened() or not cap_gt.isOpened():
+        cap_in.release()
+        cap_gt.release()
+        return (
+            psnr_list,
+            ssim_list,
+            niqe_list,
+            custom_metric_values,
+            metric_elapsed_list,
+            metric_psnr_ssim_elapsed_list,
+            metric_niqe_elapsed_list,
+            metric_custom_elapsed_list,
+            algo_elapsed_list,
+            {"name": sample_name},
+            0,
+        )
+    try:
+        n = 0
+        while n < max_frames:
+            check_cancel()
+            ok_i, inp_u8 = cap_in.read()
+            ok_g, gt_u8 = cap_gt.read()
+            if not ok_i or not ok_g or inp_u8 is None or gt_u8 is None:
+                break
+            t_algo = time.time()
+            pred_u8 = compute_pred(inp_u8, gt_u8, pair)
+            algo_elapsed_list.append(time.time() - t_algo)
+            gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
+            sample, custom_values, timings = _compute_metric_sample(
+                gt_u8=gt_u8,
+                pred_u8=pred_u8,
+                selected_metrics=selected_metrics,
+                metric_defs=metric_defs,
+                task_type=task_type,
+                sample_name=f"{sample_name}#f{n}",
+            )
+            frame_samples.append(sample)
+            if "PSNR" in sample:
+                psnr_list.append(float(sample["PSNR"]))
+            if "SSIM" in sample:
+                ssim_list.append(float(sample["SSIM"]))
+            if "NIQE" in sample:
+                niqe_list.append(float(sample["NIQE"]))
+            for metric_key, value in custom_values.items():
+                custom_metric_values.setdefault(metric_key, []).append(float(value))
+            metric_elapsed_list.append(float(timings["metric_elapsed"]))
+            metric_psnr_ssim_elapsed_list.append(float(timings["builtin_elapsed"]))
+            metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
+            metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
+            n += 1
+    finally:
+        cap_in.release()
+        cap_gt.release()
+
+    mean_row = _mean_video_sample_from_frames(frame_samples, sample_name, selected_metrics)
+    return (
+        psnr_list,
+        ssim_list,
+        niqe_list,
+        custom_metric_values,
+        metric_elapsed_list,
+        metric_psnr_ssim_elapsed_list,
+        metric_niqe_elapsed_list,
+        metric_custom_elapsed_list,
+        algo_elapsed_list,
+        mean_row,
+        len(frame_samples),
+    )
+
+
+def _eval_user_video_pair_frames(
+    gt_video_path: str,
+    pred_video_path: str,
+    *,
+    check_cancel: Callable[[], None],
+    selected_metrics: list[str],
+    metric_defs: dict[str, dict[str, Any]],
+    task_type: str,
+    sample_name: str,
+    max_frames: int,
+) -> tuple[
+    list[float],
+    list[float],
+    list[float],
+    dict[str, list[float]],
+    list[float],
+    list[float],
+    list[float],
+    list[float],
+    dict[str, Any],
+    int,
+]:
+    """用户接入视频算法：对算法输出视频与 GT 视频逐帧对齐计算指标。"""
+    psnr_list: list[float] = []
+    ssim_list: list[float] = []
+    niqe_list: list[float] = []
+    custom_metric_values: dict[str, list[float]] = {}
+    metric_elapsed_list: list[float] = []
+    metric_psnr_ssim_elapsed_list: list[float] = []
+    metric_niqe_elapsed_list: list[float] = []
+    metric_custom_elapsed_list: list[float] = []
+    frame_samples: list[dict[str, Any]] = []
+
+    cap_gt = cv2.VideoCapture(str(gt_video_path))
+    cap_pr = cv2.VideoCapture(str(pred_video_path))
+    if not cap_gt.isOpened() or not cap_pr.isOpened():
+        cap_gt.release()
+        cap_pr.release()
+        return (psnr_list, ssim_list, niqe_list, custom_metric_values, metric_elapsed_list, metric_psnr_ssim_elapsed_list, metric_niqe_elapsed_list, metric_custom_elapsed_list, {"name": sample_name}, 0)
+    try:
+        n = 0
+        while n < max_frames:
+            check_cancel()
+            ok_g, gt_u8 = cap_gt.read()
+            ok_p, pred_u8 = cap_pr.read()
+            if not ok_g or not ok_p or gt_u8 is None or pred_u8 is None:
+                break
+            gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
+            sample, custom_values, timings = _compute_metric_sample(
+                gt_u8=gt_u8,
+                pred_u8=pred_u8,
+                selected_metrics=selected_metrics,
+                metric_defs=metric_defs,
+                task_type=task_type,
+                sample_name=f"{sample_name}#f{n}",
+            )
+            frame_samples.append(sample)
+            if "PSNR" in sample:
+                psnr_list.append(float(sample["PSNR"]))
+            if "SSIM" in sample:
+                ssim_list.append(float(sample["SSIM"]))
+            if "NIQE" in sample:
+                niqe_list.append(float(sample["NIQE"]))
+            for metric_key, value in custom_values.items():
+                custom_metric_values.setdefault(metric_key, []).append(float(value))
+            metric_elapsed_list.append(float(timings["metric_elapsed"]))
+            metric_psnr_ssim_elapsed_list.append(float(timings["builtin_elapsed"]))
+            metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
+            metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
+            n += 1
+    finally:
+        cap_gt.release()
+        cap_pr.release()
+
+    mean_row = _mean_video_sample_from_frames(frame_samples, sample_name, selected_metrics)
+    return (
+        psnr_list,
+        ssim_list,
+        niqe_list,
+        custom_metric_values,
+        metric_elapsed_list,
+        metric_psnr_ssim_elapsed_list,
+        metric_niqe_elapsed_list,
+        metric_custom_elapsed_list,
+        mean_row,
+        len(frame_samples),
+    )
 
 
 def _apply_gamma_bgr(img_bgr_u8: np.ndarray, gamma: float) -> np.ndarray:
@@ -992,6 +1211,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
             if pairs:
                 if is_video_task:
+                    vm_max = _video_metric_max_frames(algo_params)
                     psnr_list: list[float] = []
                     ssim_list: list[float] = []
                     niqe_list: list[float] = []
@@ -1003,38 +1223,97 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                     samples: list[dict[str, Any]] = []
                     read_ok = 0
                     read_fail = 0
+                    video_frames_total = 0
+                    dummy_u8 = np.zeros((4, 4, 3), dtype=np.uint8)
                     for pair in pairs:
                         check_cancel()
-                        inp_u8 = _read_first_frame(str(pair.input_path))
-                        gt_u8 = _read_first_frame(str(pair.gt_path))
-                        if inp_u8 is None or gt_u8 is None:
-                            read_fail += 1
-                            continue
-                        read_ok += 1
-                        pred_u8 = compute_pred(inp_u8, gt_u8, pair)
-                        gt_u8, pred_u8 = _resize_to_match(gt_u8, pred_u8)
                         sample_name = getattr(pair, "name", None) or ""
-                        sample, custom_values, timings = _compute_metric_sample(
-                            gt_u8=gt_u8,
-                            pred_u8=pred_u8,
-                            selected_metrics=selected_metrics,
-                            metric_defs=metric_defs,
-                            task_type=task_type,
-                            sample_name=sample_name,
-                        )
-                        if "PSNR" in sample:
-                            psnr_list.append(float(sample["PSNR"]))
-                        if "SSIM" in sample:
-                            ssim_list.append(float(sample["SSIM"]))
-                        if "NIQE" in sample:
-                            niqe_list.append(float(sample["NIQE"]))
-                        for metric_key, value in custom_values.items():
-                            custom_metric_values.setdefault(metric_key, []).append(float(value))
-                        metric_elapsed_list.append(float(timings["metric_elapsed"]))
-                        metric_psnr_ssim_elapsed_list.append(float(timings["builtin_elapsed"]))
-                        metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
-                        metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
-                        samples.append(_filter_sample_metrics(sample, selected_metrics))
+                        try:
+                            if is_user_package:
+                                _ = compute_pred(dummy_u8, dummy_u8, pair)
+                                if not user_runtime_details:
+                                    read_fail += 1
+                                    continue
+                                pred_path = str(user_runtime_details[-1].get("output_path") or "").strip()
+                                if not pred_path:
+                                    read_fail += 1
+                                    continue
+                                (
+                                    p_psnr,
+                                    p_ssim,
+                                    p_niqe,
+                                    p_custom,
+                                    p_mel,
+                                    p_pss,
+                                    p_nel,
+                                    p_cel,
+                                    mean_row,
+                                    nf,
+                                ) = _eval_user_video_pair_frames(
+                                    str(pair.gt_path),
+                                    pred_path,
+                                    check_cancel=check_cancel,
+                                    selected_metrics=selected_metrics,
+                                    metric_defs=metric_defs,
+                                    task_type=task_type,
+                                    sample_name=sample_name,
+                                    max_frames=vm_max,
+                                )
+                                if nf <= 0:
+                                    read_fail += 1
+                                    continue
+                                read_ok += 1
+                                video_frames_total += nf
+                                psnr_list.extend(p_psnr)
+                                ssim_list.extend(p_ssim)
+                                niqe_list.extend(p_niqe)
+                                for mk, vals in p_custom.items():
+                                    custom_metric_values.setdefault(mk, []).extend(vals)
+                                metric_elapsed_list.extend(p_mel)
+                                metric_psnr_ssim_elapsed_list.extend(p_pss)
+                                metric_niqe_elapsed_list.extend(p_nel)
+                                metric_custom_elapsed_list.extend(p_cel)
+                                samples.append(_filter_sample_metrics(mean_row, selected_metrics))
+                            else:
+                                (
+                                    p_psnr,
+                                    p_ssim,
+                                    p_niqe,
+                                    p_custom,
+                                    p_mel,
+                                    p_pss,
+                                    p_nel,
+                                    p_cel,
+                                    _p_algo,
+                                    mean_row,
+                                    nf,
+                                ) = _eval_builtin_video_pair_frames(
+                                    pair,
+                                    compute_pred,
+                                    check_cancel=check_cancel,
+                                    selected_metrics=selected_metrics,
+                                    metric_defs=metric_defs,
+                                    task_type=task_type,
+                                    sample_name=sample_name,
+                                    max_frames=vm_max,
+                                )
+                                if nf <= 0:
+                                    read_fail += 1
+                                    continue
+                                read_ok += 1
+                                video_frames_total += nf
+                                psnr_list.extend(p_psnr)
+                                ssim_list.extend(p_ssim)
+                                niqe_list.extend(p_niqe)
+                                for mk, vals in p_custom.items():
+                                    custom_metric_values.setdefault(mk, []).extend(vals)
+                                metric_elapsed_list.extend(p_mel)
+                                metric_psnr_ssim_elapsed_list.extend(p_pss)
+                                metric_niqe_elapsed_list.extend(p_nel)
+                                metric_custom_elapsed_list.extend(p_cel)
+                                samples.append(_filter_sample_metrics(mean_row, selected_metrics))
+                        except RunFailed:
+                            raise
                     if read_ok <= 0:
                         if strict_validate:
                             raise RunFailed(err.E_READ_IMAGE_FAIL, "video_read_failed_or_empty", {"pair_used": len(pairs), "read_ok": read_ok, "read_fail": read_fail})
@@ -1056,6 +1335,9 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                             "data_used": read_ok,
                             "read_ok": read_ok,
                             "read_fail": read_fail,
+                            "video_metric_mode": "per_frame_mean",
+                            "video_metric_max_frames": vm_max,
+                            "video_metric_frames_total": video_frames_total,
                             "metric_elapsed_mean": round(float(np.mean(metric_elapsed_list)) if metric_elapsed_list else 0.0, 6),
                             "metric_elapsed_sum": round(float(np.sum(metric_elapsed_list)) if metric_elapsed_list else 0.0, 6),
                             "metric_psnr_ssim_elapsed_mean": round(float(np.mean(metric_psnr_ssim_elapsed_list)) if metric_psnr_ssim_elapsed_list else 0.0, 6),

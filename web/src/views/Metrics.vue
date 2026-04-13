@@ -62,7 +62,7 @@
     <div class="my-metrics-section">
       <div class="section-header">
         <div class="section-title">我的指标库</div>
-        <div class="section-sub">仅包含你本人提交的指标（含审核中、已接入、社区副本等）。可在此查看详情、下载代码、发布或下架社区、删除。窄屏时可横向滚动操作列。</div>
+        <div class="section-sub">仅包含你本人提交的指标（含审核中、已接入、社区副本等）。可在此查看详情、下载代码、发布或下架社区、删除。</div>
       </div>
       <div class="my-metrics-table-wrap">
         <el-table :data="myMetricLibrary" border stripe class="data-table my-metrics-table">
@@ -82,11 +82,6 @@
               <el-tag :type="row.runtimeReady ? 'success' : 'info'">{{ row.runtimeReady ? "已接入" : "未接入" }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="代码文件" width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.codeFilename || "-" }}
-            </template>
-          </el-table-column>
           <el-table-column label="社区发布" width="100">
             <template #default="{ row }">
               <el-tag v-if="row.visibility === 'public'" type="success">已发布</el-tag>
@@ -94,8 +89,7 @@
               <span v-else class="muted-text">未发布</span>
             </template>
           </el-table-column>
-          <el-table-column prop="reviewNote" label="审核说明" min-width="160" show-overflow-tooltip />
-          <el-table-column label="操作" width="400" fixed="right" align="left">
+          <el-table-column label="操作" min-width="360" fixed="right" align="left">
             <template #default="{ row }">
               <div class="my-metric-actions">
                 <el-button size="small" plain @click="openMetricSubmissionDetail(row)">详情</el-button>
@@ -276,7 +270,6 @@
             <span v-else class="muted-text">未发布</span>
           </template>
         </el-table-column>
-        <el-table-column prop="reviewNote" label="审核说明" min-width="160" show-overflow-tooltip />
         <template #empty>
           <el-empty description="暂无提交记录" />
         </template>
@@ -329,8 +322,11 @@
   </div>
 </template>
 
+<script>
+export default { name: "Metrics" };
+</script>
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
@@ -682,22 +678,39 @@ watch(
   { deep: true }
 );
 
+function startMetricsBackgroundSync() {
+  if (metricsRefreshTimer) return;
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  metricsRefreshTimer = window.setInterval(refreshMetricsSilently, 10000);
+}
+
+function stopMetricsBackgroundSync() {
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  if (metricsRefreshTimer) {
+    window.clearInterval(metricsRefreshTimer);
+    metricsRefreshTimer = null;
+  }
+}
+
 onMounted(async () => {
   if (store.metricsCatalog?.length) {
     refreshMetricsSilently();
   } else {
     await refreshMetricsSilently();
   }
-  document.addEventListener("visibilitychange", handleVisibilityChange);
-  metricsRefreshTimer = window.setInterval(refreshMetricsSilently, 10000);
+});
+
+onActivated(() => {
+  startMetricsBackgroundSync();
+  refreshMetricsSilently();
+});
+
+onDeactivated(() => {
+  stopMetricsBackgroundSync();
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("visibilitychange", handleVisibilityChange);
-  if (metricsRefreshTimer) {
-    window.clearInterval(metricsRefreshTimer);
-    metricsRefreshTimer = null;
-  }
+  stopMetricsBackgroundSync();
 });
 </script>
 

@@ -1,12 +1,15 @@
 <template>
   <div class="page">
     <div class="header-section">
-      <div class="header-left">
-        <h2 class="page-title">发起评测任务</h2>
-        <p class="page-subtitle">通过简单的三个步骤，快速配置并启动您的算法性能评测</p>
-      </div>
-      <div class="header-right">
-        <el-button class="centered-btn" @click="goRuns">返回任务中心</el-button>
+      <h2 class="title">发起评测任务</h2>
+      <p class="subtitle">通过简单的三个步骤，快速配置并启动算法性能评测。</p>
+    </div>
+
+    <div class="action-bar new-run-action-bar">
+      <div class="toolbar">
+        <div class="toolbar-right">
+          <el-button class="centered-btn" @click="goRuns">返回任务中心</el-button>
+        </div>
       </div>
     </div>
 
@@ -79,10 +82,10 @@
               <div v-if="datasetHintText" class="dataset-alert">
                 <el-alert :title="datasetHintText" :type="datasetHintType" :closable="false" show-icon />
               </div>
-              <el-button 
-                v-if="form.datasetId" 
-                size="small" 
-                plain 
+              <el-button
+                v-if="form.datasetId && isNewRunAdmin"
+                size="small"
+                plain
                 class="scan-btn centered-btn"
                 @click="scanSelectedDataset"
               >
@@ -271,6 +274,9 @@
 
 </template>
 
+<script>
+export default { name: "NewRun" };
+</script>
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -280,6 +286,10 @@ import { TASK_LABEL_BY_TYPE, useAppStore, toTaskLabel, toTaskType } from "../sto
 const NEWRUN_CACHE_KEY = "newrun_form_v2";
 const router = useRouter();
 const store = useAppStore();
+
+/** 数据集目录扫描仅管理员可用，不对普通用户暴露 */
+const isNewRunAdmin = computed(() => String(store.user?.role || "") === "admin");
+
 const HIDDEN_PLATFORM_ALGORITHM_IDS = new Set([
   "alg_dn_cnn_light",
   "alg_dn_cnn_strong",
@@ -891,6 +901,7 @@ function normalizePresetName(name) {
 }
 
 async function scanSelectedDataset() {
+  if (!isNewRunAdmin.value) return;
   if (!form.datasetId) return;
   try {
     await store.scanDataset(form.datasetId);
@@ -922,7 +933,10 @@ const datasetHintText = computed(() => {
     {};
   const n = Number(pairs?.[tt] ?? 0);
   if (Number.isFinite(n) && n > 0) return `当前任务可用配对：${n} 组（已检测输入/gt）`;
-  return "当前任务配对数为 0，请检查 gt 目录与输入目录后重新扫描。";
+  if (isNewRunAdmin.value) {
+    return "当前任务配对数为 0，请检查 gt 目录与输入目录后重新扫描。";
+  }
+  return "当前任务配对数为 0，请确认该数据集是否包含当前任务所需的输入与 GT，或尝试更换数据集。";
 });
 
 async function savePreset() {
@@ -1019,7 +1033,10 @@ async function create() {
     {};
   const pairCount = Number(pairs?.[tt] ?? 0);
   if (!Number.isFinite(pairCount) || pairCount <= 0) {
-    return ElMessage({ type: "error", message: "当前任务配对数为 0，无法创建 Run。请先扫描并修复输入/gt配对。" });
+    const msg = isNewRunAdmin.value
+      ? "当前任务配对数为 0，无法创建 Run。请先扫描并修复输入/gt 配对。"
+      : "当前任务配对数为 0，无法创建任务。请确认数据集中输入与 GT 是否齐全，或更换数据集。";
+    return ElMessage({ type: "error", message: msg });
   }
 
   let params = {};
@@ -1045,7 +1062,18 @@ async function create() {
 
   try {
     const creationResults = [];
-    for (const algorithmId of targetAlgorithmIds) {
+    const failures = [];
+    const total = targetAlgorithmIds.length;
+    const concurrency = Math.min(4, Math.max(1, total));
+    let cursor = 0;
+
+    const progressTip = ElMessage({
+      type: "info",
+      message: `正在创建评测任务（0/${total}）...`,
+      duration: 0,
+    });
+
+    const createOne = async (algorithmId) => {
       const currentAlgorithm = store.algorithms.find((item) => item.id === algorithmId);
       const runParams = isSingleAlgorithmMode.value
         ? JSON.parse(JSON.stringify(params))
@@ -1060,6 +1088,33 @@ async function create() {
         evalMode: form.evalMode,
       });
       creationResults.push(algorithmId);
+    };
+
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (true) {
+        const idx = cursor;
+        cursor += 1;
+        if (idx >= total) return;
+        const algorithmId = targetAlgorithmIds[idx];
+        try {
+          await createOne(algorithmId);
+        } catch (error) {
+          failures.push({ algorithmId, error });
+        }
+      }
+    });
+
+    await Promise.all(workers);
+    progressTip.close();
+
+    if (failures.length) {
+      const first = failures[0] || {};
+      const err = first.error || new Error("部分任务创建失败");
+      err.partialSuccess = creationResults.length;
+      err.total = total;
+      err.failedCount = failures.length;
+      err.failedAlgorithmId = first.algorithmId || "";
+      throw err;
     }
     // 让用户选择是否留在当前页面或转到任务中心
     try {
@@ -1083,23 +1138,39 @@ async function create() {
       activeStep.value = 0;
     }
   } catch (e) {
+    if (Number.isFinite(e?.partialSuccess) && Number.isFinite(e?.total)) {
+      ElMessage({
+        type: "warning",
+        message: `已创建 ${e.partialSuccess}/${e.total} 个任务，仍有 ${e.failedCount || 1} 个失败`,
+      });
+    }
     const d = e?.detail;
     if (d && typeof d === "object") {
       const code = d.error_code || d.error || "";
       if (code === "dataset_no_pairs_for_task" || code === "E_DATASET_NO_PAIR") {
         const dirs = Array.isArray(d.expected_dirs) ? d.expected_dirs.join(" + ") : "";
         const hint = dirs ? `建议目录：${dirs}` : "请检查 gt 目录与输入目录";
-        try {
-          await ElMessageBox.confirm(`${d.message || "当前数据集无有效配对"}\n${hint}\n是否立即扫描数据集？`, "数据集提示", {
-            type: "warning",
-            confirmButtonText: "立即扫描",
-            cancelButtonText: "稍后",
-          });
+        if (isNewRunAdmin.value) {
           try {
-            await scanSelectedDataset();
+            await ElMessageBox.confirm(`${d.message || "当前数据集无有效配对"}\n${hint}\n是否立即扫描数据集？`, "数据集提示", {
+              type: "warning",
+              confirmButtonText: "立即扫描",
+              cancelButtonText: "稍后",
+            });
+            try {
+              await scanSelectedDataset();
+            } catch {
+              // ignore
+            }
           } catch {
+            // user cancelled
           }
-        } catch {
+        } else {
+          await ElMessageBox.alert(
+            `${d.message || "当前数据集无有效配对"}\n${hint}\n请调整数据集内容或更换数据集后再试。`,
+            "数据集提示",
+            { type: "warning" }
+          );
         }
         return;
       }
@@ -1157,33 +1228,48 @@ function goRuns() {
   margin: 0 auto;
 }
 
-/* Header Section */
+/* Header + 工具条（与算法库 / 指标库一致） */
 .header-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 32px;
-  flex-wrap: wrap;
-  gap: 16px;
+  margin-bottom: 8px;
 }
 
-.header-left {
-  flex: 1;
-}
-
-.page-title {
-  margin: 0;
+.title {
+  margin: 0 0 12px;
   font-size: 28px;
   font-weight: 700;
-  color: #1a2f62;
+  color: #1f2f57;
   line-height: 1.2;
 }
 
-.page-subtitle {
-  margin: 8px 0 0;
-  color: #64748b;
+.subtitle {
+  margin: 0;
+  max-width: 860px;
+  color: #6a7ca9;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.action-bar {
+  background: #f8faff;
+  padding: 20px 28px;
+  border-radius: 16px;
+  border: 1px solid #e6eeff;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.new-run-action-bar .toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .centered-btn {
@@ -1827,13 +1913,7 @@ function goRuns() {
     padding: 16px;
   }
   
-  .header-section {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  
-  .page-title {
+  .title {
     font-size: 24px;
   }
   

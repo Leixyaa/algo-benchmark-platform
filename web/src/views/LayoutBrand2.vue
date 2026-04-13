@@ -69,7 +69,11 @@
 
       <el-main class="main">
         <div class="contentCard">
-          <router-view />
+          <router-view v-slot="{ Component }">
+            <keep-alive :include="layoutCachedPageNames">
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
         </div>
       </el-main>
     </el-container>
@@ -88,6 +92,19 @@ const router = useRouter();
 const store = useAppStore();
 const notifiedIds = new Set();
 
+/** 缓存主区页面实例，避免每次切换路由都销毁重建、重复打全量接口 */
+const layoutCachedPageNames = [
+  "Community",
+  "Datasets",
+  "Algorithms",
+  "Metrics",
+  "NewRun",
+  "Compare",
+  "Runs",
+  "Notices",
+  "Admin",
+];
+
 const active = computed(() => route.path);
 const unreadCount = computed(() => (Array.isArray(store.notices) ? store.notices.length : 0));
 
@@ -96,7 +113,6 @@ const title = computed(() => {
     "/community": "社区中心",
     "/datasets": "数据集管理",
     "/algorithms": "算法库",
-    "/algorithm-access": "算法接入",
     "/metrics": "指标库",
     "/new-run": "发起评测",
     "/runs": "任务中心",

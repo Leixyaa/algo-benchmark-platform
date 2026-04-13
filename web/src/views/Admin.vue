@@ -17,12 +17,19 @@
 
       <el-tab-pane label="社区算法" name="algorithms">
         <div class="toolbar">
-          <el-input v-model="algorithmKeyword" placeholder="搜索算法名称 / 上传者ID" clearable class="search-input" />
+          <el-input v-model="algorithmKeyword" placeholder="搜索算法名称或上传者" clearable class="search-input" />
         </div>
-        <el-table :data="filteredAlgorithms" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredAlgorithms"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="name" label="算法名称" min-width="220" />
           <el-table-column prop="task" label="任务" width="120" />
-          <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+          <el-table-column prop="uploaderId" label="上传者" width="140" />
           <el-table-column prop="downloadCount" label="下载量" width="100" />
           <el-table-column prop="createdAt" label="发布时间" width="180" />
           <el-table-column label="操作" width="320">
@@ -52,13 +59,20 @@
 
       <el-tab-pane label="社区数据集" name="datasets">
         <div class="toolbar">
-          <el-input v-model="datasetKeyword" placeholder="搜索数据集名称 / 上传者ID" clearable class="search-input" />
+          <el-input v-model="datasetKeyword" placeholder="搜索数据集名称或上传者" clearable class="search-input" />
         </div>
-        <el-table :data="filteredDatasets" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredDatasets"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="name" label="数据集名称" min-width="220" />
           <el-table-column prop="type" label="类型" width="100" />
           <el-table-column prop="size" label="规模" width="140" />
-          <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+          <el-table-column prop="uploaderId" label="上传者" width="140" />
           <el-table-column prop="downloadCount" label="下载量" width="100" />
           <el-table-column prop="createdAt" label="发布时间" width="180" />
           <el-table-column label="操作" width="220">
@@ -81,7 +95,14 @@
         <div class="toolbar">
           <el-input v-model="metricKeyword" placeholder="搜索指标名称 / 标识 / 提交人" clearable class="search-input" />
         </div>
-        <el-table :data="filteredMetrics" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredMetrics"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="displayName" label="指标名称" min-width="160" />
           <el-table-column prop="metricKey" label="指标标识" width="150" />
           <el-table-column label="适用任务" min-width="180">
@@ -120,7 +141,14 @@
             class="search-input"
           />
         </div>
-        <el-table :data="filteredAlgorithmSubmissions" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredAlgorithmSubmissions"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="name" label="算法名称" min-width="180" />
           <el-table-column prop="taskLabel" label="任务" width="110" />
           <el-table-column prop="uploaderId" label="提交人" width="140" />
@@ -152,7 +180,14 @@
         <div class="toolbar">
           <el-input v-model="pendingReportKeyword" placeholder="搜索待处理举报对象 / 举报人 / 原因" clearable class="search-input" />
         </div>
-        <el-table :data="pendingReports" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="pendingReports"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="targetTypeLabel" label="举报类型" width="120" />
           <el-table-column prop="targetId" label="举报对象ID" min-width="180" />
           <el-table-column prop="reporterId" label="举报人ID" width="140" />
@@ -177,7 +212,14 @@
         <div class="toolbar">
           <el-input v-model="metricLogKeyword" placeholder="搜索指标名称 / 标识 / 提交人 / 处理人" clearable class="search-input" />
         </div>
-        <el-table :data="handledMetricLogs" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="handledMetricLogs"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="name" label="指标名称" min-width="180" />
           <el-table-column prop="targetId" label="指标标识" min-width="180" />
           <el-table-column prop="submitterId" label="提交人" width="140" />
@@ -198,7 +240,14 @@
             class="search-input"
           />
         </div>
-        <el-table :data="handledAlgorithmSubmissionLogs" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="handledAlgorithmSubmissionLogs"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="name" label="算法名称" min-width="180" />
           <el-table-column prop="taskLabel" label="任务" width="110" />
           <el-table-column prop="submitterId" label="提交人" width="140" />
@@ -248,7 +297,14 @@
             清除举报记录
           </el-button>
         </div>
-        <el-table :data="handledReports" border stripe class="data-table">
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="handledReports"
+          border
+          stripe
+          class="data-table"
+        >
           <el-table-column prop="targetTypeLabel" label="举报类型" width="120" />
           <el-table-column prop="targetId" label="举报对象ID" min-width="180" />
           <el-table-column prop="reporterId" label="举报人ID" width="140" />
@@ -267,7 +323,7 @@
         <div class="detail-summary">
           <div class="detail-name">{{ detailItem.name }}</div>
           <div class="detail-meta">
-            <span>上传者ID：{{ detailItem.uploaderId || "-" }}</span>
+            <span>上传者：{{ detailItem.uploaderId || "-" }}</span>
             <span>下载量：{{ detailItem.downloadCount ?? 0 }}</span>
             <span>发布时间：{{ detailItem.createdAt || "-" }}</span>
           </div>
@@ -329,7 +385,7 @@
 
           <div class="process-detail-grid">
             <div>名称：{{ reportTargetDetail.name || "-" }}</div>
-            <div>上传者ID：{{ reportTargetDetail.uploaderId || "-" }}</div>
+            <div>上传者：{{ reportTargetDetail.uploaderId || "-" }}</div>
             <div v-if="activeReport.targetType !== 'comment'">下载量：{{ reportTargetDetail.downloadCount ?? 0 }}</div>
             <div v-if="reportTargetDetail.createdAt">发布时间：{{ reportTargetDetail.createdAt }}</div>
             <div v-if="reportTargetDetail.task">任务：{{ reportTargetDetail.task }}</div>
@@ -512,6 +568,9 @@
   </div>
 </template>
 
+<script>
+export default { name: "Admin" };
+</script>
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
@@ -528,6 +587,8 @@ const metrics = ref([]);
 const algorithmSubmissions = ref([]);
 const comments = ref([]);
 const reports = ref([]);
+/** 首屏与各 tab 表格共用数据源，请求未完成前避免误显示空表 / No Data */
+const adminDataLoading = ref(true);
 
 const algorithmKeyword = ref("");
 const datasetKeyword = ref("");
@@ -838,21 +899,31 @@ const detailComments = computed(() =>
 );
 
 async function loadAll() {
-  if (store.user.role !== "admin") return;
-  const [algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
-    adminApi.listCommunityAlgorithms(),
-    adminApi.listCommunityDatasets(),
-    adminApi.listMetrics(),
-    adminApi.listAlgorithmSubmissions(),
-    adminApi.listComments(),
-    adminApi.listReports(),
-  ]);
-  algorithms.value = (algRes || []).map(mapAlgorithm);
-  datasets.value = (dsRes || []).map(mapDataset);
-  metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
-  algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
-  comments.value = (commentRes || []).map(mapComment);
-  reports.value = (reportRes || []).map(mapReport);
+  if (store.user.role !== "admin") {
+    adminDataLoading.value = false;
+    return;
+  }
+  adminDataLoading.value = true;
+  try {
+    const [algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
+      adminApi.listCommunityAlgorithms(),
+      adminApi.listCommunityDatasets(),
+      adminApi.listMetrics(),
+      adminApi.listAlgorithmSubmissions(),
+      adminApi.listComments(),
+      adminApi.listReports(),
+    ]);
+    algorithms.value = (algRes || []).map(mapAlgorithm);
+    datasets.value = (dsRes || []).map(mapDataset);
+    metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
+    algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
+    comments.value = (commentRes || []).map(mapComment);
+    reports.value = (reportRes || []).map(mapReport);
+  } catch (e) {
+    ElMessage({ type: "error", message: `加载管理数据失败：${e?.message || e}` });
+  } finally {
+    adminDataLoading.value = false;
+  }
 }
 
 

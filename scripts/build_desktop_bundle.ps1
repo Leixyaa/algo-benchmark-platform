@@ -10,20 +10,6 @@ function Get-RepoRoot {
   return $root.Path
 }
 
-function Copy-IfExists([string]$Source, [string]$Destination) {
-  if (Test-Path -LiteralPath $Source) {
-    Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
-  }
-}
-
-function Get-FirstMatchPath([string]$Directory, [string]$Pattern) {
-  $item = Get-ChildItem -LiteralPath $Directory -Filter $Pattern | Select-Object -First 1
-  if (-not $item) {
-    throw "Required file not found in $Directory matching $Pattern"
-  }
-  return $item.FullName
-}
-
 $repoRoot = Get-RepoRoot
 $bundleRoot = Join-Path $repoRoot "release\desktop-runtime"
 $bundleDocs = Join-Path $bundleRoot "docs"
@@ -56,10 +42,10 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "desktop\package.json") -Destination
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\manual_up_desktop.ps1") -Destination $bundleScripts -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\manual_up_desktop.cmd") -Destination $bundleScripts -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs\desktop-quickstart.md") -Destination $bundleDocs -Force
-$conditionDoc = Get-FirstMatchPath (Join-Path $repoRoot "docs\graduation") "*条件一_满足说明.md"
-$conditionChecklist = Get-FirstMatchPath (Join-Path $repoRoot "docs\graduation") "*条件一_验收清单.md"
-Copy-Item -LiteralPath $conditionDoc -Destination $bundleDocs -Force
-Copy-Item -LiteralPath $conditionChecklist -Destination $bundleDocs -Force
+Get-ChildItem -LiteralPath (Join-Path $repoRoot "docs\graduation") -Filter *.md |
+  ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $bundleDocs -Force
+  }
 
 $bundleReadme = @"
 # Desktop Runtime Bundle
@@ -73,7 +59,7 @@ Contents:
 - scripts/manual_up_desktop.cmd
 - scripts/manual_up_desktop.ps1
 - docs/desktop-quickstart.md
-- docs/计算环境_条件一_满足说明.md
+- docs/: copied graduation markdown materials for defense and review
 
 Recommended start command:
 

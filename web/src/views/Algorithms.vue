@@ -24,7 +24,7 @@
           <el-select v-model="filterImpl" placeholder="&#20840;&#37096;&#23454;&#29616;" clearable class="filter-box">
             <el-option v-for="x in implFilterOptions" :key="x" :label="x" :value="x" />
           </el-select>
-          <el-input v-model="filterKeyword" placeholder="&#25628;&#32034;&#31639;&#27861;&#21517;&#31216; / &#29256;&#26412; / ID" clearable class="filter-input" prefix-icon="Search" />
+          <el-input v-model="filterKeyword" placeholder="&#25628;&#32034;&#31639;&#27861;&#21517;&#31216; / &#29256;&#26412; / &#20851;&#38190;&#35789;" clearable class="filter-input" prefix-icon="Search" />
         </div>
         <el-button @click="resetFilters" icon="Close" plain class="reset-btn centered-btn action-btn">&#37325;&#32622;&#31579;&#36873;</el-button>
       </div>
@@ -178,7 +178,7 @@
       <div class="access-dialog">
         <div class="protocol-card">
           <div class="protocol-title">算法运行接入协议</div>
-          <div class="protocol-line">1. 当前支持图像任务与视频任务；视频任务第一版按首帧评测口径接入。</div>
+          <div class="protocol-line">1. 支持图像与视频任务；视频类任务对算法输出视频与 GT 视频逐帧对齐计算指标，并在有效帧上取平均（默认每段最多评估 360 帧，可由运行参数 video_metric_max_frames 调整）。</div>
           <div class="protocol-line">2. 代码包只支持单个 <code>.py</code> 文件或 <code>.zip</code>；zip 内优先使用 <code>infer.py</code>。</div>
           <div class="protocol-line">3. 固定命令行协议：<code>python infer.py --input &lt;input&gt; --output &lt;output&gt;</code>。</div>
           <div class="protocol-line">4. 审核通过且勾选“接入运行链路”后，平台才会将算法接进真实评测链路。</div>
@@ -398,17 +398,21 @@
   </div>
 </template>
 
+<script>
+export default { name: "Algorithms" };
+</script>
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { algorithmsApi } from "../api/algorithms";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 const router = useRouter();
+const route = useRoute();
 const TEXT = {
   communityAlgorithms: "\u793e\u533a\u7b97\u6cd5",
   manage: "\u7ba1\u7406",
@@ -671,6 +675,24 @@ function resetAccessForm() {
 
 function openAccessDialog() {
   showAccessDialog.value = true;
+}
+
+/** 兼容旧书签 /algorithm-access?access=1 → 打开接入弹窗后去掉 query */
+function applyAccessFromQuery() {
+  const raw = route.query.access;
+  if (raw === undefined || raw === null || raw === "") return;
+  const v = String(Array.isArray(raw) ? raw[0] : raw)
+    .trim()
+    .toLowerCase();
+  if (v !== "1" && v !== "true" && v !== "yes") return;
+  if (!store.user.isLoggedIn) {
+    ElMessage.warning("请先登录后再进行算法接入");
+  } else {
+    showAccessDialog.value = true;
+  }
+  const nextQuery = { ...route.query };
+  delete nextQuery.access;
+  router.replace({ path: route.path, query: nextQuery }).catch(() => {});
 }
 
 function openSubmissionHistoryDialog() {
@@ -1326,7 +1348,15 @@ onMounted(async () => {
   }
   loadSubmissionRows().catch(() => {});
   _updatePresetOptions();
+  applyAccessFromQuery();
 });
+
+watch(
+  () => route.query.access,
+  () => {
+    applyAccessFromQuery();
+  }
+);
 
 watch(
   () => store.user.isLoggedIn,
@@ -1508,7 +1538,7 @@ watch(
 
 async function submitEdit() {
   if (!editForm.id) {
-    ElMessage({ type: "warning", message: "缺少算法 ID" });
+    ElMessage({ type: "warning", message: "无法识别该算法记录，请刷新页面后重试" });
     return;
   }
   if (!editForm.name.trim()) {

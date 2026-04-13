@@ -3,7 +3,7 @@
     <div class="header-section">
       <h2 class="title">数据集管理</h2>
       <div class="subtitle">
-        支持创建、上传和扫描数据集，推荐通过 ZIP 导入并统一纳入平台管理。
+        支持创建、上传与管理数据集，推荐通过 ZIP 导入并统一纳入平台管理。
       </div>
     </div>
 
@@ -20,10 +20,16 @@
         <div class="selector-left">
           <span class="label">当前选择：</span>
           <el-select v-model="selectedDatasetId" placeholder="请选择数据集" class="select-box" filterable>
-            <el-option v-for="d in ownedDatasets" :key="d.id" :label="`${d.name} (${d.id})`" :value="d.id" />
+            <el-option
+              v-for="d in ownedDatasets"
+              :key="d.id"
+              :label="datasetSelectLabel(d)"
+              :value="d.id"
+            />
           </el-select>
         </div>
         <el-button
+          v-if="isDatasetAdmin"
           type="success"
           class="scan-btn centered-btn action-btn"
           :loading="selectedDatasetExists && scanningDatasets.has(selectedDatasetId)"
@@ -59,11 +65,11 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="id">查看/修改 ID</el-dropdown-item>
+                      <el-dropdown-item v-if="isDatasetAdmin" command="id">查看/修改 ID</el-dropdown-item>
                       <el-dropdown-item command="community">{{ isSelfPublishedDataset(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
                       <el-dropdown-item v-if="isSelfPublishedDataset(row)" command="unpublish-community">下架社区</el-dropdown-item>
                       <el-dropdown-item command="export">下载到本地</el-dropdown-item>
-                      <el-dropdown-item command="scan">重新扫描</el-dropdown-item>
+                      <el-dropdown-item v-if="isDatasetAdmin" command="scan">重新扫描</el-dropdown-item>
                       <el-dropdown-item command="zip">导入 ZIP</el-dropdown-item>
                       <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
                     </el-dropdown-menu>
@@ -90,7 +96,7 @@
                 <span class="size-cell" :title="row.size || '-'">{{ row.size || '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="sourceUploaderId" label="上传者ID" width="140" />
+            <el-table-column prop="sourceUploaderId" label="上传者" width="140" />
             <el-table-column prop="createdAt" label="下载时间" width="180" />
             <el-table-column label="操作" width="140">
               <template #default="{ row }">
@@ -138,6 +144,10 @@
     </el-dialog>
   </div>
 </template>
+
+<script>
+export default { name: "Datasets" };
+</script>
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
@@ -147,6 +157,16 @@ import { datasetsApi } from "../api/datasets";
 import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
+
+/** 扫描 / 改 ID 等仅面向运维或开发，不对普通用户展示 */
+const isDatasetAdmin = computed(() => String(store.user?.role || "") === "admin");
+
+function datasetSelectLabel(d) {
+  if (!d) return "";
+  const name = String(d.name || "").trim() || "未命名数据集";
+  if (isDatasetAdmin.value) return `${name} (${d.id})`;
+  return name;
+}
 
 const showCreate = ref(false);
 const activeDatasetTab = ref("owned");
@@ -273,7 +293,7 @@ async function submitCreate() {
     });
     const finalId = created?.id || "";
     if (!finalId) {
-      ElMessage({ type: "error", message: "创建成功但未返回数据集 ID" });
+      ElMessage({ type: "error", message: "创建成功但未返回数据集编号，请刷新后重试" });
       return;
     }
     await scanOne(finalId, { silentStart: true });
@@ -322,6 +342,9 @@ async function handleDatasetAction(id, command) {
   const owned = ownedDatasets.value.some((item) => item.id === id);
   if (!owned && ["id", "community", "unpublish-community", "scan", "zip"].includes(command)) {
     ElMessage({ type: "warning", message: "社区数据集不能直接修改，请先下载后在用户数据集中管理" });
+    return;
+  }
+  if ((command === "id" || command === "scan") && !isDatasetAdmin.value) {
     return;
   }
   if (command === "id") {
@@ -392,7 +415,7 @@ async function exportDatasetToLocal(id) {
     exportingDatasets.value = nextExporting;
     progressMessage = ElMessage({
       type: "info",
-      message: `正在下载数据集 ${id}，请稍候...`,
+      message: isDatasetAdmin.value ? `正在下载数据集 ${id}，请稍候...` : "正在下载数据集，请稍候...",
       duration: 0,
     });
     const result = await datasetsApi.exportDataset(id);
@@ -462,27 +485,27 @@ async function editDatasetId(id) {
   }
   try {
     const { value } = await ElMessageBox.prompt(
-      `当前数据集 ID：${current.id}`,
-      "查看/修改 ID（测试开发）",
+      `当前内部编号：${current.id}`,
+      "查看/修改内部编号（测试开发）",
       {
         inputValue: current.id,
         confirmButtonText: "保存",
         cancelButtonText: "取消",
         inputPattern: /^[A-Za-z0-9._-]+$/,
-        inputErrorMessage: "ID 仅支持字母、数字、点、下划线和短横线",
+        inputErrorMessage: "编号仅支持字母、数字、点、下划线和短横线",
       }
     );
     const nextId = String(value || "").trim();
     if (!nextId || nextId === current.id) {
-      ElMessage({ type: "info", message: "数据集 ID 未修改" });
+      ElMessage({ type: "info", message: "数据集编号未修改" });
       return;
     }
     const updated = await store.changeDatasetId(current.id, nextId);
     selectedDatasetId.value = updated?.id || nextId;
-    ElMessage({ type: "success", message: "数据集 ID 已更新" });
+    ElMessage({ type: "success", message: "数据集编号已更新" });
   } catch (action) {
     if (action !== "cancel" && action !== "close") {
-      ElMessage({ type: "error", message: `修改 ID 失败：${action?.message || action}` });
+      ElMessage({ type: "error", message: `修改编号失败：${action?.message || action}` });
     }
   }
 }

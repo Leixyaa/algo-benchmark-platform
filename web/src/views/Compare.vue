@@ -1,10 +1,12 @@
 <template>
   <div class="page">
-    <section class="hero-panel">
+    <div class="header-section compare-page-head">
+      <h2 class="title">平台算法对比分析</h2>
+      <p class="subtitle">围绕真实评测结果做筛选、排序、导出与结论整理，保留统一口径的指标对比，不再提供智能选型入口。</p>
+    </div>
+    <div class="action-bar compare-context-bar">
       <div class="hero-copy">
         <div class="hero-kicker">Platform Compare</div>
-        <h2 class="page-title">平台算法对比分析</h2>
-        <p class="page-subtitle">围绕真实评测结果做筛选、排序、导出与结论整理，保留统一口径的指标对比，不再提供智能选型入口。</p>
         <div class="hero-meta">
           <div class="meta-pill">
             <span class="meta-label">当前任务</span>
@@ -28,7 +30,7 @@
         <el-button class="soft-btn" @click="refreshAll" :disabled="!store.user.isLoggedIn">同步数据</el-button>
         <el-button class="danger-soft-btn" @click="resetAllConfig" :disabled="!store.user.isLoggedIn">重置配置</el-button>
       </div>
-    </section>
+    </div>
 
     <div class="config-grid">
       <el-card shadow="never" class="config-card">
@@ -167,6 +169,9 @@
   </div>
 </template>
 
+<script>
+export default { name: "Compare" };
+</script>
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
@@ -665,7 +670,27 @@ onMounted(async () => {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.hero-panel,
+.header-section.compare-page-head {
+  margin-bottom: 20px;
+}
+
+.compare-page-head .title {
+  margin: 0 0 12px;
+  font-size: 28px;
+  font-weight: 700;
+  color: #1f2f57;
+  line-height: 1.2;
+}
+
+.compare-page-head .subtitle {
+  margin: 0;
+  max-width: 860px;
+  color: #6a7ca9;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.action-bar.compare-context-bar,
 .header-actions,
 .hero-meta,
 .card-header,
@@ -687,7 +712,7 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.hero-panel,
+.action-bar.compare-context-bar,
 .tool-row,
 .table-header,
 .chart-header,
@@ -695,22 +720,26 @@ onMounted(async () => {
   justify-content: space-between;
 }
 
-.hero-panel {
-  padding: 32px 36px;
-  margin-bottom: 24px;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 34%),
-    radial-gradient(circle at right center, rgba(59, 130, 246, 0.08), transparent 28%),
-    rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(220, 231, 245, 0.95);
-  box-shadow: var(--card-shadow);
-  transition: all 0.3s ease;
+.action-bar {
+  box-sizing: border-box;
 }
 
-.hero-panel:hover {
-  box-shadow: 0 15px 30px rgba(148, 163, 184, 0.12);
-  transform: translateY(-2px);
+.action-bar.compare-context-bar {
+  padding: 28px 32px;
+  margin-bottom: 24px;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 34%),
+    radial-gradient(circle at right center, rgba(59, 130, 246, 0.06), transparent 28%),
+    #f8faff;
+  border: 1px solid #e6eeff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.action-bar.compare-context-bar:hover {
+  box-shadow: 0 8px 20px rgba(148, 163, 184, 0.12);
+  transform: translateY(-1px);
 }
 
 .hero-copy {
@@ -1311,7 +1340,11 @@ onMounted(async () => {
     padding: 16px;
   }
 
-  .hero-panel,
+  .compare-page-head .title {
+    font-size: 24px;
+  }
+
+  .action-bar.compare-context-bar,
   .recommend-card {
     padding: 24px;
   }

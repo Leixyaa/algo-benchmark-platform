@@ -55,6 +55,9 @@
   </div>
 </template>
 
+<script>
+export default { name: "Notices" };
+</script>
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";

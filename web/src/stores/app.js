@@ -1131,8 +1131,10 @@ export const useAppStore = defineStore("app", {
     },
 
     /**
-     * 鍚姩杞锛堥粯璁?800ms锛?     * - run 杩涘叆缁堟€侊紙宸插畬鎴?澶辫触锛変細鑷姩 stop
-     * - 缃戠粶/鍚庣鐭殏閲嶅惎锛氫笉绔嬪嵆 stop锛岃涓嬩竴杞户缁皾璇?     */
+     * 启动轮询（默认 800ms）
+     * - run 进入终态（已完成/失败）会自动 stop
+     * - 网络/后端短暂重启：不立即 stop，让下一轮继续尝试
+     */
     startPolling(runId, intervalMs = 800) {
       if (_pollTimers.has(runId)) return;
 
@@ -1217,6 +1219,7 @@ export const useAppStore = defineStore("app", {
         this.runs.unshift(run);
         return;
       }
+
       this.runs[idx] = { ...this.runs[idx], ...run };
     },
   },

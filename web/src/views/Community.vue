@@ -9,7 +9,7 @@
       <div class="toolbar-row">
         <el-input
           v-model="keyword"
-          placeholder="搜索名称 / ID / 任务 / 实现方式"
+          placeholder="搜索名称 / 任务 / 实现方式"
           clearable
           class="search-input"
         />
@@ -49,12 +49,19 @@
     </div>
 
     <div v-if="tab === 'algorithms'" class="section">
-      <el-table :data="filteredAlgorithms" border stripe class="data-table">
+      <el-table
+        v-loading="communityListLoading"
+        element-loading-text="加载中..."
+        :data="filteredAlgorithms"
+        border
+        stripe
+        class="data-table"
+      >
         <el-table-column prop="name" label="算法名称" min-width="220" />
         <el-table-column prop="task" label="任务" width="140" />
         <el-table-column prop="impl" label="实现方式" width="120" />
         <el-table-column prop="version" label="版本" width="100" />
-        <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="uploaderId" label="上传者" width="140" />
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -78,11 +85,18 @@
     </div>
 
     <div v-else-if="tab === 'datasets'" class="section">
-      <el-table :data="filteredDatasets" border stripe class="data-table">
+      <el-table
+        v-loading="communityListLoading"
+        element-loading-text="加载中..."
+        :data="filteredDatasets"
+        border
+        stripe
+        class="data-table"
+      >
         <el-table-column prop="name" label="数据集名称" min-width="220" />
         <el-table-column prop="type" label="类型" width="100" />
         <el-table-column prop="size" label="规模" width="140" />
-        <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="uploaderId" label="上传者" width="140" />
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -106,7 +120,14 @@
     </div>
 
     <div v-else class="section">
-      <el-table :data="filteredMetrics" border stripe class="data-table">
+      <el-table
+        v-loading="communityListLoading"
+        element-loading-text="加载中..."
+        :data="filteredMetrics"
+        border
+        stripe
+        class="data-table"
+      >
         <el-table-column prop="displayName" label="指标名称" min-width="180" />
         <el-table-column prop="metricKey" label="标识" width="170" />
         <el-table-column label="方向" width="120">
@@ -119,7 +140,7 @@
             {{ formatMetricTaskTypes(row.taskTypes) }}
           </template>
         </el-table-column>
-        <el-table-column prop="uploaderId" label="上传者ID" width="140" />
+        <el-table-column prop="uploaderId" label="上传者" width="140" />
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -147,7 +168,7 @@
         <div class="detail-summary">
           <div class="detail-name">{{ detailItem.name }}</div>
           <div class="detail-meta">
-            <span>上传者ID：{{ detailItem.uploaderId || "-" }}</span>
+            <span>上传者：{{ detailItem.uploaderId || "-" }}</span>
             <span>下载量：{{ detailItem.downloadCount ?? 0 }}</span>
             <span>发布时间：{{ detailItem.createdAt || "-" }}</span>
           </div>
@@ -299,8 +320,11 @@
   </div>
 </template>
 
+<script>
+export default { name: "Community" };
+</script>
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
@@ -312,6 +336,8 @@ const store = useAppStore();
 const communityAlgorithms = ref([]);
 const communityDatasets = ref([]);
 const communityMetrics = ref([]);
+/** 首次进入与刷新列表时，避免在请求未完成前误显示「暂无数据」 */
+const communityListLoading = ref(true);
 
 const tab = ref("algorithms");
 const keyword = ref("");
@@ -407,14 +433,24 @@ function mapMetric(x) {
 }
 
 async function loadCommunity() {
-  const [algorithms, datasets, metrics] = await Promise.all([
-    algorithmsApi.listAlgorithms({ limit: 500, scope: "community" }),
-    datasetsApi.listDatasets({ limit: 200, scope: "community" }),
-    metricsApi.listMetrics({ limit: 500, scope: "community" }),
-  ]);
-  communityAlgorithms.value = (algorithms || []).map(mapAlgorithm);
-  communityDatasets.value = (datasets || []).map(mapDataset);
-  communityMetrics.value = (metrics || []).map(mapMetric);
+  communityListLoading.value = true;
+  try {
+    const [algorithms, datasets, metrics] = await Promise.all([
+      algorithmsApi.listAlgorithms({ limit: 500, scope: "community" }),
+      datasetsApi.listDatasets({ limit: 200, scope: "community" }),
+      metricsApi.listMetrics({ limit: 500, scope: "community" }),
+    ]);
+    communityAlgorithms.value = (algorithms || []).map(mapAlgorithm);
+    communityDatasets.value = (datasets || []).map(mapDataset);
+    communityMetrics.value = (metrics || []).map(mapMetric);
+  } catch (e) {
+    ElMessage({ type: "error", message: `加载社区资源失败：${e?.message || e}` });
+    communityAlgorithms.value = [];
+    communityDatasets.value = [];
+    communityMetrics.value = [];
+  } finally {
+    communityListLoading.value = false;
+  }
 }
 
 function setLoading(setRef, id, loading) {
@@ -829,8 +865,15 @@ async function downloadMetric(row) {
 }
 
 onMounted(async () => {
-  window.addEventListener("focus", handleWindowFocus);
   await syncCommunityState();
+});
+
+onActivated(() => {
+  window.addEventListener("focus", handleWindowFocus);
+});
+
+onDeactivated(() => {
+  window.removeEventListener("focus", handleWindowFocus);
 });
 
 onBeforeUnmount(() => {

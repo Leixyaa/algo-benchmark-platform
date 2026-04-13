@@ -1,15 +1,18 @@
 
 <template>
   <div class="page">
-    <div class="header-section">
-      <div class="header-left">
-        <h2 class="page-title">运行任务中心</h2>
-        <p class="page-subtitle">查看运行状态、量化指标、参数详情与综合评分结果。</p>
-      </div>
-      <div class="header-right">
-        <el-button type="primary" size="large" class="create-btn" @click="goNewRun" :disabled="!store.user.isLoggedIn">
-          新建运行任务
-        </el-button>
+    <div class="header-section runs-page-head">
+      <h2 class="title">运行任务中心</h2>
+      <p class="subtitle">查看运行状态、量化指标、参数详情与综合评分结果。</p>
+    </div>
+
+    <div class="action-bar runs-action-bar">
+      <div class="toolbar">
+        <div class="toolbar-right">
+          <el-button type="primary" size="large" class="create-btn" @click="goNewRun" :disabled="!store.user.isLoggedIn">
+            新建运行任务
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -106,7 +109,7 @@
         <div class="detail-header-card">
           <div class="detail-main-info">
             <div class="info-item">
-              <span class="info-label">任务 ID</span>
+              <span class="info-label">运行编号</span>
               <span class="info-value mono">{{ detail.id }}</span>
             </div>
             <div class="info-item">
@@ -178,8 +181,11 @@
   </div>
 </template>
 
+<script>
+export default { name: "Runs" };
+</script>
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, TASK_TYPE_BY_LABEL, useAppStore } from "../stores/app";
@@ -187,6 +193,10 @@ import { authFetch } from "../api/http";
 
 const router = useRouter();
 const store = useAppStore();
+
+/** 切回任务页时若距上次拉取较近则不再请求，避免「来回切页总在等接口」 */
+const lastRunsFetchedAt = ref(0);
+const RUNS_STALE_MS = 25000;
 
 const HIDDEN_KEY = "hiddenRunIds_v1";
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
@@ -576,7 +586,14 @@ function scoreOne(run, ctx) {
   return { score: Number(score.toFixed(4)), reason: `${parts.join("；")}；评分范围：同任务同数据集（样本池 ${ctx.sampleCount || 0} 条）；评分权重：PSNR 39% + SSIM 39% + NIQE 22%；耗时请单独查看。` };
 }
 
-async function refresh() { try { await store.fetchRuns(); } catch (e) { ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` }); } }
+async function refresh() {
+  try {
+    await store.fetchRuns();
+    lastRunsFetchedAt.value = Date.now();
+  } catch (e) {
+    ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` });
+  }
+}
 
 function remove(id) {
   ElMessageBox.confirm("确认从当前列表隐藏该任务吗？", "隐藏确认", { type: "warning", confirmButtonText: "隐藏", cancelButtonText: "取消" })
@@ -592,7 +609,15 @@ function openDetail(row) {
   detailVisible.value = true;
 }
 
-onMounted(() => { refresh(); });
+onMounted(() => {
+  refresh();
+});
+
+onActivated(() => {
+  if (!lastRunsFetchedAt.value) return;
+  if (Date.now() - lastRunsFetchedAt.value < RUNS_STALE_MS) return;
+  refresh();
+});
 </script>
 
 <style scoped>
@@ -604,32 +629,47 @@ onMounted(() => { refresh(); });
   margin: 0 auto;
 }
 
-.header-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 32px;
-  flex-wrap: wrap;
+.header-section.runs-page-head {
+  margin-bottom: 8px;
 }
 
-.header-left {
-  flex: 1;
-}
-
-.page-title {
-  margin: 0;
+.runs-page-head .title {
+  margin: 0 0 12px;
   font-size: 28px;
   font-weight: 700;
-  color: #16305f;
+  color: #1f2f57;
   line-height: 1.2;
 }
 
-.page-subtitle {
-  margin: 8px 0 0;
-  color: #6b7a96;
+.runs-page-head .subtitle {
+  margin: 0;
+  max-width: 860px;
+  color: #6a7ca9;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.action-bar {
+  background: #f8faff;
+  padding: 20px 28px;
+  border-radius: 16px;
+  border: 1px solid #e6eeff;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.runs-action-bar .toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .main-card {
@@ -1135,11 +1175,6 @@ onMounted(() => { refresh(); });
     min-width: 100%;
   }
   
-  .header-section {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
   .row-actions {
     flex-direction: column;
     align-items: stretch;
@@ -1153,6 +1188,10 @@ onMounted(() => { refresh(); });
 @media (max-width: 768px) {
   .page {
     padding: 16px;
+  }
+
+  .runs-page-head .title {
+    font-size: 24px;
   }
   
   .main-card {
