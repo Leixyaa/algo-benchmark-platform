@@ -182,7 +182,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { TASK_LABEL_BY_TYPE, TASK_TYPE_BY_LABEL, useAppStore } from "../stores/app";
 import { authFetch } from "../api/http";
 
 const router = useRouter();
@@ -281,8 +281,8 @@ const rows = computed(() => {
 const filteredRows = computed(() => {
   const kw = String(keyword.value || "").trim().toLowerCase();
   return (rows.value ?? []).filter((r) => {
-    if (statusFilter.value && String(r.status || "").toLowerCase() !== statusFilter.value) return false;
-    if (taskFilter.value && r.taskType !== taskFilter.value) return false;
+    if (statusFilter.value && normalizeStatusFilterValue(r.status) !== statusFilter.value) return false;
+    if (taskFilter.value && normalizeRunTaskType(r) !== taskFilter.value) return false;
     if (!kw) return true;
     const hay = `${r.dataset ?? ""} ${r.algorithm ?? ""} ${r.task ?? ""} ${r.paramSchemeText ?? ""}`.toLowerCase();
     return hay.includes(kw);
@@ -452,6 +452,24 @@ function statusText(status) {
   return status || "-";
 }
 
+function normalizeStatusFilterValue(status) {
+  const text = statusText(status);
+  if (text === "已完成") return "done";
+  if (text === "运行中") return "running";
+  if (text === "失败") return "failed";
+  if (text === "排队中") return "queued";
+  if (text === "取消中") return "canceling";
+  if (text === "已取消") return "canceled";
+  return String(status ?? "").trim().toLowerCase();
+}
+
+function normalizeRunTaskType(run) {
+  const rawType = String(run?.taskType || "").trim();
+  if (rawType) return rawType;
+  const taskLabel = String(run?.task || "").trim();
+  return TASK_TYPE_BY_LABEL[taskLabel] || taskLabel;
+}
+
 function statusTagType(status) {
   const text = statusText(status);
   if (text === "已完成") return "success";
@@ -518,9 +536,7 @@ function toNumber(v) { const x = Number(v); return Number.isFinite(x) ? x : null
 function minMax(values) { const nums = values.filter((x) => Number.isFinite(x)); if (nums.length === 0) return { min: null, max: null }; return { min: Math.min(...nums), max: Math.max(...nums) }; }
 function norm01(x, min, max) { if (!Number.isFinite(x) || !Number.isFinite(min) || !Number.isFinite(max)) return null; if (max === min) return 1.0; return (x - min) / (max - min); }
 
-function comparableTaskKey(run) {
-  return String(run?.taskType || run?.task || "").trim();
-}
+function comparableTaskKey(run) { return normalizeRunTaskType(run); }
 
 function comparableGroupKey(run) {
   return `${comparableTaskKey(run)}::${String(run?.datasetId || "").trim()}`;

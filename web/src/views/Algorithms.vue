@@ -10,7 +10,8 @@
     <div class="action-bar">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-button type="primary" class="centered-btn action-btn" @click="goToAlgorithmAccess" :disabled="!store.user.isLoggedIn">&#25552;&#20132;&#31639;&#27861;&#20195;&#30721;&#21253;</el-button>
+          <el-button type="primary" class="centered-btn action-btn" @click="openAccessDialog" :disabled="!store.user.isLoggedIn">&#31639;&#27861;&#25509;&#20837;</el-button>
+          <el-button plain class="centered-btn action-btn" @click="openSubmissionHistoryDialog" :disabled="!store.user.isLoggedIn">&#25509;&#20837;&#30003;&#35831;&#35760;&#24405;</el-button>
           <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">&#28165;&#29702;&#29992;&#25143;&#31639;&#27861;</el-button>
         </div>
       </div>
@@ -31,37 +32,7 @@
 
     <div class="section">
       <el-tabs v-model="activeAlgorithmTab" class="resource-tabs">
-        <el-tab-pane label="&#24179;&#21488;&#31639;&#27861;" name="builtin">
-          <el-table :data="filteredBuiltinAlgorithms" border stripe class="data-table">
-            <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
-            <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
-            <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
-            <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
-            <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
-            <el-table-column label="&#25805;&#20316;" width="180">
-              <template #default="{ row }">
-                <el-dropdown v-if="canManagePlatformAlgorithm(row)" trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
-                  <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
-                    {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="view">&#26597;&#30475;&#21442;&#25968;</el-dropdown-item>
-                      <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
-                      <el-dropdown-item command="delete" divided>&#19979;&#26550;</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-                <template v-else>
-                  <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
-                  <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
-                </template>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-        <el-tab-pane label="&#29992;&#25143;&#31639;&#27861;" name="owned">
+<el-tab-pane label="&#29992;&#25143;&#31639;&#27861;" name="owned">
           <div class="history-tip">
             &#36825;&#37324;&#23637;&#31034;&#24403;&#21069;&#36134;&#21495;&#30340;&#31169;&#26377;&#31639;&#27861;&#12290;&#21253;&#25324;&#36890;&#36807;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#23457;&#26680;&#21518;&#29983;&#25104;&#30340; UserPackage &#31639;&#27861;&#65292;&#21487;&#29992;&#20110;&#26412;&#20154;&#21457;&#36215;&#27979;&#35797;&#12289;&#19979;&#36733;&#19982;&#21024;&#38500;&#12290;
           </div>
@@ -80,10 +51,12 @@
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item command="use">{{ TEXT.use }}</el-dropdown-item>
+                      <el-dropdown-item v-if="getSubmissionId(row)" command="submission-detail">&#25509;&#20837;&#35814;&#24773;</el-dropdown-item>
+                      <el-dropdown-item v-if="getSubmissionId(row)" command="submission-download">&#19979;&#36733;&#20195;&#30721;&#21253;</el-dropdown-item>
                       <el-dropdown-item command="community">{{ isSelfPublishedAlgorithm(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
                       <el-dropdown-item v-if="isSelfPublishedAlgorithm(row)" command="unpublish-community">下架社区</el-dropdown-item>
                       <el-dropdown-item command="export">&#19979;&#36733;&#21040;&#26412;&#22320;</el-dropdown-item>
-                      <el-dropdown-item command="delete" divided>&#21024;&#38500;</el-dropdown-item>
+                      <el-dropdown-item :command="getSubmissionId(row) ? 'delete-submission' : 'delete'" divided>&#21024;&#38500;</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -106,7 +79,7 @@
           </div>
         </el-tab-pane>
 
-        <el-tab-pane :label="TEXT.communityAlgorithms" name="community">
+<el-tab-pane :label="TEXT.communityAlgorithms" name="community">
           <el-table :data="filteredDownloadedAlgorithms" border stripe class="data-table">
             <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
             <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
@@ -133,6 +106,36 @@
             <template #empty>
               <el-empty description="&#26242;&#26080;&#31038;&#53306;&#31639;&#27861;" />
             </template>
+          </el-table>
+        </el-tab-pane>
+
+<el-tab-pane label="&#24179;&#21488;&#31639;&#27861;" name="builtin">
+          <el-table :data="filteredBuiltinAlgorithms" border stripe class="data-table">
+            <el-table-column prop="task" label="&#20219;&#21153;" width="120" />
+            <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="200" />
+            <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
+            <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
+            <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
+            <el-table-column label="&#25805;&#20316;" width="180">
+              <template #default="{ row }">
+                <el-dropdown v-if="canManagePlatformAlgorithm(row)" trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
+                  <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
+                    {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="view">&#26597;&#30475;&#21442;&#25968;</el-dropdown-item>
+                      <el-dropdown-item command="edit">&#32534;&#36753;</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>&#19979;&#26550;</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <template v-else>
+                  <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
+                  <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
+                </template>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -168,6 +171,140 @@
       </div>
       <template #footer>
         <el-button @click="showParamDialog = false">&#20851;&#38381;</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showAccessDialog" title="算法接入" width="980px" top="4vh" destroy-on-close>
+      <div class="access-dialog">
+        <div class="protocol-card">
+          <div class="protocol-title">算法运行接入协议</div>
+          <div class="protocol-line">1. 当前支持图像任务与视频任务；视频任务第一版按首帧评测口径接入。</div>
+          <div class="protocol-line">2. 代码包只支持单个 <code>.py</code> 文件或 <code>.zip</code>；zip 内优先使用 <code>infer.py</code>。</div>
+          <div class="protocol-line">3. 固定命令行协议：<code>python infer.py --input &lt;input&gt; --output &lt;output&gt;</code>。</div>
+          <div class="protocol-line">4. 审核通过且勾选“接入运行链路”后，平台才会将算法接进真实评测链路。</div>
+          <div class="protocol-line">5. 平台不会 import 用户代码，而是使用 subprocess 隔离执行并设置超时。</div>
+        </div>
+
+        <el-form label-position="top" class="submit-form">
+          <div class="inline-grid">
+            <el-form-item label="适用任务">
+              <el-select v-model="accessForm.taskType" class="full-width">
+                <el-option v-for="item in accessTaskOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="版本号">
+              <el-input v-model="accessForm.version" placeholder="例如：v1 / 2026.04" />
+            </el-form-item>
+          </div>
+
+          <el-form-item label="算法名称">
+            <el-input v-model="accessForm.name" placeholder="例如：MyDehazeNet / 自定义去噪算法" />
+          </el-form-item>
+
+          <el-form-item label="算法说明">
+            <el-input v-model="accessForm.description" type="textarea" :rows="3" placeholder="说明算法作用、适用场景和主要思路。" />
+          </el-form-item>
+
+          <el-form-item label="依赖说明">
+            <el-input v-model="accessForm.dependencyText" type="textarea" :rows="3" placeholder="例如：Python 3.10、torch 2.1、opencv-python、CUDA 12.1" />
+          </el-form-item>
+
+          <el-form-item label="入口说明">
+            <el-input v-model="accessForm.entryText" type="textarea" :rows="3" placeholder="例如：主入口为 infer.py，命令行为 python infer.py --input ... --output ..." />
+          </el-form-item>
+
+          <el-form-item label="代码包文件">
+            <div class="file-upload-row">
+              <input
+                ref="archiveInput"
+                type="file"
+                class="hidden-file-input"
+                accept=".zip,.py"
+                @change="handleArchiveChange"
+              />
+              <el-button plain @click="triggerArchiveSelect">选择文件</el-button>
+              <span class="file-name">{{ accessForm.archiveFilename || "未选择文件" }}</span>
+              <el-button v-if="accessForm.archiveFilename" text type="danger" @click="clearArchive">清除</el-button>
+            </div>
+            <div class="file-tip">请上传 <code>.py</code> 或 <code>.zip</code>。通过审核后会自动关联到用户算法。</div>
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="closeAccessDialog">取消</el-button>
+        <el-button type="primary" :loading="submittingAccess" @click="submitAccess">提交审核</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showSubmissionHistoryDialog" title="&#25509;&#20837;&#30003;&#35831;&#35760;&#24405;" width="1100px" destroy-on-close>
+      <el-table :data="submissionRows" border stripe class="data-table submission-table">
+        <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="180" />
+        <el-table-column prop="taskLabel" label="&#20219;&#21153;" width="110" />
+        <el-table-column label="&#29366;&#24577;" width="110">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="createdAt" label="&#25552;&#20132;&#26102;&#38388;" width="170" />
+        <el-table-column label="&#29992;&#25143;&#31639;&#27861;" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.ownerAlgorithmId" type="success">&#24050;&#29983;&#25104;</el-tag>
+            <span v-else class="publish-placeholder">&#26410;&#29983;&#25104;</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="&#36816;&#34892;&#25509;&#20837;" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.runtimeReady" type="success">&#24050;&#25509;&#20837;</el-tag>
+            <span v-else class="publish-placeholder">&#26410;&#25509;&#20837;</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="&#24179;&#21488;&#25910;&#24405;" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.platformAlgorithmId" type="success">&#24050;&#25910;&#24405;</el-tag>
+            <span v-else class="publish-placeholder">&#26410;&#25910;&#24405;</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="&#25805;&#20316;" width="120">
+          <template #default="{ row }">
+            <el-button size="small" plain @click="openSubmissionDetail(row)">&#35814;&#24773;</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="&#26242;&#26080;&#25509;&#20837;&#30003;&#35831;&#35760;&#24405;" />
+        </template>
+      </el-table>
+      <template #footer>
+        <el-button @click="showSubmissionHistoryDialog = false">&#20851;&#38381;</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showSubmissionDetailDialog" title="算法接入详情" width="760px">
+      <el-descriptions v-if="selectedSubmissionDetail" border :column="2" class="param-desc">
+        <el-descriptions-item label="算法名称">{{ selectedSubmissionDetail.name || "-" }}</el-descriptions-item>
+        <el-descriptions-item label="任务">{{ selectedSubmissionDetail.taskLabel || "-" }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="statusTagType(selectedSubmissionDetail.status)">{{ statusLabel(selectedSubmissionDetail.status) }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="提交时间">{{ selectedSubmissionDetail.createdAt || "-" }}</el-descriptions-item>
+        <el-descriptions-item label="审核说明">{{ selectedSubmissionDetail.reviewNote || "暂无" }}</el-descriptions-item>
+        <el-descriptions-item label="运行接入">
+          {{ selectedSubmissionDetail.runtimeReady ? "已接入" : "未接入" }}
+        </el-descriptions-item>
+        <el-descriptions-item label="用户算法">
+          {{ selectedSubmissionDetail.ownerAlgorithmId ? "已生成" : "未生成" }}
+        </el-descriptions-item>
+        <el-descriptions-item label="平台收录">
+          {{ selectedSubmissionDetail.platformAlgorithmId ? "已收录" : "未收录" }}
+        </el-descriptions-item>
+        <el-descriptions-item label="社区发布">
+          {{ selectedSubmissionDetail.communityAlgorithmId ? "已发布" : "未发布" }}
+        </el-descriptions-item>
+        <el-descriptions-item label="代码包">
+          {{ selectedSubmissionDetail.archiveFilename || "-" }}
+        </el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="showSubmissionDetailDialog = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -268,7 +405,7 @@ import { ArrowDown } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
 import { algorithmsApi } from "../api/algorithms";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
-import { useAppStore } from "../stores/app";
+import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 const router = useRouter();
@@ -373,6 +510,15 @@ const activeAlgorithmTab = ref("builtin");
 const currentPage = ref(1);
 const pageSize = ref(20);
 const exportingAlgorithms = ref(new Set());
+const showAccessDialog = ref(false);
+const showSubmissionHistoryDialog = ref(false);
+const showSubmissionDetailDialog = ref(false);
+const selectedSubmissionDetail = ref(null);
+const archiveInput = ref(null);
+const submittingAccess = ref(false);
+const submissionRows = ref([]);
+const submissionRowsLoaded = ref(false);
+const deletingSubmissionIds = ref(new Set());
 const taskFilterOptions = computed(() => {
   return [...new Set(sortedAlgorithms.value.map((a) => String(a?.task || "").trim()).filter(Boolean))];
 });
@@ -391,9 +537,17 @@ const filteredAlgorithms = computed(() => {
 });
 const filteredBuiltinAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => isVisiblePlatformAlgorithm(a)));
 const filteredUserAlgorithms = computed(() => filteredAlgorithms.value.filter((a) => !isPlatformAlgorithm(a)));
+function hasSubmissionRecord(row) {
+  const submissionId = getSubmissionId(row);
+  if (!submissionId) return false;
+  return submissionRows.value.some((item) => item.id === submissionId);
+}
 function isUserRuntimeAlgorithm(row) {
   const role = getPackageRole(row);
-  if (role === "owner_runtime") return true;
+  if (role === "owner_runtime") {
+    if (!submissionRowsLoaded.value) return true;
+    return hasSubmissionRecord(row);
+  }
   if (role === "downloaded_community") return false;
   if (role === "community") return !String(row?.sourceSubmissionId || "").trim();
   return !hasAlgorithmCommunitySource(row);
@@ -448,8 +602,254 @@ function resetFilters() {
   currentPage.value = 1;
 }
 
-function goToAlgorithmAccess() {
-  router.push("/algorithm-access");
+const accessForm = reactive({
+  taskType: "denoise",
+  name: "",
+  version: "v1",
+  description: "",
+  dependencyText: "",
+  entryText: "",
+  archiveFilename: "",
+  archiveB64: "",
+});
+
+const accessTaskOptions = computed(() =>
+  Object.entries(TASK_LABEL_BY_TYPE).map(([value, label]) => ({ value, label }))
+);
+
+function formatSubmissionTs(unixSeconds) {
+  if (!unixSeconds) return "-";
+  const d = new Date(Number(unixSeconds) * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function mapSubmission(x) {
+  return {
+    id: String(x.submission_id || ""),
+    taskType: String(x.task_type || ""),
+    taskLabel: String(x.task_label || TASK_LABEL_BY_TYPE[x.task_type] || x.task_type || ""),
+    name: String(x.name || ""),
+    version: String(x.version || ""),
+    description: String(x.description || ""),
+    dependencyText: String(x.dependency_text || ""),
+    entryText: String(x.entry_text || ""),
+    archiveFilename: String(x.archive_filename || ""),
+    status: String(x.status || "pending"),
+    reviewNote: String(x.review_note || ""),
+    createdAt: formatSubmissionTs(x.created_at),
+    runtimeReady: Boolean(x.runtime_ready),
+    ownerAlgorithmId: String(x.owner_algorithm_id || ""),
+    platformAlgorithmId: String(x.platform_algorithm_id || ""),
+    communityAlgorithmId: String(x.community_algorithm_id || ""),
+  };
+}
+
+function statusLabel(status) {
+  if (status === "approved") return "已通过";
+  if (status === "rejected") return "已驳回";
+  return "待审核";
+}
+
+function statusTagType(status) {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "danger";
+  return "warning";
+}
+
+function resetAccessForm() {
+  accessForm.taskType = "denoise";
+  accessForm.name = "";
+  accessForm.version = "v1";
+  accessForm.description = "";
+  accessForm.dependencyText = "";
+  accessForm.entryText = "";
+  accessForm.archiveFilename = "";
+  accessForm.archiveB64 = "";
+  if (archiveInput.value) archiveInput.value.value = "";
+}
+
+function openAccessDialog() {
+  showAccessDialog.value = true;
+}
+
+function openSubmissionHistoryDialog() {
+  showSubmissionHistoryDialog.value = true;
+}
+
+function closeAccessDialog() {
+  showAccessDialog.value = false;
+}
+
+async function loadSubmissionRows() {
+  if (!store.user.isLoggedIn) {
+    submissionRows.value = [];
+    submissionRowsLoaded.value = false;
+    return;
+  }
+  const list = await algorithmSubmissionsApi.listMine();
+  submissionRows.value = Array.isArray(list) ? list.map(mapSubmission) : [];
+  submissionRowsLoaded.value = true;
+}
+
+function triggerArchiveSelect() {
+  archiveInput.value?.click();
+}
+
+function clearArchive() {
+  accessForm.archiveFilename = "";
+  accessForm.archiveB64 = "";
+  if (archiveInput.value) archiveInput.value.value = "";
+}
+
+async function handleArchiveChange(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  try {
+    const buffer = await file.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+    }
+    accessForm.archiveFilename = file.name;
+    accessForm.archiveB64 = btoa(binary);
+    ElMessage.success(`已读取代码包：${file.name}`);
+  } catch {
+    clearArchive();
+    ElMessage.error("读取代码包失败");
+  }
+}
+
+async function submitAccess() {
+  if (!store.user.isLoggedIn) {
+    ElMessage.warning("请先登录后再提交算法代码包");
+    return;
+  }
+  if (!String(accessForm.name || "").trim()) {
+    ElMessage.warning("请先填写算法名称");
+    return;
+  }
+  if (!String(accessForm.archiveFilename || "").trim() || !String(accessForm.archiveB64 || "").trim()) {
+    ElMessage.warning("请先选择代码包文件");
+    return;
+  }
+  submittingAccess.value = true;
+  try {
+    await algorithmSubmissionsApi.createSubmission({
+      task_type: accessForm.taskType,
+      name: accessForm.name,
+      version: accessForm.version,
+      description: accessForm.description,
+      dependency_text: accessForm.dependencyText,
+      entry_text: accessForm.entryText,
+      archive_filename: accessForm.archiveFilename,
+      archive_b64: accessForm.archiveB64,
+    });
+    ElMessage.success("算法代码包已提交，等待管理员审核");
+    resetAccessForm();
+    showAccessDialog.value = false;
+    await Promise.all([loadSubmissionRows(), store.fetchAlgorithms()]);
+    activeAlgorithmTab.value = "owned";
+  } catch (e) {
+    ElMessage.error(e?.message || "提交算法代码包失败");
+  } finally {
+    submittingAccess.value = false;
+  }
+}
+
+function openSubmissionDetail(row) {
+  selectedSubmissionDetail.value = row;
+  showSubmissionDetailDialog.value = true;
+}
+
+async function downloadSubmissionArchive(row) {
+  try {
+    await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
+  } catch (e) {
+    ElMessage.error(e?.message || "下载代码包失败");
+  }
+}
+
+function setSubmissionDeleting(id, loading) {
+  const next = new Set(deletingSubmissionIds.value);
+  if (loading) next.add(String(id));
+  else next.delete(String(id));
+  deletingSubmissionIds.value = next;
+}
+
+async function publishSubmissionToCommunity(row) {
+  try {
+    const alreadyPublished = Boolean(row?.communityAlgorithmId);
+    const { value } = await ElMessageBox.prompt(
+      "请输入算法在社区中心展示的说明，便于区分同名算法。",
+      alreadyPublished ? "更新社区说明" : "发布到社区",
+      {
+        inputType: "textarea",
+        inputValue: String(row.description || ""),
+        inputPlaceholder: "例如：适合图像去噪任务，参数偏稳妥，适合演示用。",
+        confirmButtonText: alreadyPublished ? "保存" : "发布",
+        cancelButtonText: "取消",
+      }
+    );
+    const out = await algorithmSubmissionsApi.publishToCommunity(row.id, {
+      community_description: String(value || "").trim(),
+    });
+    submissionRows.value = submissionRows.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
+    await store.fetchAlgorithms();
+    ElMessage.success(alreadyPublished ? "社区说明已更新" : "已发布到社区");
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage.error(e?.message || "发布到社区失败");
+  }
+}
+
+async function unpublishSubmissionFromCommunity(row) {
+  if (!row?.communityAlgorithmId) {
+    ElMessage.warning("当前申请还没有发布到社区");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将算法“${row.name}”从社区下架吗？接入申请和你的用户算法会继续保留。`,
+      "下架社区算法",
+      { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
+    );
+    const out = await algorithmSubmissionsApi.unpublishFromCommunity(row.id);
+    submissionRows.value = submissionRows.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
+    await store.fetchAlgorithms();
+    ElMessage.success("算法已从社区下架，本地接入记录已保留");
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage.error(e?.message || "下架社区失败");
+  }
+}
+
+async function deleteSubmissionRecord(row) {
+  if (!row?.id) return;
+  try {
+    await ElMessageBox.confirm(
+      row.communityAlgorithmId
+        ? "删除后会一并移除当前社区发布记录，但不会删除已收录的平台留档。确认继续吗？"
+        : "确认删除这条算法接入申请吗？",
+      "删除算法接入申请",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  setSubmissionDeleting(row.id, true);
+  try {
+    await algorithmSubmissionsApi.deleteSubmission(row.id);
+    submissionRows.value = submissionRows.value.filter((item) => item.id !== row.id);
+    await store.fetchAlgorithms();
+    ElMessage.success("算法接入申请已删除");
+  } catch (e) {
+    ElMessage.error(e?.message || "删除算法接入申请失败");
+  } finally {
+    setSubmissionDeleting(row.id, false);
+  }
 }
 
 const PRESET_BY_TASK = {
@@ -924,8 +1324,21 @@ onMounted(async () => {
       // ignore
     }
   }
+  loadSubmissionRows().catch(() => {});
   _updatePresetOptions();
 });
+
+watch(
+  () => store.user.isLoggedIn,
+  (loggedIn) => {
+    if (!loggedIn) {
+      submissionRows.value = [];
+      submissionRowsLoaded.value = false;
+      return;
+    }
+    loadSubmissionRows().catch(() => {});
+  }
+);
 
 const isEditing = ref(false);
 const activeParamMode = computed({
@@ -1231,6 +1644,24 @@ async function remove(id) {
 }
 
 async function handleAlgorithmAction(row, command) {
+  if (command === "submission-detail") {
+    const matched = submissionRows.value.find((item) => item.id === getSubmissionId(row));
+    if (matched) openSubmissionDetail(matched);
+    else ElMessage({ type: "warning", message: "未找到对应的接入申请记录" });
+    return;
+  }
+  if (command === "submission-download") {
+    const matched = submissionRows.value.find((item) => item.id === getSubmissionId(row));
+    if (matched) await downloadSubmissionArchive(matched);
+    else ElMessage({ type: "warning", message: "未找到对应的代码包记录" });
+    return;
+  }
+  if (command === "delete-submission") {
+    const matched = submissionRows.value.find((item) => item.id === getSubmissionId(row));
+    if (matched) await deleteSubmissionRecord(matched);
+    else ElMessage({ type: "warning", message: "未找到对应的接入申请记录" });
+    return;
+  }
   if (command === "community") {
     await uploadAlgorithmToCommunity(row);
     return;
@@ -1454,6 +1885,34 @@ async function resetToBuiltins() {
   color: #5d6c8c;
   line-height: 1.6;
   font-size: 14px;
+}
+
+.submission-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid #dbe7ff;
+  background: #ffffff;
+}
+
+.submission-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.submission-panel-title {
+  color: #1f2f57;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.submission-panel-subtitle {
+  margin-top: 4px;
+  color: #6a7ca9;
+  font-size: 13px;
 }
 
 .toolbar {
@@ -1799,6 +2258,68 @@ async function resetToBuiltins() {
 }
 
 /* 响应式设计 */
+
+.access-dialog {
+  display: grid;
+  gap: 16px;
+}
+
+.protocol-card {
+  padding: 14px 16px;
+  border: 1px solid #dbe7ff;
+  border-radius: 14px;
+  background: #f7faff;
+}
+
+.protocol-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2f57;
+}
+
+.protocol-line {
+  color: #5d6c8c;
+  line-height: 1.7;
+}
+
+.submit-form {
+  display: grid;
+  gap: 2px;
+}
+
+.inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.file-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.file-name {
+  color: #3b4b72;
+  font-size: 13px;
+}
+
+.file-tip {
+  margin-top: 8px;
+  color: #7d8cac;
+  font-size: 13px;
+}
+
 @media (max-width: 768px) {
   .page {
     padding: 16px;
@@ -1816,6 +2337,11 @@ async function resetToBuiltins() {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .submission-panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
   
   .filter-left {
     flex-direction: column;
@@ -1829,6 +2355,10 @@ async function resetToBuiltins() {
   
   .algorithm-form-container {
     flex-direction: column;
+  }
+
+  .inline-grid {
+    grid-template-columns: 1fr;
   }
   
   .form-left,

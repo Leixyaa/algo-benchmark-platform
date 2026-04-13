@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import { ElMessage } from "element-plus";
 
 import Layout from "../views/LayoutBrand2.vue";
@@ -39,8 +39,10 @@ const routes = [
   },
 ];
 
+const isDesktop = import.meta.env.VITE_DESKTOP === "1";
+
 const router = createRouter({
-  history: createWebHistory(),
+  history: isDesktop ? createWebHashHistory() : createWebHistory(),
   routes,
 });
 

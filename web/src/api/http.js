@@ -2,6 +2,7 @@
 // 通用 HTTP 请求封装：自动拼 query，JSON 请求与错误透传
 
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const IS_DESKTOP = import.meta.env.VITE_DESKTOP === "1";
 
 function getAuthValue(key) {
   return sessionStorage.getItem(key) || localStorage.getItem(key) || "";
@@ -72,7 +73,16 @@ function handleUnauthorized(res) {
   if (res.status !== 401) return;
   const hadToken = !!getAuthValue("token");
   clearAuthStorage();
-  if (hadToken && window.location.pathname !== "/login") {
+  if (!hadToken) {
+    return;
+  }
+  if (IS_DESKTOP) {
+    if (!window.location.hash.startsWith("#/login")) {
+      window.location.hash = "#/login";
+    }
+    return;
+  }
+  if (window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
 }

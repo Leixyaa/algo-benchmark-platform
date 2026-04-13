@@ -51,7 +51,6 @@
     <div v-if="tab === 'algorithms'" class="section">
       <el-table :data="filteredAlgorithms" border stripe class="data-table">
         <el-table-column prop="name" label="算法名称" min-width="220" />
-        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="task" label="任务" width="140" />
         <el-table-column prop="impl" label="实现方式" width="120" />
         <el-table-column prop="version" label="版本" width="100" />
@@ -81,7 +80,6 @@
     <div v-else-if="tab === 'datasets'" class="section">
       <el-table :data="filteredDatasets" border stripe class="data-table">
         <el-table-column prop="name" label="数据集名称" min-width="220" />
-        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="type" label="类型" width="100" />
         <el-table-column prop="size" label="规模" width="140" />
         <el-table-column prop="uploaderId" label="上传者ID" width="140" />
@@ -110,7 +108,6 @@
     <div v-else class="section">
       <el-table :data="filteredMetrics" border stripe class="data-table">
         <el-table-column prop="displayName" label="指标名称" min-width="180" />
-        <el-table-column prop="description" label="社区说明" min-width="240" show-overflow-tooltip />
         <el-table-column prop="metricKey" label="标识" width="170" />
         <el-table-column label="方向" width="120">
           <template #default="{ row }">
@@ -168,7 +165,7 @@
 
         <div class="detail-block">
           <div class="block-head">
-            <div class="block-title">详细描述</div>
+            <div class="block-title">社区说明</div>
             <el-button
               v-if="detailType !== 'metric'"
               size="small"
@@ -181,6 +178,10 @@
             </el-button>
           </div>
           <div v-if="detailIsUserPackage" class="package-detail-grid">
+            <div class="package-detail-card package-detail-card-wide">
+              <div class="package-detail-title">社区说明</div>
+              <div class="package-detail-text">{{ detailItem.description || "暂无社区说明" }}</div>
+            </div>
             <div class="package-detail-card">
               <div class="package-detail-title">算法说明</div>
               <div class="package-detail-text">{{ cleanPackageDescription(detailItem) }}</div>
@@ -203,6 +204,10 @@
             </div>
           </div>
           <div v-else-if="detailType === 'metric'" class="package-detail-grid">
+            <div class="package-detail-card package-detail-card-wide">
+              <div class="package-detail-title">社区说明</div>
+              <div class="package-detail-text">{{ detailItem.description || "暂无社区说明" }}</div>
+            </div>
             <div class="package-detail-card">
               <div class="package-detail-title">指标说明</div>
               <div class="package-detail-text">{{ detailItem.description || "暂无指标说明" }}</div>
@@ -220,7 +225,7 @@
               <div class="package-detail-text">{{ detailItem.codeFilename || "未提供代码文件名" }}</div>
             </div>
           </div>
-          <div v-else class="description-box">{{ detailItem.description || "暂无描述" }}</div>
+          <div v-else class="description-box">{{ detailItem.description || "暂无社区说明" }}</div>
         </div>
 
         <div v-if="detailType !== 'metric'" class="detail-block">

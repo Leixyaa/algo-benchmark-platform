@@ -3,14 +3,16 @@
     <el-aside width="280px" class="sidebar">
       <div class="brand">
         <div class="brandIcon">V</div>
-        <div class="brandTitle">图像增强与复原算法评测平台</div>
+        <div class="brandText">
+          <div class="brandTitle">图像增强与复原算法评测平台</div>
+          <div class="brandSub">Image Benchmark Studio</div>
+        </div>
       </div>
 
       <el-menu :default-active="active" router class="menu">
         <el-menu-item index="/community">社区中心</el-menu-item>
         <el-menu-item index="/datasets">数据集管理</el-menu-item>
         <el-menu-item index="/algorithms">算法库</el-menu-item>
-        <el-menu-item index="/algorithm-access">算法接入</el-menu-item>
         <el-menu-item index="/metrics">指标库</el-menu-item>
         <el-menu-item index="/new-run">发起评测</el-menu-item>
         <el-menu-item index="/runs">任务中心</el-menu-item>
@@ -182,7 +184,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 24px 20px 22px;
+  padding: 20px 18px 18px;
   text-align: center;
 }
 
@@ -199,15 +201,26 @@ onBeforeUnmount(() => {
   font-size: 30px;
 }
 
+.brandText {
+  width: 100%;
+}
+
 .brandTitle {
   color: #1f2f57;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  line-height: 1.45;
-  letter-spacing: 0.2px;
-  width: 180px;
-  margin: 0 auto;
-  word-break: break-word;
+  line-height: 1.3;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brandSub {
+  margin-top: 4px;
+  color: #7b8db5;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .menu {
