@@ -35,3 +35,29 @@ celerybeat-schedule
 # ===== Local Datasets / Exports (Generated) =====
 数据集/
 docs/导出文件/
+
+# ===== Large archives / bundles (GitHub 单文件 100MB 限制) =====
+# 后端依赖包、整包备份等请勿入库；需要时请用网盘或 Release 附件
+backend/**/*.zip
+*.7z
+
+# ===== Desktop / 本地构建产物（可重新生成）=====
+web/dist-desktop/
+release/
+
+# ===== 环境变量与本地覆盖（勿提交密钥与机器相关路径）=====
+# 根目录已有 .env；以下为常见变体与桌面专用配置
+.env.local
+.env.*.local
+web/.env.desktop
+web/.env.development.local
+web/.env.production.local
+
+# ===== 测试与覆盖率 =====
+coverage/
+.nyc_output/
+
+# ===== 临时与缓存 =====
+*.tmp
+*.temp
+.cache/
