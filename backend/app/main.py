@@ -83,6 +83,9 @@ from .schemas import (
     AlgorithmSubmissionReview,
     AlgorithmSubmissionPublish,
     AlgorithmSubmissionOut,
+    AlgorithmSubmissionHistoryOut,
+    MetricSubmissionHistoryOut,
+    HistoryBatchDeleteIn,
     UserCreate,
     UserPasswordChange,
     UserProfileUpdate,
@@ -995,6 +998,12 @@ def _algorithm_submission_storage_root() -> Path:
     return root
 
 
+def _algorithm_history_storage_root() -> Path:
+    root = _dataset_storage_root() / "_algorithm_history"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _resolve_dataset_dir(owner_id: str, dataset_id: str) -> Path:
     return resolve_dataset_dir(_dataset_storage_root(), str(owner_id or "system"), dataset_id)
 
@@ -1171,6 +1180,10 @@ def _make_platform_algorithm_id(r, source_id: str) -> str:
 
 def _algorithm_submission_dir(owner_id: str, submission_id: str) -> Path:
     return _algorithm_submission_storage_root() / str(owner_id or "system") / submission_id
+
+
+def _algorithm_history_dir(owner_id: str, history_id: str) -> Path:
+    return _algorithm_history_storage_root() / str(owner_id or "system") / history_id
 
 
 @app.get("/health")
@@ -1617,6 +1630,147 @@ def _store_algorithm_submission_archive(owner_id: str, submission_id: str, archi
         f.write(payload)
     digest = hashlib.sha256(payload).hexdigest()
     return str(target_path), len(payload), digest
+
+
+def _store_algorithm_history_archive(owner_id: str, history_id: str, archive_filename: str, payload: bytes) -> tuple[str, int, str]:
+    safe_name = Path(str(archive_filename or "").strip() or "algorithm_package.zip").name
+    target_dir = _algorithm_history_dir(owner_id, history_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / safe_name
+    with open(target_path, "wb") as f:
+        f.write(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    return str(target_path), len(payload), digest
+
+
+def _append_algorithm_submission_history(r, submission: dict, archive_bytes: bytes | None = None) -> dict:
+    owner_id = str(submission.get("owner_id") or "").strip()
+    if not owner_id:
+        return {}
+    history_id = f"alg_hist_{uuid.uuid4().hex[:14]}"
+    archive_filename = str(submission.get("archive_filename") or "").strip() or "algorithm_package.zip"
+    archive_path = str(submission.get("archive_path") or "").strip()
+    archive_size = int(submission.get("archive_size") or 0)
+    archive_sha256 = str(submission.get("archive_sha256") or "").strip()
+    if archive_bytes is not None:
+        history_archive_path, history_archive_size, history_archive_sha = _store_algorithm_history_archive(
+            owner_id, history_id, archive_filename, archive_bytes
+        )
+        archive_path = history_archive_path
+        archive_size = history_archive_size
+        archive_sha256 = history_archive_sha
+    item = {
+        "history_id": history_id,
+        "owner_id": owner_id,
+        "submission_id": str(submission.get("submission_id") or "").strip() or None,
+        "task_type": str(submission.get("task_type") or "").strip(),
+        "task_label": str(submission.get("task_label") or ""),
+        "name": str(submission.get("name") or "").strip(),
+        "version": str(submission.get("version") or "v1").strip() or "v1",
+        "description": str(submission.get("description") or ""),
+        "dependency_text": str(submission.get("dependency_text") or ""),
+        "entry_text": str(submission.get("entry_text") or ""),
+        "archive_filename": archive_filename,
+        "archive_size": archive_size,
+        "archive_sha256": archive_sha256,
+        "archive_path": archive_path,
+        "created_at": float(time.time()),
+    }
+    _save_algorithm_history_item(r, history_id, item)
+    return item
+
+
+def _append_metric_submission_history(r, metric: dict) -> dict:
+    owner_id = str(metric.get("owner_id") or "").strip()
+    if not owner_id:
+        return {}
+    history_id = f"metric_hist_{uuid.uuid4().hex[:14]}"
+    item = {
+        "history_id": history_id,
+        "owner_id": owner_id,
+        "metric_id": str(metric.get("metric_id") or "").strip() or None,
+        "metric_key": str(metric.get("metric_key") or "").strip(),
+        "name": str(metric.get("name") or "").strip(),
+        "display_name": str(metric.get("display_name") or metric.get("name") or "").strip(),
+        "description": str(metric.get("description") or ""),
+        "task_types": _normalize_metric_task_types(metric.get("task_types") if isinstance(metric.get("task_types"), list) else []),
+        "direction": _normalize_metric_direction(metric.get("direction")),
+        "requires_reference": bool(metric.get("requires_reference")),
+        "implementation_type": _normalize_metric_implementation_type(metric.get("implementation_type")),
+        "formula_text": str(metric.get("formula_text") or ""),
+        "code_text": str(metric.get("code_text") or ""),
+        "code_filename": str(metric.get("code_filename") or ""),
+        "created_at": float(time.time()),
+    }
+    _save_metric_history_item(r, history_id, item)
+    return item
+
+
+def _seed_algorithm_history_from_current_submissions(r, owner_id: str) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    created = 0
+    for submission in _list_all_algorithm_submissions(r):
+        if str(submission.get("owner_id") or "").strip() != owner:
+            continue
+        submission_id = str(submission.get("submission_id") or "").strip()
+        history_id = f"alg_hist_seed_{submission_id}" if submission_id else f"alg_hist_seed_{uuid.uuid4().hex[:14]}"
+        task_type = str(submission.get("task_type") or "").strip()
+        item = {
+            "history_id": history_id,
+            "owner_id": owner,
+            "submission_id": submission_id or None,
+            "task_type": task_type,
+            "task_label": str(submission.get("task_label") or TASK_LABEL_BY_TYPE.get(task_type, task_type)),
+            "name": str(submission.get("name") or "").strip(),
+            "version": str(submission.get("version") or "v1").strip() or "v1",
+            "description": str(submission.get("description") or ""),
+            "dependency_text": str(submission.get("dependency_text") or ""),
+            "entry_text": str(submission.get("entry_text") or ""),
+            "archive_filename": str(submission.get("archive_filename") or "").strip(),
+            "archive_size": int(submission.get("archive_size") or 0),
+            "archive_sha256": str(submission.get("archive_sha256") or "").strip(),
+            "archive_path": str(submission.get("archive_path") or "").strip(),
+            "created_at": float(submission.get("created_at") or time.time()),
+        }
+        _save_algorithm_history_item(r, history_id, item)
+        created += 1
+    return created
+
+
+def _seed_metric_history_from_current_metrics(r, owner_id: str) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    created = 0
+    for metric in _list_all_metric_records(r):
+        if str(metric.get("owner_id") or "").strip() != owner:
+            continue
+        metric_id = str(metric.get("metric_id") or "").strip()
+        history_id = f"metric_hist_seed_{metric_id}" if metric_id else f"metric_hist_seed_{uuid.uuid4().hex[:14]}"
+        item = {
+            "history_id": history_id,
+            "owner_id": owner,
+            "metric_id": metric_id or None,
+            "metric_key": str(metric.get("metric_key") or "").strip(),
+            "name": str(metric.get("name") or "").strip(),
+            "display_name": str(metric.get("display_name") or metric.get("name") or "").strip(),
+            "description": str(metric.get("description") or ""),
+            "task_types": _normalize_metric_task_types(
+                metric.get("task_types") if isinstance(metric.get("task_types"), list) else []
+            ),
+            "direction": _normalize_metric_direction(metric.get("direction")),
+            "requires_reference": bool(metric.get("requires_reference")),
+            "implementation_type": _normalize_metric_implementation_type(metric.get("implementation_type")),
+            "formula_text": str(metric.get("formula_text") or ""),
+            "code_text": str(metric.get("code_text") or ""),
+            "code_filename": str(metric.get("code_filename") or ""),
+            "created_at": float(metric.get("created_at") or time.time()),
+        }
+        _save_metric_history_item(r, history_id, item)
+        created += 1
+    return created
 
 
 def _algorithm_archive_response(archive_path: Path, filename: str):
@@ -2362,6 +2516,170 @@ def _merge_by(items: list[dict], sql_items: Optional[list[dict]], key_builder) -
         if isinstance(item, dict):
             merged[str(key_builder(item))] = item
     return list(merged.values())
+
+
+def _algorithm_history_key(owner_id: str, history_id: str) -> str:
+    return f"algorithm_history:{owner_id}:{history_id}"
+
+
+def _metric_history_key(owner_id: str, history_id: str) -> str:
+    return f"metric_history:{owner_id}:{history_id}"
+
+
+def _save_algorithm_history_item(r, history_id: str, data: dict) -> None:
+    item = dict(data or {})
+    owner_id = str(item.get("owner_id") or "").strip()
+    if not owner_id:
+        return
+    item["history_id"] = str(history_id)
+    _sql_record_save("algorithm_history", history_id, item)
+    try:
+        r.set(_algorithm_history_key(owner_id, history_id), json.dumps(item, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _save_metric_history_item(r, history_id: str, data: dict) -> None:
+    item = dict(data or {})
+    owner_id = str(item.get("owner_id") or "").strip()
+    if not owner_id:
+        return
+    item["history_id"] = str(history_id)
+    _sql_record_save("metric_history", history_id, item)
+    try:
+        r.set(_metric_history_key(owner_id, history_id), json.dumps(item, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _list_algorithm_history_items(r, owner_id: str, limit: int = 5000) -> list[dict]:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return []
+    sql_items = _sql_record_list("algorithm_history", limit=limit)
+    if sql_items is not None:
+        sql_items = [item for item in sql_items if str(item.get("owner_id") or "").strip() == owner]
+        if not sql_store.allow_redis_fallback():
+            sql_items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+            return sql_items[:limit]
+    items: list[dict] = []
+    for key in r.scan_iter(match=_algorithm_history_key(owner, "*"), count=500):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and str(data.get("owner_id") or "").strip() == owner:
+                items.append(data)
+        except Exception:
+            continue
+    items = _merge_by(items, sql_items, lambda item: str(item.get("history_id") or ""))
+    items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return items[:limit]
+
+
+def _list_metric_history_items(r, owner_id: str, limit: int = 5000) -> list[dict]:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return []
+    sql_items = _sql_record_list("metric_history", limit=limit)
+    if sql_items is not None:
+        sql_items = [item for item in sql_items if str(item.get("owner_id") or "").strip() == owner]
+        if not sql_store.allow_redis_fallback():
+            sql_items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+            return sql_items[:limit]
+    items: list[dict] = []
+    for key in r.scan_iter(match=_metric_history_key(owner, "*"), count=500):
+        try:
+            raw = r.get(key)
+            if not raw:
+                continue
+            data = json.loads(raw)
+            if isinstance(data, dict) and str(data.get("owner_id") or "").strip() == owner:
+                items.append(data)
+        except Exception:
+            continue
+    items = _merge_by(items, sql_items, lambda item: str(item.get("history_id") or ""))
+    items.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return items[:limit]
+
+
+def _clear_algorithm_history_items(r, owner_id: str) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    items = _list_algorithm_history_items(r, owner, limit=20000)
+    for item in items:
+        hid = str(item.get("history_id") or "").strip()
+        if not hid:
+            continue
+        _sql_record_delete("algorithm_history", hid)
+        try:
+            r.delete(_algorithm_history_key(owner, hid))
+        except Exception:
+            pass
+    return len(items)
+
+
+def _clear_metric_history_items(r, owner_id: str) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    items = _list_metric_history_items(r, owner, limit=20000)
+    for item in items:
+        hid = str(item.get("history_id") or "").strip()
+        if not hid:
+            continue
+        _sql_record_delete("metric_history", hid)
+        try:
+            r.delete(_metric_history_key(owner, hid))
+        except Exception:
+            pass
+    return len(items)
+
+
+def _delete_algorithm_history_items(r, owner_id: str, history_ids: list[str]) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    wanted = {str(item or "").strip() for item in (history_ids or []) if str(item or "").strip()}
+    if not wanted:
+        return 0
+    existing = _list_algorithm_history_items(r, owner, limit=20000)
+    existing_ids = {str(item.get("history_id") or "").strip() for item in existing}
+    removed = 0
+    for hid in wanted:
+        if hid not in existing_ids:
+            continue
+        _sql_record_delete("algorithm_history", hid)
+        try:
+            r.delete(_algorithm_history_key(owner, hid))
+        except Exception:
+            pass
+        removed += 1
+    return removed
+
+
+def _delete_metric_history_items(r, owner_id: str, history_ids: list[str]) -> int:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return 0
+    wanted = {str(item or "").strip() for item in (history_ids or []) if str(item or "").strip()}
+    if not wanted:
+        return 0
+    existing = _list_metric_history_items(r, owner, limit=20000)
+    existing_ids = {str(item.get("history_id") or "").strip() for item in existing}
+    removed = 0
+    for hid in wanted:
+        if hid not in existing_ids:
+            continue
+        _sql_record_delete("metric_history", hid)
+        try:
+            r.delete(_metric_history_key(owner, hid))
+        except Exception:
+            pass
+        removed += 1
+    return removed
 
 
 def _comment_key(resource_type: str, resource_id: str, comment_id: str) -> str:
@@ -4380,6 +4698,7 @@ def create_algorithm_submission(payload: AlgorithmSubmissionCreate, current_user
         "platform_algorithm_id": None,
     }
     save_algorithm_submission(r, submission_id, data)
+    _append_algorithm_submission_history(r, data, archive_bytes=archive_bytes)
     return _algorithm_submission_to_out(r, data)
 
 
@@ -4475,6 +4794,65 @@ def unpublish_algorithm_submission_from_community(submission_id: str, current_us
     cur["community_published_at"] = None
     save_algorithm_submission(r, submission_id, cur)
     return _algorithm_submission_to_out(r, cur)
+
+
+@app.get("/history/algorithm-submissions", response_model=list[AlgorithmSubmissionHistoryOut])
+def list_algorithm_submission_history(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    items = _list_algorithm_history_items(r, owner_id, limit=5000)
+    if not items:
+        _seed_algorithm_history_from_current_submissions(r, owner_id)
+        items = _list_algorithm_history_items(r, owner_id, limit=5000)
+    return [AlgorithmSubmissionHistoryOut(**item) for item in items if isinstance(item, dict)]
+
+
+@app.get("/history/algorithm-submissions/{history_id}/download")
+def download_algorithm_submission_history_archive(history_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    items = _list_algorithm_history_items(r, owner_id, limit=5000)
+    current = next((item for item in items if str(item.get("history_id") or "") == str(history_id)), None)
+    if not current:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_history_not_found", history_id=history_id)
+    archive_path = Path(str(current.get("archive_path") or "")).resolve()
+    if not archive_path.exists() or not archive_path.is_file():
+        err.api_error(404, err.E_HTTP, "algorithm_archive_not_found", history_id=history_id)
+    filename = str(current.get("archive_filename") or archive_path.name).strip() or archive_path.name
+    return StreamingResponse(
+        open(archive_path, "rb"),
+        media_type="application/octet-stream",
+        headers=_attachment_headers(filename),
+    )
+
+
+@app.delete("/history/algorithm-submissions")
+def clear_algorithm_submission_history(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _clear_algorithm_history_items(r, owner_id)
+    return {"ok": True, "removed": int(removed)}
+
+
+@app.delete("/history/algorithm-submissions/{history_id}")
+def delete_algorithm_submission_history_item(history_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _delete_algorithm_history_items(r, owner_id, [history_id])
+    if not removed:
+        err.api_error(404, err.E_HTTP, "algorithm_submission_history_not_found", history_id=history_id)
+    return {"ok": True, "removed": int(removed)}
+
+
+@app.post("/history/algorithm-submissions/delete-batch")
+def delete_algorithm_submission_history_batch(
+    payload: HistoryBatchDeleteIn,
+    current_user: dict = Depends(get_current_user),
+):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _delete_algorithm_history_items(r, owner_id, payload.history_ids)
+    return {"ok": True, "removed": int(removed)}
 
 
 @app.get("/admin/users", response_model=list[UserOut])
@@ -4698,6 +5076,7 @@ def create_metric(payload: MetricCreate, current_user: dict = Depends(get_curren
         "created_at": created,
     }
     save_metric(r, metric_id, data)
+    _append_metric_submission_history(r, data)
     return MetricOut(**data)
 
 
@@ -4886,6 +5265,46 @@ def download_metric_to_user_library(metric_id: str, current_user: dict = Depends
     save_metric(r, metric_id, source)
     save_metric(r, target_metric_id, copied)
     return MetricOut(**copied)
+
+
+@app.get("/history/metric-submissions", response_model=list[MetricSubmissionHistoryOut])
+def list_metric_submission_history(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    items = _list_metric_history_items(r, owner_id, limit=5000)
+    if not items:
+        _seed_metric_history_from_current_metrics(r, owner_id)
+        items = _list_metric_history_items(r, owner_id, limit=5000)
+    return [MetricSubmissionHistoryOut(**item) for item in items if isinstance(item, dict)]
+
+
+@app.delete("/history/metric-submissions")
+def clear_metric_submission_history(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _clear_metric_history_items(r, owner_id)
+    return {"ok": True, "removed": int(removed)}
+
+
+@app.delete("/history/metric-submissions/{history_id}")
+def delete_metric_submission_history_item(history_id: str, current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _delete_metric_history_items(r, owner_id, [history_id])
+    if not removed:
+        err.api_error(404, err.E_HTTP, "metric_submission_history_not_found", history_id=history_id)
+    return {"ok": True, "removed": int(removed)}
+
+
+@app.post("/history/metric-submissions/delete-batch")
+def delete_metric_submission_history_batch(
+    payload: HistoryBatchDeleteIn,
+    current_user: dict = Depends(get_current_user),
+):
+    r = make_redis()
+    owner_id = _username_of(current_user)
+    removed = _delete_metric_history_items(r, owner_id, payload.history_ids)
+    return {"ok": True, "removed": int(removed)}
 
 
 @app.get("/admin/metrics", response_model=list[MetricOut])
@@ -5959,7 +6378,14 @@ def batch_clear_runs(
     """
     Clear specific runs by ids for the current user.
     """
-    run_ids = payload.get("run_ids") if isinstance(payload, dict) else None
+    run_ids = None
+    if isinstance(payload, dict):
+        # Backward/forward compatibility: accept multiple common key names.
+        run_ids = payload.get("run_ids")
+        if run_ids is None:
+            run_ids = payload.get("runIds")
+        if run_ids is None:
+            run_ids = payload.get("ids")
     if not isinstance(run_ids, list) or not run_ids:
         err.api_error(400, err.E_HTTP, "run_ids_required")
 

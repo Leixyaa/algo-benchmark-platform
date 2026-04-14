@@ -50,7 +50,7 @@
         style="width: 100%"
         stripe
         size="small"
-        row-key="id"
+        :row-key="getRunId"
         v-loading="store.loading"
         @selection-change="handleSelectionChange"
       >
@@ -353,7 +353,13 @@ async function clearDone() {
 }
 
 function canBatchClearRow(row) { return !isActiveStatus(row?.status); }
-function handleSelectionChange(selection) { selectedIds.value = (selection || []).map((row) => row?.id).filter(Boolean); }
+function getRunId(row) {
+  const raw = row && typeof row === "object" ? row : {};
+  return String(raw.id || raw.run_id || raw?.raw?.run_id || "").trim();
+}
+function handleSelectionChange(selection) {
+  selectedIds.value = (selection || []).map((row) => getRunId(row)).filter(Boolean);
+}
 
 async function clearSelected() {
   if (!selectedIds.value.length) {
@@ -366,15 +372,25 @@ async function clearSelected() {
       confirmButtonText: "批量清除",
       cancelButtonText: "取消",
     });
+    const runIds = Array.from(new Set(selectedIds.value.map((id) => String(id || "").trim()).filter(Boolean)));
     const res = await authFetch("/runs/batch-clear", {
       method: "POST",
-      body: JSON.stringify({ run_ids: selectedIds.value }),
+      body: JSON.stringify({ run_ids: runIds }),
       headers: { "Content-Type": "application/json" },
     });
     const data = await res.json();
     if (!res.ok) throw new Error(JSON.stringify(data));
     selectedIds.value = [];
-    ElMessage({ type: "success", message: `已清除 ${data.deleted || 0} 条任务${data.skipped ? `，跳过 ${data.skipped} 条` : ""}` });
+    const deleted = Number(data?.deleted || 0);
+    const skipped = Number(data?.skipped || 0);
+    if (deleted <= 0 && skipped > 0) {
+      ElMessage({
+        type: "warning",
+        message: `未删除任何任务（跳过 ${skipped} 条）。请确认这些任务属于当前账号，且不是排队/运行中。`,
+      });
+    } else {
+      ElMessage({ type: "success", message: `已清除 ${deleted} 条任务${skipped ? `，跳过 ${skipped} 条` : ""}` });
+    }
     await refresh();
   } catch (e) {
     if (e === "cancel" || e === "close") return;
@@ -619,6 +635,11 @@ async function refresh() {
 }
 
 async function remove(id) {
+  const runId = String(id || "").trim();
+  if (!runId) {
+    ElMessage({ type: "warning", message: "任务 ID 缺失，无法删除，请先刷新页面后重试" });
+    return;
+  }
   try {
     await ElMessageBox.confirm("确认删除该任务记录吗？删除后不可恢复。", "删除确认", {
       type: "warning",
@@ -627,7 +648,7 @@ async function remove(id) {
     });
     const res = await authFetch("/runs/batch-clear", {
       method: "POST",
-      body: JSON.stringify({ run_ids: [id] }),
+      body: JSON.stringify({ run_ids: [runId] }),
       headers: { "Content-Type": "application/json" },
     });
     const data = await res.json();
@@ -636,9 +657,9 @@ async function remove(id) {
       ElMessage({ type: "warning", message: "当前任务状态不可删除，请稍后重试" });
       return;
     }
-    hiddenIds.value.delete(id);
+    hiddenIds.value.delete(runId);
     persistHidden();
-    if (detail.value?.id === id) detailVisible.value = false;
+    if (detail.value?.id === runId) detailVisible.value = false;
     ElMessage({ type: "success", message: "任务已删除" });
     await refresh();
   } catch (e) {

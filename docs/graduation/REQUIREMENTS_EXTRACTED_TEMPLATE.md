@@ -56,7 +56,7 @@
   - 系统可运行、流程清晰、演示顺利；功能模块完整；论文能准确反映设计与测试评估
 
 ## 6. 技术栈与环境（约束）
-- 前端：Vue3 + Vite；Pinia；Element Plus；ECharts；Axios；LocalStorage 持久化
+- 前端：Vue3 + Vite；Pinia；Element Plus；ECharts；Axios；历史记录通过后端 API + SQL 表持久化
 - 后端：FastAPI；Celery + Redis；Python 3.x；OpenCV / scikit-image / scikit-video
 - 环境：Windows 开发；Redis 使用 Docker 容器
 

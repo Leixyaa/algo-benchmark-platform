@@ -474,7 +474,12 @@ function onChartMove(event) {
   const y = event.clientY - rect.top;
   const hit = chartHits.find((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
   if (!hit) return onChartLeave();
-  chartTip.value = { visible: true, x: Math.max(8, Math.min(rect.width - 8, x + 12)), y: Math.max(8, Math.min(rect.height - 8, y + 12)), text: `${hit.name}锛?{hit.text}` };
+  chartTip.value = {
+    visible: true,
+    x: Math.max(8, Math.min(rect.width - 8, x + 12)),
+    y: Math.max(8, Math.min(rect.height - 8, y + 12)),
+    text: `${hit.name}：${hit.text}`,
+  };
 }
 
 function drawChart() {
@@ -734,6 +739,11 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.weight-actions {
+  margin-top: 18px;
+  gap: 14px;
+}
+
 .action-bar.compare-context-bar,
 .tool-row,
 .table-header,
@@ -966,13 +976,15 @@ onMounted(async () => {
 .weight-sum {
   color: var(--accent);
   font-weight: 800;
+  margin-left: 6px;
+  white-space: nowrap;
 }
 
 .weight-breakdown {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .weight-chip {
@@ -1176,6 +1188,9 @@ onMounted(async () => {
 .success-btn,
 .primary-btn,
 .accent-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
   border-radius: 8px;
   font-weight: 600;
@@ -1183,6 +1198,7 @@ onMounted(async () => {
   transition: all 0.2s ease;
   padding: 0 18px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .soft-btn,
@@ -1191,6 +1207,11 @@ onMounted(async () => {
   color: var(--text-main);
   background: rgba(255, 255, 255, 0.95);
   border-color: #e2e8f0;
+}
+
+.preset-btn {
+  width: 112px;
+  padding: 0 10px;
 }
 
 .soft-btn:hover,

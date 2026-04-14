@@ -159,6 +159,14 @@ if metadata is not None:
         _payload_json_column(),
     )
 
+    algorithm_history_table = _record_table(
+        "abp_algorithm_history",
+        "history_id",
+        Column("submission_id", String(191), index=True),
+        Column("task_type", String(64), index=True),
+        Column("name", String(255), index=True),
+    )
+
     runs_table = _record_table(
         "abp_runs",
         "run_id",
@@ -190,6 +198,14 @@ if metadata is not None:
         Column("metric_key", String(191), index=True),
         Column("name", String(255), index=True),
         Column("status", String(32), index=True),
+    )
+
+    metric_history_table = _record_table(
+        "abp_metric_history",
+        "history_id",
+        Column("metric_id", String(191), index=True),
+        Column("metric_key", String(191), index=True),
+        Column("name", String(255), index=True),
     )
 
     users_table = _record_table(
@@ -238,10 +254,12 @@ if metadata is not None:
 else:
     algorithms_table = None
     algorithm_submissions_table = None
+    algorithm_history_table = None
     runs_table = None
     datasets_table = None
     presets_table = None
     metrics_table = None
+    metric_history_table = None
     users_table = None
     comments_table = None
     notices_table = None
@@ -275,10 +293,12 @@ def _ensure_mysql_payload_longtext(engine: Any) -> None:
     tables = (
         "abp_algorithms",
         "abp_algorithm_submissions",
+        "abp_algorithm_history",
         "abp_runs",
         "abp_datasets",
         "abp_presets",
         "abp_metrics",
+        "abp_metric_history",
         "abp_users",
         "abp_comments",
         "abp_notices",
@@ -521,6 +541,30 @@ def _submission_values(submission_id: str, data: Dict[str, Any]) -> Dict[str, An
     }
 
 
+def _algorithm_history_values(record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(data or {})
+    item["history_id"] = str(item.get("history_id") or record_id)
+    return {
+        "history_id": str(item.get("history_id") or record_id),
+        **_record_base_row(item, owner_id=str(item.get("owner_id") or "system"), visibility="private"),
+        "submission_id": str(item.get("submission_id") or ""),
+        "task_type": str(item.get("task_type") or ""),
+        "name": str(item.get("name") or ""),
+    }
+
+
+def _metric_history_values(record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(data or {})
+    item["history_id"] = str(item.get("history_id") or record_id)
+    return {
+        "history_id": str(item.get("history_id") or record_id),
+        **_record_base_row(item, owner_id=str(item.get("owner_id") or "system"), visibility="private"),
+        "metric_id": str(item.get("metric_id") or ""),
+        "metric_key": str(item.get("metric_key") or ""),
+        "name": str(item.get("name") or item.get("display_name") or ""),
+    }
+
+
 RECORD_TABLE_SPECS = {
     "run": {"table": runs_table, "pk": "run_id", "values": _run_values},
     "dataset": {"table": datasets_table, "pk": "dataset_id", "values": _dataset_values},
@@ -530,6 +574,8 @@ RECORD_TABLE_SPECS = {
     "comment": {"table": comments_table, "pk": "comment_record_id", "values": _comment_values},
     "notice": {"table": notices_table, "pk": "notice_record_id", "values": _notice_values},
     "report": {"table": reports_table, "pk": "report_id", "values": _report_values},
+    "algorithm_history": {"table": algorithm_history_table, "pk": "history_id", "values": _algorithm_history_values},
+    "metric_history": {"table": metric_history_table, "pk": "history_id", "values": _metric_history_values},
 }
 
 

@@ -4,6 +4,21 @@ export const metricsApi = {
   listMetrics(query = {}) {
     return request("/metrics", { method: "GET", query });
   },
+  listSubmissionHistory() {
+    return request("/history/metric-submissions", { method: "GET" });
+  },
+  clearSubmissionHistory() {
+    return request("/history/metric-submissions", { method: "DELETE" });
+  },
+  deleteSubmissionHistoryItem(historyId) {
+    return request(`/history/metric-submissions/${historyId}`, { method: "DELETE" });
+  },
+  deleteSubmissionHistoryBatch(historyIds = []) {
+    return request("/history/metric-submissions/delete-batch", {
+      method: "POST",
+      body: { history_ids: historyIds },
+    });
+  },
   createMetric(body) {
     return request("/metrics", { method: "POST", body });
   },

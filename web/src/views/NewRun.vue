@@ -1425,15 +1425,21 @@ function goRuns() {
 .preset-box {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: stretch;
   flex-wrap: wrap;
+}
+
+.preset-box .full-width-select {
+  flex: 1 1 460px;
+  min-width: 320px;
 }
 
 .preset-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 .preset-actions .el-button {
@@ -1441,6 +1447,7 @@ function goRuns() {
   font-size: 12px;
   padding: 6px 14px;
   transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
 .preset-actions .el-button:hover {
@@ -1647,6 +1654,12 @@ function goRuns() {
   border-radius: 8px;
   box-shadow: 0 0 0 1px #e2e8f0 inset;
   transition: all 0.3s ease;
+}
+
+:deep(.el-select__selected-item) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 :deep(.el-input__wrapper.is-focus),

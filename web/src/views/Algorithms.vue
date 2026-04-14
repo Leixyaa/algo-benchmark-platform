@@ -12,7 +12,7 @@
         <div class="toolbar-left">
           <el-button type="primary" class="centered-btn action-btn" @click="openAccessDialog" :disabled="!store.user.isLoggedIn">&#31639;&#27861;&#25509;&#20837;</el-button>
           <el-button plain class="centered-btn action-btn" @click="openSubmissionHistoryDialog" :disabled="!store.user.isLoggedIn">&#25509;&#20837;&#30003;&#35831;&#35760;&#24405;</el-button>
-          <el-button icon="RefreshLeft" class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">&#28165;&#29702;&#29992;&#25143;&#31639;&#27861;</el-button>
+          <el-button class="centered-btn action-btn" @click="resetToBuiltins" :disabled="!store.user.isLoggedIn">&#28165;&#29702;&#29992;&#25143;&#31639;&#27861;</el-button>
         </div>
       </div>
 
@@ -26,7 +26,7 @@
           </el-select>
           <el-input v-model="filterKeyword" placeholder="&#25628;&#32034;&#31639;&#27861;&#21517;&#31216; / &#29256;&#26412; / &#20851;&#38190;&#35789;" clearable class="filter-input" prefix-icon="Search" />
         </div>
-        <el-button @click="resetFilters" icon="Close" plain class="reset-btn centered-btn action-btn">&#37325;&#32622;&#31579;&#36873;</el-button>
+        <el-button @click="resetFilters" plain class="reset-btn centered-btn action-btn">&#37325;&#32622;&#31579;&#36873;</el-button>
       </div>
     </div>
 
@@ -131,7 +131,7 @@
                   </template>
                 </el-dropdown>
                 <template v-else>
-                  <el-button size="small" icon="Setting" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
+                  <el-button size="small" icon="Setting" class="table-action-btn readonly-action-btn" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
                   <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
                 </template>
               </template>
@@ -237,36 +237,48 @@
     </el-dialog>
 
     <el-dialog v-model="showSubmissionHistoryDialog" title="&#25509;&#20837;&#30003;&#35831;&#35760;&#24405;" width="1100px" destroy-on-close>
-      <el-table :data="submissionRows" border stripe class="data-table submission-table">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="history-hint"
+        title="该页面仅用于历史查看：支持查看当次接入说明、下载当次代码包。可使用“清空历史记录”一次性清理。"
+      />
+      <el-table
+        :data="submissionHistoryRows"
+        border
+        stripe
+        class="data-table submission-table"
+        :row-key="(row) => row.historyId || row.id"
+        @selection-change="onSubmissionHistorySelectionChange"
+      >
+        <el-table-column type="selection" width="52" />
         <el-table-column prop="name" label="&#31639;&#27861;&#21517;&#31216;" min-width="180" />
         <el-table-column prop="taskLabel" label="&#20219;&#21153;" width="110" />
-        <el-table-column label="&#29366;&#24577;" width="110">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
         <el-table-column prop="createdAt" label="&#25552;&#20132;&#26102;&#38388;" width="170" />
-        <el-table-column label="&#29992;&#25143;&#31639;&#27861;" width="110">
+        <el-table-column label="操作" width="340">
           <template #default="{ row }">
-            <el-tag v-if="row.ownerAlgorithmId" type="success">&#24050;&#29983;&#25104;</el-tag>
-            <span v-else class="publish-placeholder">&#26410;&#29983;&#25104;</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="&#36816;&#34892;&#25509;&#20837;" width="110">
-          <template #default="{ row }">
-            <el-tag v-if="row.runtimeReady" type="success">&#24050;&#25509;&#20837;</el-tag>
-            <span v-else class="publish-placeholder">&#26410;&#25509;&#20837;</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="&#24179;&#21488;&#25910;&#24405;" width="140">
-          <template #default="{ row }">
-            <el-tag v-if="row.platformAlgorithmId" type="success">&#24050;&#25910;&#24405;</el-tag>
-            <span v-else class="publish-placeholder">&#26410;&#25910;&#24405;</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="&#25805;&#20316;" width="120">
-          <template #default="{ row }">
-            <el-button size="small" plain @click="openSubmissionDetail(row)">&#35814;&#24773;</el-button>
+            <div class="history-actions">
+              <el-button size="small" plain @click="openSubmissionDetail(row)">接入说明</el-button>
+              <el-button
+                size="small"
+                plain
+                @click="downloadSubmissionArchive(row)"
+                  :disabled="!(String(row.historyId || '').trim() || String(row.id || '').trim()) || !String(row.archiveFilename || '').trim()"
+              >
+                下载代码包
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                class="history-delete-btn"
+                @click="deleteSingleAlgorithmHistory(row)"
+                :disabled="!String(row.historyId || '').trim()"
+              >
+                删除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -274,6 +286,23 @@
         </template>
       </el-table>
       <template #footer>
+        <el-button
+          type="danger"
+          plain
+          :disabled="!selectedSubmissionHistoryIds.length"
+          @click="deleteSelectedAlgorithmHistory"
+        >
+          删除选中
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :loading="clearingSubmissionHistory"
+          :disabled="!submissionHistoryRows.length"
+          @click="clearAlgorithmSubmissionHistory"
+        >
+          清空历史记录
+        </el-button>
         <el-button @click="showSubmissionHistoryDialog = false">&#20851;&#38381;</el-button>
       </template>
     </el-dialog>
@@ -282,28 +311,21 @@
       <el-descriptions v-if="selectedSubmissionDetail" border :column="2" class="param-desc">
         <el-descriptions-item label="算法名称">{{ selectedSubmissionDetail.name || "-" }}</el-descriptions-item>
         <el-descriptions-item label="任务">{{ selectedSubmissionDetail.taskLabel || "-" }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="statusTagType(selectedSubmissionDetail.status)">{{ statusLabel(selectedSubmissionDetail.status) }}</el-tag>
-        </el-descriptions-item>
         <el-descriptions-item label="提交时间">{{ selectedSubmissionDetail.createdAt || "-" }}</el-descriptions-item>
-        <el-descriptions-item label="审核说明">{{ selectedSubmissionDetail.reviewNote || "暂无" }}</el-descriptions-item>
-        <el-descriptions-item label="运行接入">
-          {{ selectedSubmissionDetail.runtimeReady ? "已接入" : "未接入" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="用户算法">
-          {{ selectedSubmissionDetail.ownerAlgorithmId ? "已生成" : "未生成" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="平台收录">
-          {{ selectedSubmissionDetail.platformAlgorithmId ? "已收录" : "未收录" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="社区发布">
-          {{ selectedSubmissionDetail.communityAlgorithmId ? "已发布" : "未发布" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="代码包">
-          {{ selectedSubmissionDetail.archiveFilename || "-" }}
-        </el-descriptions-item>
+        <el-descriptions-item label="版本">{{ selectedSubmissionDetail.version || "-" }}</el-descriptions-item>
+        <el-descriptions-item label="接入说明" :span="2">{{ selectedSubmissionDetail.description || "暂无" }}</el-descriptions-item>
+        <el-descriptions-item label="依赖说明" :span="2">{{ selectedSubmissionDetail.dependencyText || "暂无" }}</el-descriptions-item>
+        <el-descriptions-item label="入口说明" :span="2">{{ selectedSubmissionDetail.entryText || "暂无" }}</el-descriptions-item>
+        <el-descriptions-item label="代码包文件名" :span="2">{{ selectedSubmissionDetail.archiveFilename || "-" }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
+        <el-button
+          plain
+          @click="downloadSubmissionArchive(selectedSubmissionDetail)"
+          :disabled="!selectedSubmissionDetail || !(String(selectedSubmissionDetail.historyId || '').trim() || String(selectedSubmissionDetail.id || '').trim()) || !String(selectedSubmissionDetail.archiveFilename || '').trim()"
+        >
+          下载代码包
+        </el-button>
         <el-button @click="showSubmissionDetailDialog = false">关闭</el-button>
       </template>
     </el-dialog>
@@ -521,8 +543,11 @@ const selectedSubmissionDetail = ref(null);
 const archiveInput = ref(null);
 const submittingAccess = ref(false);
 const submissionRows = ref([]);
+const submissionHistoryRows = ref([]);
+const selectedSubmissionHistoryIds = ref([]);
 const submissionRowsLoaded = ref(false);
 const deletingSubmissionIds = ref(new Set());
+const clearingSubmissionHistory = ref(false);
 const taskFilterOptions = computed(() => {
   return [...new Set(sortedAlgorithms.value.map((a) => String(a?.task || "").trim()).filter(Boolean))];
 });
@@ -642,6 +667,7 @@ function mapSubmission(x) {
     status: String(x.status || "pending"),
     reviewNote: String(x.review_note || ""),
     createdAt: formatSubmissionTs(x.created_at),
+    createdAtTs: Number(x.created_at || 0),
     runtimeReady: Boolean(x.runtime_ready),
     ownerAlgorithmId: String(x.owner_algorithm_id || ""),
     platformAlgorithmId: String(x.platform_algorithm_id || ""),
@@ -649,16 +675,42 @@ function mapSubmission(x) {
   };
 }
 
-function statusLabel(status) {
-  if (status === "approved") return "已通过";
-  if (status === "rejected") return "已驳回";
-  return "待审核";
+function mapSubmissionHistory(row) {
+  const src = row && typeof row === "object" ? row : {};
+  const createdAtTs = Number(src.created_at || 0);
+  const taskType = String(src.task_type || "");
+  return {
+    id: String(src.submission_id || "").trim(),
+    historyId: String(src.history_id || "").trim(),
+    taskType,
+    taskLabel: String(src.task_label || TASK_LABEL_BY_TYPE[taskType] || taskType || "").trim(),
+    name: String(src.name || "").trim(),
+    version: String(src.version || "v1").trim(),
+    description: String(src.description || ""),
+    dependencyText: String(src.dependency_text || ""),
+    entryText: String(src.entry_text || ""),
+    archiveFilename: String(src.archive_filename || "").trim(),
+    createdAt: formatSubmissionTs(createdAtTs),
+    createdAtTs,
+  };
 }
 
-function statusTagType(status) {
-  if (status === "approved") return "success";
-  if (status === "rejected") return "danger";
-  return "warning";
+async function loadSubmissionHistoryRows() {
+  if (!store.user.isLoggedIn) {
+    submissionHistoryRows.value = [];
+    return;
+  }
+  try {
+    const list = await algorithmSubmissionsApi.listHistory();
+    submissionHistoryRows.value = Array.isArray(list)
+      ? list.map(mapSubmissionHistory).sort((a, b) => Number(b.createdAtTs || 0) - Number(a.createdAtTs || 0))
+      : [];
+    selectedSubmissionHistoryIds.value = [];
+  } catch (e) {
+    submissionHistoryRows.value = [];
+    selectedSubmissionHistoryIds.value = [];
+    ElMessage.error(e?.message || "加载算法历史记录失败");
+  }
 }
 
 function resetAccessForm() {
@@ -696,7 +748,15 @@ function applyAccessFromQuery() {
 }
 
 function openSubmissionHistoryDialog() {
+  selectedSubmissionHistoryIds.value = [];
+  loadSubmissionHistoryRows().catch(() => {});
   showSubmissionHistoryDialog.value = true;
+}
+
+function onSubmissionHistorySelectionChange(rows) {
+  selectedSubmissionHistoryIds.value = Array.isArray(rows)
+    ? rows.map((item) => String(item?.historyId || "").trim()).filter(Boolean)
+    : [];
 }
 
 function closeAccessDialog() {
@@ -706,6 +766,7 @@ function closeAccessDialog() {
 async function loadSubmissionRows() {
   if (!store.user.isLoggedIn) {
     submissionRows.value = [];
+    submissionHistoryRows.value = [];
     submissionRowsLoaded.value = false;
     return;
   }
@@ -772,7 +833,7 @@ async function submitAccess() {
     ElMessage.success("算法代码包已提交，等待管理员审核");
     resetAccessForm();
     showAccessDialog.value = false;
-    await Promise.all([loadSubmissionRows(), store.fetchAlgorithms()]);
+    await Promise.all([loadSubmissionRows(), loadSubmissionHistoryRows(), store.fetchAlgorithms()]);
     activeAlgorithmTab.value = "owned";
   } catch (e) {
     ElMessage.error(e?.message || "提交算法代码包失败");
@@ -787,6 +848,19 @@ function openSubmissionDetail(row) {
 }
 
 async function downloadSubmissionArchive(row) {
+  const historyId = String(row?.historyId || "").trim();
+  if (historyId) {
+    try {
+      await algorithmSubmissionsApi.downloadHistoryArchive(historyId, row.archiveFilename || "algorithm_package.zip");
+    } catch (e) {
+      ElMessage.error(e?.message || "下载代码包失败");
+    }
+    return;
+  }
+  if (!row?.id) {
+    ElMessage.warning("该记录缺少可下载的编号");
+    return;
+  }
   try {
     await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
   } catch (e) {
@@ -871,6 +945,94 @@ async function deleteSubmissionRecord(row) {
     ElMessage.error(e?.message || "删除算法接入申请失败");
   } finally {
     setSubmissionDeleting(row.id, false);
+  }
+}
+
+async function clearAlgorithmSubmissionHistory() {
+  if (!submissionHistoryRows.value.length) {
+    ElMessage.info("暂无可清理的历史记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      "确定清空算法接入历史记录吗？",
+      "清空历史记录",
+      { type: "warning", confirmButtonText: "清空", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  clearingSubmissionHistory.value = true;
+  try {
+    const out = await algorithmSubmissionsApi.clearHistory();
+    const removed = Number(out?.removed || 0);
+    submissionHistoryRows.value = [];
+    selectedSubmissionHistoryIds.value = [];
+    if (showSubmissionDetailDialog.value) {
+      showSubmissionDetailDialog.value = false;
+      selectedSubmissionDetail.value = null;
+    }
+    ElMessage.success(`历史记录已清理 ${removed} 条`);
+  } catch (e) {
+    ElMessage.error(e?.message || "清空历史记录失败");
+  } finally {
+    clearingSubmissionHistory.value = false;
+  }
+}
+
+async function deleteSingleAlgorithmHistory(row) {
+  const historyId = String(row?.historyId || "").trim();
+  if (!historyId) return;
+  try {
+    await ElMessageBox.confirm("确定删除这条算法接入历史记录吗？", "删除历史记录", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    });
+  } catch {
+    return;
+  }
+  try {
+    const out = await algorithmSubmissionsApi.deleteHistoryItem(historyId);
+    submissionHistoryRows.value = submissionHistoryRows.value.filter((item) => String(item?.historyId || "") !== historyId);
+    selectedSubmissionHistoryIds.value = selectedSubmissionHistoryIds.value.filter((id) => id !== historyId);
+    ElMessage.success(`已删除 ${Number(out?.removed || 1)} 条历史记录`);
+    if (selectedSubmissionDetail.value && String(selectedSubmissionDetail.value.historyId || "") === historyId) {
+      showSubmissionDetailDialog.value = false;
+      selectedSubmissionDetail.value = null;
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || "删除历史记录失败");
+  }
+}
+
+async function deleteSelectedAlgorithmHistory() {
+  if (!selectedSubmissionHistoryIds.value.length) {
+    ElMessage.info("请先勾选要删除的历史记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedSubmissionHistoryIds.value.length} 条算法接入历史记录吗？`,
+      "批量删除历史记录",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const ids = [...selectedSubmissionHistoryIds.value];
+    const out = await algorithmSubmissionsApi.deleteHistoryBatch(ids);
+    const idSet = new Set(ids);
+    submissionHistoryRows.value = submissionHistoryRows.value.filter((item) => !idSet.has(String(item?.historyId || "")));
+    selectedSubmissionHistoryIds.value = [];
+    ElMessage.success(`已删除 ${Number(out?.removed || 0)} 条历史记录`);
+    if (selectedSubmissionDetail.value && idSet.has(String(selectedSubmissionDetail.value.historyId || ""))) {
+      showSubmissionDetailDialog.value = false;
+      selectedSubmissionDetail.value = null;
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || "批量删除历史记录失败");
   }
 }
 
@@ -1363,6 +1525,7 @@ watch(
   (loggedIn) => {
     if (!loggedIn) {
       submissionRows.value = [];
+      submissionHistoryRows.value = [];
       submissionRowsLoaded.value = false;
       return;
     }
@@ -1878,6 +2041,20 @@ async function resetToBuiltins() {
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1;
+}
+
+.centered-btn :deep(.el-button__text) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.centered-btn :deep(.el-icon) {
+  margin-right: 6px;
 }
 
 .centered-btn:hover {
@@ -1886,9 +2063,9 @@ async function resetToBuiltins() {
 }
 
 .action-btn {
-  min-width: 140px;
+  width: 156px;
   height: 44px;
-  padding: 0 20px;
+  padding: 0 14px;
   border-radius: 12px;
   font-size: 14px;
   font-weight: 500;
@@ -1945,6 +2122,32 @@ async function resetToBuiltins() {
   font-size: 13px;
 }
 
+.history-hint {
+  margin-bottom: 14px;
+}
+
+.history-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-actions :deep(.el-button) {
+  min-width: 92px;
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.history-delete-btn {
+  min-width: 66px !important;
+  padding: 0 6px !important;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -1979,7 +2182,7 @@ async function resetToBuiltins() {
 
 .reset-btn {
   margin-left: auto;
-  min-width: 100px;
+  width: 156px;
 }
 
 .filter-box {
@@ -2037,15 +2240,36 @@ async function resetToBuiltins() {
 }
 
 .readonly-tag {
+  display: inline-flex;
+  align-items: center;
   margin-left: 8px;
   font-size: 12px;
+  min-width: 42px;
+  height: 30px;
+  justify-content: center;
+}
+
+.readonly-tag :deep(.el-tag__content) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .table-action-btn {
-  min-width: 96px;
+  width: 104px;
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
   border-radius: 8px;
   font-size: 13px;
+  white-space: nowrap;
+}
+
+.readonly-action-btn {
+  margin-right: 8px;
 }
 
 .pagination-row {

@@ -134,7 +134,7 @@
           type="info"
           :closable="false"
           class="hint-box"
-          title="第一版先支持「提交定义 + 管理员审核 + 接入目录」。指标代码可直接粘贴文本，也可上传代码文件。"
+          title="提交指标定义后由管理员审核，审核通过后即可接入目录并用于评测。指标代码可直接粘贴文本，也可上传代码文件。"
         />
         <div class="protocol-card">
           <div class="protocol-title">自定义指标代码协议</div>
@@ -237,37 +237,48 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showMetricSubmissionHistoryDialog" title="指标提交记录" width="960px" destroy-on-close>
+    <el-dialog v-model="showMetricSubmissionHistoryDialog" title="指标提交记录" width="1100px" destroy-on-close>
       <el-alert
         type="info"
         :closable="false"
         show-icon
         class="history-hint"
-        title="以下为各次提交的状态快照，不含管理操作。下载代码、发布/下架社区、删除等请在页面中「我的指标库」表格内操作。"
+        title="该页面仅用于历史查看：支持查看当次指标说明、下载当次代码。可使用“清空历史记录”一次性清理。"
       />
-      <el-table :data="myMetricLibrary" border stripe class="data-table submission-table history-readonly-table">
-        <el-table-column prop="displayName" label="指标" min-width="150" />
-        <el-table-column label="适用任务" min-width="200">
+      <el-table
+        :data="metricHistoryRows"
+        border
+        stripe
+        class="data-table submission-table history-readonly-table"
+        :row-key="(row) => row.historyId || row.id"
+        @selection-change="onMetricHistorySelectionChange"
+      >
+        <el-table-column type="selection" width="52" />
+        <el-table-column prop="displayName" label="指标" min-width="180" />
+        <el-table-column label="适用任务" width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ formatTaskTypes(row.taskTypes) }}
+            <span class="history-task-text">{{ formatTaskTypes(row.taskTypes) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="提交时间" width="170" />
-        <el-table-column label="审核状态" width="100">
+        <el-table-column label="操作" width="340">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="运行接入" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.runtimeReady ? 'success' : 'info'">{{ row.runtimeReady ? "已接入" : "未接入" }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="社区发布" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.visibility === 'public'" type="success">已发布</el-tag>
-            <el-tag v-else-if="row.sourceMetricId" type="info">社区副本</el-tag>
-            <span v-else class="muted-text">未发布</span>
+            <div class="history-actions">
+              <el-button size="small" plain @click="openMetricSubmissionDetail(row)">指标说明</el-button>
+              <el-button size="small" plain @click="downloadMetricCode(row)" :disabled="!canDownloadMetricCode(row)">
+                下载代码
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                class="history-delete-btn"
+                @click="deleteSingleMetricHistory(row)"
+                :disabled="!String(row.historyId || '').trim()"
+              >
+                删除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -275,6 +286,23 @@
         </template>
       </el-table>
       <template #footer>
+        <el-button
+          type="danger"
+          plain
+          :disabled="!selectedMetricHistoryIds.length"
+          @click="deleteSelectedMetricHistory"
+        >
+          删除选中
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :loading="clearingMetricHistory"
+          :disabled="!metricHistoryRows.length"
+          @click="clearMetricSubmissionHistory"
+        >
+          清空历史记录
+        </el-button>
         <el-button @click="showMetricSubmissionHistoryDialog = false">关闭</el-button>
       </template>
     </el-dialog>
@@ -293,15 +321,6 @@
           {{ selectedMetricSubmission.requiresReference ? "需要" : "不需要" }}
         </el-descriptions-item>
         <el-descriptions-item label="实现方式">{{ implementationTypeLabel(selectedMetricSubmission.implementationType) }}</el-descriptions-item>
-        <el-descriptions-item label="审核状态">
-          <el-tag :type="statusTagType(selectedMetricSubmission.status)">{{ statusLabel(selectedMetricSubmission.status) }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="运行接入">
-          {{ selectedMetricSubmission.runtimeReady ? "已接入" : "未接入" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="社区发布" :span="2">
-          {{ communityMetricStatusText(selectedMetricSubmission) }}
-        </el-descriptions-item>
         <el-descriptions-item label="审核说明" :span="2">
           {{ selectedMetricSubmission.reviewNote || "暂无" }}
         </el-descriptions-item>
@@ -328,10 +347,14 @@ export default { name: "Metrics" };
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { metricsApi } from "../api/metrics";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 
 const store = useAppStore();
 const submitting = ref(false);
+const clearingMetricHistory = ref(false);
+const metricHistoryRows = ref([]);
+const selectedMetricHistoryIds = ref([]);
 const codeInputMode = ref("text");
 const codeFileInput = ref(null);
 let metricsRefreshTimer = null;
@@ -385,6 +408,56 @@ const myMetricLibrary = computed(() =>
   (store.metricsCatalog || []).filter((item) => item.uploaderId === String(store.user?.username || ""))
 );
 
+function formatMetricHistoryTs(unixSeconds) {
+  if (!unixSeconds) return "-";
+  const d = new Date(Number(unixSeconds) * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function mapMetricHistoryRow(row) {
+  const src = row && typeof row === "object" ? row : {};
+  const createdAtTs = Number(src.created_at || 0);
+  return {
+    id: String(src.metric_id || "").trim(),
+    historyId: String(src.history_id || "").trim(),
+    metricKey: String(src.metric_key || "").trim(),
+    displayName: String(src.display_name || src.name || "").trim(),
+    taskTypes: Array.isArray(src.task_types) ? [...src.task_types] : [],
+    createdAt: formatMetricHistoryTs(createdAtTs),
+    createdAtTs,
+    direction: String(src.direction || ""),
+    requiresReference: Boolean(src.requires_reference),
+    implementationType: String(src.implementation_type || "python"),
+    description: String(src.description || ""),
+    formulaText: String(src.formula_text || ""),
+    codeText: String(src.code_text || ""),
+    codeFilename: String(src.code_filename || "").trim(),
+    reviewNote: "",
+    status: "history",
+    runtimeReady: true,
+  };
+}
+
+async function loadMetricHistoryRows() {
+  if (!store.user.isLoggedIn) {
+    metricHistoryRows.value = [];
+    selectedMetricHistoryIds.value = [];
+    return;
+  }
+  try {
+    const list = await metricsApi.listSubmissionHistory();
+    metricHistoryRows.value = Array.isArray(list)
+      ? list.map(mapMetricHistoryRow).sort((a, b) => Number(b?.createdAtTs || 0) - Number(a?.createdAtTs || 0))
+      : [];
+    selectedMetricHistoryIds.value = [];
+  } catch (e) {
+    metricHistoryRows.value = [];
+    selectedMetricHistoryIds.value = [];
+    ElMessage.error(e?.message || "加载指标历史记录失败");
+  }
+}
+
 function openMetricAccessDialog() {
   if (!store.user.isLoggedIn) {
     ElMessage.warning("请先登录后再提交指标");
@@ -403,7 +476,14 @@ async function openMetricSubmissionHistoryDialog() {
   } catch {
     // ignore
   }
+  await loadMetricHistoryRows();
   showMetricSubmissionHistoryDialog.value = true;
+}
+
+function onMetricHistorySelectionChange(rows) {
+  selectedMetricHistoryIds.value = Array.isArray(rows)
+    ? rows.map((item) => String(item?.historyId || "").trim()).filter(Boolean)
+    : [];
 }
 
 function closeMetricAccessDialog() {
@@ -424,13 +504,6 @@ function openMetricSubmissionDetail(row) {
 function implementationTypeLabel(t) {
   if (t === "formula") return "公式 / 说明型指标";
   return "Python 指标代码";
-}
-
-function communityMetricStatusText(row) {
-  if (!row) return "—";
-  if (String(row.visibility || "").toLowerCase() === "public") return "已在社区公开发布";
-  if (row.sourceMetricId) return "来自社区的下载副本";
-  return "未发布到社区";
 }
 
 function resetForm() {
@@ -567,6 +640,7 @@ async function submitMetric() {
       codeFilename: form.codeFilename,
     });
     await store.fetchMetrics();
+    await loadMetricHistoryRows();
     ElMessage.success("指标定义已提交，等待管理员审核");
     resetForm();
     showMetricAccessDialog.value = false;
@@ -594,6 +668,94 @@ async function removeMetric(row) {
     if (e !== "cancel") {
       ElMessage.error(e?.message || "删除指标失败");
     }
+  }
+}
+
+async function clearMetricSubmissionHistory() {
+  if (!metricHistoryRows.value.length) {
+    ElMessage.info("暂无可清理的历史记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      "确定清空指标接入历史记录吗？",
+      "清空历史记录",
+      { type: "warning", confirmButtonText: "清空", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  clearingMetricHistory.value = true;
+  try {
+    const out = await metricsApi.clearSubmissionHistory();
+    const removed = Number(out?.removed || 0);
+    metricHistoryRows.value = [];
+    selectedMetricHistoryIds.value = [];
+    if (showMetricDetailDialog.value) {
+      showMetricDetailDialog.value = false;
+      selectedMetricSubmission.value = null;
+    }
+    ElMessage.success(`历史记录已清理 ${removed} 条`);
+  } catch (e) {
+    ElMessage.error(e?.message || "清空历史记录失败");
+  } finally {
+    clearingMetricHistory.value = false;
+  }
+}
+
+async function deleteSingleMetricHistory(row) {
+  const historyId = String(row?.historyId || "").trim();
+  if (!historyId) return;
+  try {
+    await ElMessageBox.confirm("确定删除这条指标历史记录吗？", "删除历史记录", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    });
+  } catch {
+    return;
+  }
+  try {
+    const out = await metricsApi.deleteSubmissionHistoryItem(historyId);
+    metricHistoryRows.value = metricHistoryRows.value.filter((item) => String(item?.historyId || "") !== historyId);
+    selectedMetricHistoryIds.value = selectedMetricHistoryIds.value.filter((id) => id !== historyId);
+    if (selectedMetricSubmission.value && String(selectedMetricSubmission.value.historyId || "") === historyId) {
+      showMetricDetailDialog.value = false;
+      selectedMetricSubmission.value = null;
+    }
+    ElMessage.success(`已删除 ${Number(out?.removed || 1)} 条历史记录`);
+  } catch (e) {
+    ElMessage.error(e?.message || "删除历史记录失败");
+  }
+}
+
+async function deleteSelectedMetricHistory() {
+  if (!selectedMetricHistoryIds.value.length) {
+    ElMessage.info("请先勾选要删除的历史记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedMetricHistoryIds.value.length} 条指标历史记录吗？`,
+      "批量删除历史记录",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    const ids = [...selectedMetricHistoryIds.value];
+    const out = await metricsApi.deleteSubmissionHistoryBatch(ids);
+    const idSet = new Set(ids);
+    metricHistoryRows.value = metricHistoryRows.value.filter((item) => !idSet.has(String(item?.historyId || "")));
+    selectedMetricHistoryIds.value = [];
+    if (selectedMetricSubmission.value && idSet.has(String(selectedMetricSubmission.value.historyId || ""))) {
+      showMetricDetailDialog.value = false;
+      selectedMetricSubmission.value = null;
+    }
+    ElMessage.success(`已删除 ${Number(out?.removed || 0)} 条历史记录`);
+  } catch (e) {
+    ElMessage.error(e?.message || "批量删除历史记录失败");
   }
 }
 
@@ -749,6 +911,15 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.centered-btn :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .centered-btn:hover {
@@ -757,9 +928,9 @@ onBeforeUnmount(() => {
 }
 
 .action-btn {
-  min-width: 140px;
+  width: 156px;
   height: 44px;
-  padding: 0 20px;
+  padding: 0 14px;
   border-radius: 12px;
   font-size: 14px;
   font-weight: 500;
@@ -807,16 +978,55 @@ onBeforeUnmount(() => {
   display: inline-flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
+  justify-content: flex-start;
 }
 
 .my-metric-actions :deep(.el-button) {
   margin: 0;
+  width: 88px;
+  height: 32px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .history-hint {
   margin-bottom: 14px;
+}
+
+.history-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.history-actions :deep(.el-button) {
+  min-width: 92px;
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.history-delete-btn {
+  min-width: 66px !important;
+  padding: 0 6px !important;
+}
+
+.history-task-text {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .section-header {

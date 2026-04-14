@@ -344,6 +344,46 @@ class AlgorithmSubmissionOut(BaseModel):
     community_published_at: Optional[float] = None
 
 
+class AlgorithmSubmissionHistoryOut(BaseModel):
+    history_id: str
+    owner_id: Optional[str] = "system"
+    submission_id: Optional[str] = None
+    task_type: str = ""
+    task_label: str = ""
+    name: str = ""
+    version: str = "v1"
+    description: str = ""
+    dependency_text: str = ""
+    entry_text: str = ""
+    archive_filename: str = ""
+    archive_size: int = 0
+    archive_sha256: str = ""
+    archive_path: str = ""
+    created_at: float
+
+
+class MetricSubmissionHistoryOut(BaseModel):
+    history_id: str
+    owner_id: Optional[str] = "system"
+    metric_id: Optional[str] = None
+    metric_key: str = ""
+    name: str = ""
+    display_name: str = ""
+    description: str = ""
+    task_types: List[str] = Field(default_factory=list)
+    direction: str = "higher_better"
+    requires_reference: bool = True
+    implementation_type: str = "python"
+    formula_text: str = ""
+    code_text: str = ""
+    code_filename: str = ""
+    created_at: float
+
+
+class HistoryBatchDeleteIn(BaseModel):
+    history_ids: List[str] = Field(default_factory=list)
+
+
 class UserCreate(BaseModel):
     username: str
     password: str
