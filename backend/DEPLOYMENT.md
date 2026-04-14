@@ -60,7 +60,8 @@ docker start redis
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 # 启动 Celery Worker（在另一个终端）
-.\.venv\Scripts\python.exe -m celery -A app.celery_app worker --loglevel=info
+# 单机开多个 worker 且任务偏 CPU 时，可加 --without-gossip --without-mingle，避免误报 missed heartbeat（见 4.5）
+.\.venv\Scripts\python.exe -m celery -A app.celery_app:celery_app worker --loglevel=info
 
 # Linux/Mac
 # 激活虚拟环境
@@ -70,7 +71,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 # 启动 Celery Worker（在另一个终端）
 source .venv/bin/activate
-python -m celery -A app.celery_app worker --loglevel=info
+python -m celery -A app.celery_app:celery_app worker --loglevel=info
 ```
 
 ##### 直接启动（不使用虚拟环境）
@@ -79,7 +80,7 @@ python -m celery -A app.celery_app worker --loglevel=info
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 # 启动 Celery Worker（在另一个终端）
-python -m celery -A app.celery_app worker --loglevel=info
+python -m celery -A app.celery_app:celery_app worker --loglevel=info
 ```
 
 #### 2.3.3 启动前端服务
@@ -141,6 +142,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\manual_up.ps1 -SkipRedis
 - 确保数据目录结构正确（包含 `gt` 目录和相应的输入目录）
 - 检查文件命名是否规范，确保输入文件与 GT 文件能够正确配对
 - 查看后端日志以获取详细错误信息
+
+### 4.5 Celery 日志里的 `missed heartbeat from workerX`（INFO）
+- **含义**：这是 **Gossip** 机制下，一个 worker 在约定时间内没收到另一个 worker 通过 broker 发来的「同伴心跳」日志，级别多为 **INFO**，**不等于任务失败**。
+- **为何在本项目里常见**：`runs.execute` 会做大量图像/算法计算；在 **Windows** 上 worker 常用 **solo** 进程，任务跑起来时主进程忙于 CPU 工作，**处理同伴事件的时机被推迟**，对端就会偶发打出 `missed heartbeat`。
+- **何时需要处理**：若任务在平台侧仍正常完成，可忽略；若伴随 worker 崩溃、任务一直卡住再排查进程/内存。
+- **开发环境减少误报**（可选）：每个 worker 启动时增加参数，关闭同伴同步（不影响从 Redis 取任务、执行任务）：
+  ```bash
+  python -m celery -A app.celery_app:celery_app worker --loglevel=info --without-gossip --without-mingle -n worker1@%h
+  ```
+  另一个终端把 `-n worker1@%h` 改成 `worker2@%h` 等即可。
 
 ## 5. 项目结构说明
 

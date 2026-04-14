@@ -2,7 +2,7 @@
   <div class="page">
     <div class="header-section">
       <h2 class="title">发起评测任务</h2>
-      <p class="subtitle">通过简单的三个步骤，快速配置并启动算法性能评测。</p>
+      <p class="subtitle">通过两个步骤，快速配置并启动算法性能评测。</p>
     </div>
 
     <div class="action-bar new-run-action-bar">
@@ -18,7 +18,6 @@
         <el-steps :active="activeStep" finish-status="success" align-center class="custom-steps">
           <el-step title="基础配置" icon="Collection" />
           <el-step title="算法选型" icon="Cpu" />
-          <el-step title="参数确认" icon="Setting" />
         </el-steps>
       </div>
 
@@ -125,7 +124,7 @@
         <div v-show="activeStep === 1" class="step-content">
           <div class="step-header">
             <h3 class="step-title">2. 选择评测算法与指标</h3>
-            <p class="step-desc">选择本次运行使用的算法条目，并勾选需要计算的评测指标。</p>
+            <p class="step-desc">选择本次运行使用的算法与指标；运行参数统一使用各算法默认配置。可将当前配置另存为预设（可选）。</p>
           </div>
 
           <el-form :model="form" label-position="top" class="modern-form">
@@ -148,7 +147,7 @@
                 />
               </el-select>
               <div class="algorithm-selection-note">
-                <span v-if="form.algorithmIds.length <= 1">单选时可继续配置参数方案；多选时会按各算法默认参数批量创建任务。</span>
+                <span v-if="form.algorithmIds.length <= 1">单选时使用该算法默认参数；多选时按各算法默认参数分别创建任务。</span>
                 <span v-else>当前已选择 {{ form.algorithmIds.length }} 个算法，将针对同一任务和数据集一次性创建 {{ form.algorithmIds.length }} 条运行任务。</span>
               </div>
               <div v-if="form.algorithmIds.length > 1" class="algorithm-batch-panel">
@@ -198,55 +197,23 @@
                 <div v-if="customReadyMetrics.length === 0" class="metrics-empty-tip">当前任务下暂无可附加的自定义指标。</div>
               </div>
             </el-form-item>
-          </el-form>
-        </div>
 
-        <!-- Step 3: Parameter & Review -->
-        <div v-show="activeStep === 2" class="step-content">
-          <div class="step-header">
-            <h3 class="step-title">3. 参数方案与确认</h3>
-            <p class="step-desc">确认运行参数并为本次配置保存预设（可选），随后即可启动 Run。</p>
-          </div>
-
-          <el-form :model="form" label-position="top" class="modern-form">
-            <el-form-item label="参数方案">
-              <el-select v-model="form.paramSchemeKey" :disabled="!!form.presetId || !isSingleAlgorithmMode" class="full-width-select">
-                <el-option label="系统内置默认参数" value="__default__" />
-                <el-option v-for="entry in userSchemeEntries" :key="entry.id" :label="`用户自定义：${entry.name}`" :value="`__user__${entry.id}`" />
-              </el-select>
-              <div v-if="!isSingleAlgorithmMode" class="algorithm-selection-note">批量模式下不单独编辑参数方案，创建时会自动使用每个算法自己的默认参数。</div>
-            </el-form-item>
-
-            <el-form-item label="运行参数预览">
-              <div class="readonly-param-container">
-                <div v-if="!isSingleAlgorithmMode" class="readonly-empty">当前为批量模式：会对所选算法分别使用默认参数创建运行任务。</div>
-                <div v-else-if="paramDisplayRows.length === 0" class="readonly-empty">当前算法无需配置参数</div>
-                <div class="param-cards-grid">
-                  <div v-for="row in paramDisplayRows" :key="row.key" class="param-info-card">
-                    <div class="param-info-head">
-                      <span class="param-info-key">{{ row.key }}</span>
-                      <span class="param-info-val">{{ row.value }}</span>
-                    </div>
-                    <div class="param-info-desc">{{ row.explain }}</div>
-                  </div>
-                </div>
-              </div>
-            </el-form-item>
-
-            <el-form-item label="另存为新预设 (可选)">
+            <el-form-item label="另存为新预设（可选）">
               <div class="save-preset-row">
                 <el-input v-model="form.presetName" :disabled="!!form.presetId" placeholder="输入预设名称，如：去雾-DCP-实验A" />
-                <el-button 
-                  type="success" 
-                  plain 
-                  :disabled="!!form.presetId || !form.presetName.trim() || !isSingleAlgorithmMode" 
+                <el-button
+                  type="success"
+                  plain
+                  :disabled="!!form.presetId || !form.presetName.trim() || !form.algorithmIds.length"
                   class="centered-btn"
                   @click="savePreset"
                 >
                   保存预设
                 </el-button>
               </div>
-              <div v-if="!isSingleAlgorithmMode" class="algorithm-selection-note">预设当前仍按单算法配置保存；如需保存预设，请先只选择一个算法。</div>
+              <div class="algorithm-selection-note">
+                预设按当前任务/数据集/指标与所选算法集合保存；加载后会回填多算法选择。
+              </div>
             </el-form-item>
           </el-form>
         </div>
@@ -256,8 +223,8 @@
             <el-button v-if="activeStep > 0" size="large" class="centered-btn" @click="activeStep--">上一步</el-button>
           </div>
           <div class="footer-center">
-            <el-button v-if="activeStep < 2" type="primary" size="large" class="centered-btn" :disabled="!isNextEnabled" @click="activeStep++">下一步</el-button>
-            <el-button v-if="activeStep === 2" type="primary" size="large" class="launch-btn centered-btn" @click="create">启动评测任务</el-button>
+            <el-button v-if="activeStep < 1" type="primary" size="large" class="centered-btn" :disabled="!isNextEnabled" @click="activeStep++">下一步</el-button>
+            <el-button v-if="activeStep === 1" type="primary" size="large" class="launch-btn centered-btn" @click="create">启动评测任务</el-button>
           </div>
           <div class="footer-right">
             <!-- Space for balance -->
@@ -282,8 +249,9 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, useAppStore, toTaskLabel, toTaskType } from "../stores/app";
+import { datasetSupportsTaskType } from "../utils/datasetTask";
 
-const NEWRUN_CACHE_KEY = "newrun_form_v2";
+const NEWRUN_CACHE_KEY = "newrun_form_v3";
 const router = useRouter();
 const store = useAppStore();
 
@@ -452,9 +420,10 @@ function getMetricPreferenceScore(item) {
   if (String(item?.uploaderId || item?.raw?.owner_id || "").trim() === "system") return 30;
   return String(item?.sourceMetricId || item?.raw?.source_metric_id || "").trim() ? 10 : 20;
 }
-const availableDatasets = computed(() =>
-  dedupeBySource(store.datasets || [], getDatasetSourceKey, getDatasetPreferenceScore)
-);
+const availableDatasets = computed(() => {
+  const deduped = dedupeBySource(store.datasets || [], getDatasetSourceKey, getDatasetPreferenceScore);
+  return deduped.filter((d) => datasetSupportsTaskType(d, form.taskType));
+});
 const readyMetrics = computed(() =>
   dedupeBySource(
     (store.metricsCatalog || [])
@@ -478,11 +447,7 @@ const customReadyMetrics = computed(() =>
 );
 const allowedMetricKeys = computed(() => readyMetrics.value.map((item) => item.metricKey));
 
-const isNextEnabled = computed(() => {
-  if (activeStep.value === 0) return !!form.taskType && !!form.datasetId;
-  if (activeStep.value === 1) return form.algorithmIds.length > 0 && metrics.value.length > 0;
-  return true;
-});
+const isNextEnabled = computed(() => !!form.taskType && !!form.datasetId);
 
 function getTaskIcon(type) {
   const map = {
@@ -522,18 +487,9 @@ try {
   const raw = localStorage.getItem(NEWRUN_CACHE_KEY);
   if (raw) {
     const cached = JSON.parse(raw);
-
-    if (typeof cached.taskType === "string") form.taskType = cached.taskType;
-    else if (typeof cached.task === "string") form.taskType = toTaskType(cached.task);
-    if (cached.datasetId) form.datasetId = cached.datasetId;
+    // 仅保留安全配置，避免历史缓存带入过期资源导致默认值异常。
     if (cached.evalMode === "full" || cached.evalMode === "preview") form.evalMode = cached.evalMode;
-    if (Array.isArray(cached.algorithmIds)) form.algorithmIds = cached.algorithmIds.filter(Boolean);
-    if (cached.algorithmId) form.algorithmId = cached.algorithmId;
-    if (!form.algorithmIds.length && form.algorithmId) form.algorithmIds = [form.algorithmId];
     if (Array.isArray(cached.metrics)) metrics.value = cached.metrics;
-    if (typeof cached.paramsText === "string") form.paramsText = cached.paramsText;
-    if (typeof cached.presetId === "string") form.presetId = cached.presetId;
-    if (typeof cached.presetName === "string") form.presetName = cached.presetName;
     form.strictValidate = true;
   }
 } catch {
@@ -625,64 +581,9 @@ const selectedPairCount = computed(() => {
   return Number.isFinite(count) && count > 0 ? count : 0;
 });
 
-const PARAM_DOCS = {
-  dcp_patch: "暗通道窗口，越大去雾更强，但细节更容易被抹平。",
-  dcp_omega: "去雾强度，越大去雾越明显。",
-  dcp_t0: "最小透射率，用于限制暗区噪声。",
-  clahe_clip_limit: "局部对比度上限，越大对比更强。",
-  gamma: "亮度伽马，小于1提亮暗部。",
-  lowlight_gamma: "低照增强强度，建议0.5~0.8起步。",
-  nlm_h: "去噪强度，越大去噪越强。",
-  nlm_hColor: "色彩去噪强度，建议与nlm_h接近。",
-  nlm_templateWindowSize: "模板窗口大小，常用奇数7。",
-  nlm_searchWindowSize: "搜索窗口大小，常用奇数21。",
-  bilateral_d: "双边滤波邻域直径。",
-  bilateral_sigmaColor: "色域平滑系数。",
-  bilateral_sigmaSpace: "空间平滑系数。",
-  gaussian_sigma: "高斯标准差，越大模糊越强。",
-  median_ksize: "中值核大小，应为奇数。",
-  unsharp_sigma: "锐化半径，控制作用范围。",
-  unsharp_amount: "锐化强度，越大边缘越锐。",
-  laplacian_strength: "拉普拉斯锐化强度。",
-};
-const SYSTEM_PARAM_KEYS = new Set(["param_scheme", "user_scheme_name"]);
-
-const paramDisplayRows = computed(() => {
-  let obj = {};
-  try {
-    const s = String(form.paramsText || "").trim();
-    const parsed = s ? JSON.parse(s) : {};
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) obj = parsed;
-  } catch {
-    obj = {};
-  }
-  return Object.entries(obj)
-    .filter(([key]) => !SYSTEM_PARAM_KEYS.has(String(key)))
-    .map(([key, value]) => ({
-      key,
-      value: String(value),
-      explain: PARAM_DOCS[key] || "当前参数暂无内置说明",
-    }));
-});
-
 const selectedDataset = computed(() =>
   availableDatasets.value.find((d) => d.id === form.datasetId)
 );
-
-const userSchemeEntries = computed(() => {
-  const alg = selectedAlgorithm.value;
-  if (!alg) return [];
-  const base = normalizeSchemeBaseName(alg.name);
-  return store.algorithms
-    .filter((x) => !isPlatformAlgorithm(x) && x?.task === alg.task)
-    .map((x) => ({
-      id: String(x.id || ""),
-      name: String(x.name || ""),
-      params: x?.defaultParams && typeof x.defaultParams === "object" && !Array.isArray(x.defaultParams) ? x.defaultParams : {},
-      base: normalizeSchemeBaseName(x?.name || ""),
-    }))
-    .filter((x) => x.base === base);
-});
 
 watch(
   () => form.algorithmIds.join("|"),
@@ -703,19 +604,6 @@ watch(
         : {};
     form.paramSchemeKey = "__default__";
     form.paramsText = JSON.stringify(obj, null, 2);
-  }
-);
-
-watch(
-  () => form.paramSchemeKey,
-  () => {
-    if (!form.algorithmId || !isSingleAlgorithmMode.value) return;
-    if (applyingPreset.value) return;
-    if (form.paramSchemeKey !== "__default__" && !String(form.paramSchemeKey).startsWith("__user__")) {
-      form.paramSchemeKey = "__default__";
-      return;
-    }
-    applyParamScheme();
   }
 );
 
@@ -807,11 +695,14 @@ function applyPreset() {
   form.presetName = p.name || "";
   form.taskType = p.taskType;
   form.datasetId = p.datasetId || "";
-  form.algorithmId = p.algorithmId || "";
-  form.algorithmIds = form.algorithmId ? [form.algorithmId] : [];
+  const presetAlgorithmIds = Array.isArray(p.algorithmIds) && p.algorithmIds.length
+    ? p.algorithmIds
+    : (p.algorithmId ? [p.algorithmId] : []);
+  form.algorithmIds = [...presetAlgorithmIds];
+  form.algorithmId = form.algorithmIds[0] || "";
   metrics.value = normalizeMetrics(p.metrics);
   const params = p.params && typeof p.params === "object" && !Array.isArray(p.params) ? p.params : {};
-  form.paramSchemeKey = resolveSchemeKeyByParams(params);
+  form.paramSchemeKey = "__default__";
   form.paramsText = JSON.stringify(params, null, 2);
 }
 
@@ -835,62 +726,12 @@ watch(
   }
 );
 
-function applyParamScheme() {
-  const alg = selectedAlgorithm.value;
-  if (!alg) return;
-
-  if (form.paramSchemeKey === "__default__") {
-    const obj =
-      alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams)
-        ? alg.defaultParams
-        : {};
-    form.paramsText = JSON.stringify(obj, null, 2);
-    return;
-  }
-
-  if (String(form.paramSchemeKey).startsWith("__user__")) {
-    const sid = String(form.paramSchemeKey).replace("__user__", "");
-    const found = userSchemeEntries.value.find((x) => x.id === sid);
-    if (!found) return;
-    form.paramsText = JSON.stringify(found.params, null, 2);
-  }
-}
-
 function getDefaultParamsForAlgorithm(alg) {
   const obj =
     alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams)
       ? alg.defaultParams
       : {};
   return JSON.parse(JSON.stringify(obj));
-}
-
-function _normalizeParamObj(x) {
-  const src = x && typeof x === "object" && !Array.isArray(x) ? x : {};
-  const out = {};
-  for (const k of Object.keys(src).sort()) out[k] = src[k];
-  return out;
-}
-
-function _sameParams(a, b) {
-  return JSON.stringify(_normalizeParamObj(a)) === JSON.stringify(_normalizeParamObj(b));
-}
-
-function resolveSchemeKeyByParams(params) {
-  const alg = selectedAlgorithm.value;
-  if (!alg) return "__default__";
-  const def = alg?.defaultParams && typeof alg.defaultParams === "object" && !Array.isArray(alg.defaultParams) ? alg.defaultParams : {};
-  if (_sameParams(params, def)) return "__default__";
-  const hit = userSchemeEntries.value.find((x) => _sameParams(params, x.params));
-  if (hit) return `__user__${hit.id}`;
-  return "__default__";
-}
-
-function normalizeSchemeBaseName(name) {
-  const n = String(name || "").trim();
-  if (!n.endsWith("）")) return n;
-  const i = n.lastIndexOf("（");
-  if (i <= 0) return n;
-  return n.slice(0, i);
 }
 
 function normalizePresetName(name) {
@@ -942,9 +783,8 @@ const datasetHintText = computed(() => {
 async function savePreset() {
   if (!form.presetName.trim()) return ElMessage({ type: "warning", message: "请填写预设名称" });
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
-  if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
+  if (!form.algorithmIds.length) return ElMessage({ type: "warning", message: "请先选择算法" });
   if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
-  if (!isSingleAlgorithmMode.value) return ElMessage({ type: "warning", message: "多选算法模式下暂不支持保存预设，请先只选择一个算法" });
   {
     const wanted = normalizePresetName(form.presetName);
     const dup = (store.presets || []).find(
@@ -965,23 +805,16 @@ async function savePreset() {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return ElMessage({ type: "error", message: '参数必须是 JSON 对象，例如 { "dcp_patch": 15 }' });
   }
-  if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) {
-    if (form.paramSchemeKey === "__default__") {
-      params.param_scheme = "default";
-    } else if (String(form.paramSchemeKey).startsWith("__user__")) {
-      const sid = String(form.paramSchemeKey).replace("__user__", "");
-      const picked = userSchemeEntries.value.find((x) => x.id === sid);
-      params.param_scheme = picked?.name ? `user:${picked.name}` : "user";
-      if (picked?.name) params.user_scheme_name = picked.name;
-    }
-  }
+  if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) params.param_scheme = "default";
 
   try {
+    const normalizedAlgorithmIds = [...new Set(form.algorithmIds.map((x) => String(x || "").trim()).filter(Boolean))];
     const out = await store.createPreset({
       name: form.presetName.trim(),
       task: toTaskLabel(form.taskType),
       datasetId: form.datasetId,
-      algorithmId: form.algorithmId,
+      algorithmId: normalizedAlgorithmIds[0] || "",
+      algorithmIds: normalizedAlgorithmIds,
       metrics: [...metrics.value],
       params,
     });
@@ -1019,7 +852,6 @@ function clearPreset() {
 async function create() {
   if (!form.algorithmIds.length) return ElMessage({ type: "warning", message: "请至少选择一个算法" });
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
-  if (!form.algorithmId) return ElMessage({ type: "warning", message: "请先选择算法" });
   if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
 
   const targetAlgorithmIds = form.algorithmIds.length
@@ -1049,16 +881,7 @@ async function create() {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return ElMessage({ type: "error", message: '参数必须是 JSON 对象，例如 { "dcp_patch": 15 }' });
   }
-  if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) {
-    if (form.paramSchemeKey === "__default__") {
-      params.param_scheme = "default";
-    } else if (String(form.paramSchemeKey).startsWith("__user__")) {
-      const sid = String(form.paramSchemeKey).replace("__user__", "");
-      const picked = userSchemeEntries.value.find((x) => x.id === sid);
-      params.param_scheme = picked?.name ? `user:${picked.name}` : "user";
-      if (picked?.name) params.user_scheme_name = picked.name;
-    }
-  }
+  if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) params.param_scheme = "default";
 
   try {
     const creationResults = [];
@@ -1182,12 +1005,6 @@ async function create() {
     }
     ElMessage({ type: "error", message: `创建 Run 失败：${e?.message || e}` });
   }
-}
-
-function getPresetMetrics() {
-  if (!form.presetId) return "无";
-  const preset = presetsAll.value.find(p => p.id === form.presetId);
-  return preset?.metrics?.join(', ') || "无";
 }
 
 // 检查指标是否被选中
@@ -1722,71 +1539,6 @@ function goRuns() {
 }
 
 
-/* Parameters Preview */
-.readonly-param-container {
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.param-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
-
-.param-info-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 16px;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-}
-
-.param-info-card:hover {
-  border-color: #2f6bff;
-  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.1);
-  transform: translateY(-1px);
-}
-
-.param-info-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.param-info-key {
-  font-weight: 700;
-  font-size: 14px;
-  color: #334155;
-}
-
-.param-info-val {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  color: #2563eb;
-  font-size: 14px;
-}
-
-.param-info-desc {
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.4;
-}
-
-.readonly-empty {
-  color: #94a3b8;
-  text-align: center;
-  padding: 24px;
-  font-size: 14px;
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-}
-
 .save-preset-row {
   display: flex;
   gap: 16px;
@@ -1948,10 +1700,6 @@ function goRuns() {
   
   .footer-center {
     order: -1;
-  }
-  
-  .param-cards-grid {
-    grid-template-columns: 1fr;
   }
   
   .algorithm-batch-chip {

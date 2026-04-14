@@ -10,6 +10,7 @@ import NewRun from "../views/NewRun.vue";
 import Compare from "../views/Compare.vue";
 import Runs from "../views/Runs.vue";
 import Notices from "../views/Notices.vue";
+import Profile from "../views/Profile.vue";
 import Login from "../views/LoginBrand.vue";
 import Register from "../views/RegisterBrand.vue";
 import AdminLogin from "../views/AdminLoginBrand.vue";
@@ -39,6 +40,7 @@ const routes = [
       { path: "new-run", component: NewRun },
       { path: "compare", component: Compare },
       { path: "runs", name: "Runs", component: Runs },
+      { path: "profile", component: Profile },
       { path: "notices", component: Notices },
       { path: "admin", component: Admin },
     ],

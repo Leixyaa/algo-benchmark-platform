@@ -17,15 +17,6 @@
         <el-menu-item index="/new-run">发起评测</el-menu-item>
         <el-menu-item index="/runs">任务中心</el-menu-item>
         <el-menu-item index="/compare">结果对比</el-menu-item>
-        <el-menu-item index="/notices">
-          我的通知
-          <el-badge
-            v-if="store.user.isLoggedIn && unreadCount > 0"
-            :value="unreadCount"
-            :max="99"
-            class="menu-badge"
-          />
-        </el-menu-item>
         <el-menu-item v-if="store.user.role === 'admin'" index="/admin">管理后台</el-menu-item>
       </el-menu>
     </el-aside>
@@ -51,10 +42,11 @@
           <el-dropdown v-if="store.user.isLoggedIn">
             <span class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
-              <span class="username">{{ store.user.username }}</span>
+              <span class="username">{{ store.user.displayName || store.user.username }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item @click="router.push('/profile')">个人信息</el-dropdown-item>
                 <el-dropdown-item @click="handleLogout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -77,6 +69,13 @@
         </div>
       </el-main>
     </el-container>
+    <AiAssistant
+      v-if="store.user.isLoggedIn"
+      :route-path="route.path"
+      :page-title="title"
+      :is-logged-in="store.user.isLoggedIn"
+      :user-role="store.user.role"
+    />
   </el-container>
 </template>
 
@@ -86,21 +85,23 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElNotification } from "element-plus";
 
 import { useAppStore } from "../stores/app";
+import AiAssistant from "../components/AiAssistant.vue";
 
 const route = useRoute();
 const router = useRouter();
 const store = useAppStore();
 const notifiedIds = new Set();
 
-/** 缓存主区页面实例，避免每次切换路由都销毁重建、重复打全量接口 */
+/** 缓存主区页面实例，避免每次切换路由都销毁重建、重复打全量接口。
+ * 社区中心（Community）不缓存，进入即重新请求列表，避免已下架数据残留。 */
 const layoutCachedPageNames = [
-  "Community",
   "Datasets",
   "Algorithms",
   "Metrics",
   "NewRun",
   "Compare",
   "Runs",
+  "Profile",
   "Notices",
   "Admin",
 ];
@@ -117,6 +118,7 @@ const title = computed(() => {
     "/new-run": "发起评测",
     "/runs": "任务中心",
     "/compare": "结果对比",
+    "/profile": "个人信息",
     "/notices": "我的通知",
     "/admin": "管理后台",
   };

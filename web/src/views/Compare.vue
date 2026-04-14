@@ -48,7 +48,7 @@
             <el-option v-for="item in taskOptions" :key="item" :label="item" :value="item" />
           </el-select>
           <el-select v-model="datasetId" placeholder="评测数据集" class="flex-item">
-            <el-option v-for="item in store.datasets" :key="item.id" :label="item.name" :value="item.id" />
+            <el-option v-for="item in filteredCompareDatasets" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
           <el-select v-model="chartMetric" placeholder="排序方式" class="flex-item">
             <el-option v-for="item in availableRankMetrics" :key="item.value" :label="item.label" :value="item.value" />
@@ -176,9 +176,16 @@ export default { name: "Compare" };
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
+import { datasetSupportsTaskType } from "../utils/datasetTask";
 import * as XLSX from "xlsx";
 
 const store = useAppStore();
+
+function mapTaskLabelToType(taskLabel) {
+  const entry = Object.entries(TASK_LABEL_BY_TYPE).find(([, label]) => label === taskLabel);
+  return entry?.[0] || toTaskType(taskLabel || "");
+}
+
 const task = ref("");
 const datasetId = ref("");
 const onlyDone = ref(true);
@@ -190,10 +197,17 @@ const wNIQE = ref(2.0);
 const chartCanvas = ref(null);
 const chartTip = ref({ visible: false, x: 0, y: 0, text: "" });
 let chartHits = [];
-const CACHE_KEY = "compare_filters_v2";
+const CACHE_KEY = "compare_filters_v3";
 const PLATFORM_DEFAULT_METRICS = ["PSNR", "SSIM", "NIQE"];
 
 const datasetMap = computed(() => new Map((store.datasets || []).map((item) => [item.id, item])));
+const filteredCompareDatasets = computed(() => {
+  const list = store.datasets || [];
+  if (!task.value) return list;
+  const taskTypeKey = mapTaskLabelToType(task.value);
+  if (!taskTypeKey) return list;
+  return list.filter((d) => datasetSupportsTaskType(d, taskTypeKey));
+});
 const taskOptions = computed(() => Array.from(new Set((store.algorithms || []).map((item) => item.task).filter(Boolean))));
 const availableRankMetrics = computed(() => {
   const base = [
@@ -241,6 +255,15 @@ function loadCache() {
   } catch {}
 }
 
+function normalizeCompareFilters() {
+  const validTaskSet = new Set(taskOptions.value || []);
+  if (task.value && !validTaskSet.has(task.value)) task.value = "";
+  const validDatasetSet = new Set((filteredCompareDatasets.value || []).map((item) => String(item.id || "")));
+  if (datasetId.value && !validDatasetSet.has(String(datasetId.value || ""))) datasetId.value = "";
+  const validMetricSet = new Set((availableRankMetrics.value || []).map((item) => item.value));
+  if (!validMetricSet.has(chartMetric.value)) chartMetric.value = "score";
+}
+
 function saveCache() {
   localStorage.setItem(CACHE_KEY, JSON.stringify({
     task: task.value,
@@ -274,11 +297,6 @@ function presetQuality() { wPSNR.value = 4.0; wSSIM.value = 3.8; wNIQE.value = 1
 function presetBalanced() { wPSNR.value = 3.5; wSSIM.value = 3.5; wNIQE.value = 2.0; }
 function presetPerception() { wPSNR.value = 2.8; wSSIM.value = 2.8; wNIQE.value = 4.2; }
 function refreshAll() { return Promise.allSettled([store.fetchRuns(), store.fetchAlgorithms(), store.fetchDatasets(), store.fetchMetrics()]); }
-
-function mapTaskLabelToType(taskLabel) {
-  const entry = Object.entries(TASK_LABEL_BY_TYPE).find(([, label]) => label === taskLabel);
-  return entry?.[0] || toTaskType(taskLabel || "");
-}
 
 function isDone(status) {
   const s = String(status || "").toLowerCase();
@@ -635,14 +653,18 @@ function exportChartPng() {
 
 watch([task, datasetId, onlyDone, chartMetric, chartTopN, wPSNR, wSSIM, wNIQE], saveCache, { deep: true });
 watch([tableRows, chartMetric, chartTopN], async () => { await nextTick(); drawChart(); });
-watch(availableRankMetrics, () => {
-  const allowed = new Set(availableRankMetrics.value.map((item) => item.value));
-  if (!allowed.has(chartMetric.value)) chartMetric.value = "score";
-});
+watch(availableRankMetrics, normalizeCompareFilters);
+watch(taskOptions, normalizeCompareFilters);
+watch(task, normalizeCompareFilters);
+watch(
+  () => (store.datasets || []).map((item) => item.id).join("|"),
+  normalizeCompareFilters
+);
 
 onMounted(async () => {
   loadCache();
   await refreshAll();
+  normalizeCompareFilters();
   await nextTick();
   drawChart();
 });

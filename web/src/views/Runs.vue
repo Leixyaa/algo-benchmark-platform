@@ -92,7 +92,7 @@
             <div class="row-actions">
               <el-button size="small" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
               <el-button v-if="canCancel(row)" size="small" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
-              <el-button v-if="!isActiveStatus(row.status)" size="small" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">隐藏</el-button>
+              <el-button v-if="!isActiveStatus(row.status)" size="small" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">删除</el-button>
             </div>
           </template>
         </el-table-column>
@@ -120,6 +120,14 @@
               <span class="info-label">创建时间</span>
               <span class="info-value">{{ detail.createdAt }}</span>
             </div>
+            <div class="info-item">
+              <span class="info-label">开始时间</span>
+              <span class="info-value">{{ detail.startedAt || "-" }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">完成时间</span>
+              <span class="info-value">{{ detail.finishedAt || "-" }}</span>
+            </div>
           </div>
         </div>
 
@@ -130,6 +138,12 @@
               <div class="kv-row"><span class="kv-label">算法大类</span><span class="kv-value">{{ detail.task }}</span></div>
               <div class="kv-row"><span class="kv-label">数据集</span><span class="kv-value">{{ detail.dataset }}</span></div>
               <div class="kv-row"><span class="kv-label">算法名称</span><span class="kv-value">{{ detail.algorithm }}</span></div>
+              <div v-if="detail.datasetMissing || detail.algorithmMissing" class="kv-row">
+                <span class="kv-label">关联资源</span>
+                <span class="kv-value danger-text">
+                  {{ detail.datasetMissing ? "数据集已删除" : "" }}{{ detail.datasetMissing && detail.algorithmMissing ? "，" : "" }}{{ detail.algorithmMissing ? "算法已删除" : "" }}
+                </span>
+              </div>
               <div class="kv-row"><span class="kv-label">参数方案</span><span class="kv-value">{{ detail.paramSchemeText || '-' }}</span></div>
               <div class="kv-row"><span class="kv-label">执行口径</span><span class="kv-value"><span class="algo-auth" :class="`algo-auth--${authenticityType(detail)}`">{{ authenticityLabel(detail) }}</span></span></div>
               <div class="kv-row"><span class="kv-label">实际算法</span><span class="kv-value">{{ detail.raw?.params?.real_algo || '-' }}</span></div>
@@ -273,11 +287,19 @@ const rows = computed(() => {
   const algoMap = new Map((store.algorithms ?? []).map((a) => [a.id, a.name]));
   const ctxCache = new Map();
   return (store.runs ?? []).filter((r) => !hiddenIds.value.has(r.id)).map((r) => {
+    const datasetId = String(r.datasetId || "").trim();
+    const algorithmId = String(r.algorithmId || "").trim();
+    const datasetName = dsMap.get(datasetId);
+    const algorithmName = algoMap.get(algorithmId);
+    const datasetMissing = Boolean(datasetId) && !datasetName;
+    const algorithmMissing = Boolean(algorithmId) && !algorithmName;
     const base = {
       ...r,
       name: r.name || `${r.task || "任务"} Run`,
-      dataset: dsMap.get(r.datasetId) ?? r.datasetId ?? "-",
-      algorithm: algoMap.get(r.algorithmId) ?? r.algorithmId ?? "-",
+      dataset: datasetName ?? (datasetId ? `关联数据集已删除（${datasetId}）` : "-"),
+      algorithm: algorithmName ?? (algorithmId ? `关联算法已删除（${algorithmId}）` : "-"),
+      datasetMissing,
+      algorithmMissing,
       paramSchemeText: resolveParamSchemeText(r),
     };
     const key = comparableGroupKey(base);
@@ -526,6 +548,7 @@ async function cancel(runId) {
   try {
     await ElMessageBox.confirm("确认取消该任务吗？", "取消确认", { type: "warning", confirmButtonText: "取消任务", cancelButtonText: "返回" });
     await store.cancelRun(runId);
+    ElMessage({ type: "success", message: "已提交取消请求，请稍候状态刷新" });
     await refresh();
   } catch (e) {
     if (e === "cancel" || e === "close") return;
@@ -595,10 +618,33 @@ async function refresh() {
   }
 }
 
-function remove(id) {
-  ElMessageBox.confirm("确认从当前列表隐藏该任务吗？", "隐藏确认", { type: "warning", confirmButtonText: "隐藏", cancelButtonText: "取消" })
-    .then(() => { hiddenIds.value.add(id); persistHidden(); ElMessage({ type: "success", message: "已从当前列表隐藏" }); })
-    .catch(() => {});
+async function remove(id) {
+  try {
+    await ElMessageBox.confirm("确认删除该任务记录吗？删除后不可恢复。", "删除确认", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    });
+    const res = await authFetch("/runs/batch-clear", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: [id] }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    if (Number(data?.deleted || 0) <= 0) {
+      ElMessage({ type: "warning", message: "当前任务状态不可删除，请稍后重试" });
+      return;
+    }
+    hiddenIds.value.delete(id);
+    persistHidden();
+    if (detail.value?.id === id) detailVisible.value = false;
+    ElMessage({ type: "success", message: "任务已删除" });
+    await refresh();
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `删除失败：${e?.message || e}` });
+  }
 }
 
 function openDetail(row) {
@@ -978,6 +1024,10 @@ onActivated(() => {
   padding: 12px 0;
   border-bottom: 1px solid #eef2f7;
   align-items: center;
+}
+
+.danger-text {
+  color: #d9534f;
 }
 
 .kv-row:last-child {

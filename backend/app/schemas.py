@@ -45,6 +45,8 @@ class DatasetCreate(BaseModel):
     visibility: str = "private"
     allow_use: bool = False
     allow_download: bool = False
+    # 算法任务维度：去噪/去雾/超分等；默认可空，扫描后由服务端写入或由用户 PATCH
+    task_types: List[str] = Field(default_factory=list)
 
 
 class DatasetPatch(BaseModel):
@@ -55,6 +57,7 @@ class DatasetPatch(BaseModel):
     visibility: Optional[str] = None
     allow_use: Optional[bool] = None
     allow_download: Optional[bool] = None
+    task_types: Optional[List[str]] = None
 
 
 class DatasetIdChange(BaseModel):
@@ -76,6 +79,7 @@ class DatasetOut(BaseModel):
     visibility: str = "private"
     allow_use: bool = False
     allow_download: bool = False
+    task_types: List[str] = Field(default_factory=list)
 
 
 class DatasetImportZip(BaseModel):
@@ -193,7 +197,8 @@ class PresetCreate(BaseModel):
     name: str
     task_type: str
     dataset_id: str
-    algorithm_id: str
+    algorithm_id: str = ""
+    algorithm_ids: List[str] = Field(default_factory=list)
     metrics: List[str] = Field(default_factory=list)
     params: Dict[str, Any] = Field(default_factory=dict)
 
@@ -203,6 +208,7 @@ class PresetPatch(BaseModel):
     task_type: Optional[str] = None
     dataset_id: Optional[str] = None
     algorithm_id: Optional[str] = None
+    algorithm_ids: Optional[List[str]] = None
     metrics: Optional[List[str]] = None
     params: Optional[Dict[str, Any]] = None
 
@@ -213,6 +219,7 @@ class PresetOut(BaseModel):
     task_type: str
     dataset_id: str
     algorithm_id: str
+    algorithm_ids: List[str] = Field(default_factory=list)
     owner_id: Optional[str] = "system"
     metrics: List[str] = Field(default_factory=list)
     params: Dict[str, Any] = Field(default_factory=dict)
@@ -340,12 +347,23 @@ class UserCreate(BaseModel):
 
 class UserOut(BaseModel):
     username: str
+    display_name: str = ""
     role: str = "user"
     created_at: float
+
+
+class UserPasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str
     username: str
+    display_name: str = ""
     role: str = "user"

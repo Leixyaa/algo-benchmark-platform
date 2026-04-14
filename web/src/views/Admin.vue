@@ -15,6 +15,29 @@
 
     <el-tabs v-model="tab" class="resource-tabs">
 
+      <el-tab-pane label="注册用户" name="users">
+        <div class="toolbar">
+          <el-input v-model="userKeyword" placeholder="搜索用户名 / 显示名 / 角色" clearable class="search-input" />
+        </div>
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredRegisteredUsers"
+          border
+          stripe
+          class="data-table"
+        >
+          <el-table-column prop="username" label="用户名" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="displayName" label="显示名" min-width="180" show-overflow-tooltip />
+          <el-table-column label="角色" width="120">
+            <template #default="{ row }">
+              {{ row.role === "admin" ? "管理员" : "普通用户" }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="注册时间" width="180" />
+        </el-table>
+      </el-tab-pane>
+
       <el-tab-pane label="社区算法" name="algorithms">
         <div class="toolbar">
           <el-input v-model="algorithmKeyword" placeholder="搜索算法名称或上传者" clearable class="search-input" />
@@ -581,6 +604,7 @@ import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
 const store = useAppStore();
 
 const tab = ref("algorithms");
+const registeredUsers = ref([]);
 const algorithms = ref([]);
 const datasets = ref([]);
 const metrics = ref([]);
@@ -590,6 +614,7 @@ const reports = ref([]);
 /** 首屏与各 tab 表格共用数据源，请求未完成前避免误显示空表 / No Data */
 const adminDataLoading = ref(true);
 
+const userKeyword = ref("");
 const algorithmKeyword = ref("");
 const datasetKeyword = ref("");
 const metricKeyword = ref("");
@@ -652,6 +677,18 @@ function includesKeyword(parts, keyword) {
   if (!kw) return true;
   return parts.join(" ").toLowerCase().includes(kw);
 }
+
+const filteredRegisteredUsers = computed(() => {
+  const kw = String(userKeyword.value || "").trim().toLowerCase();
+  const rows = registeredUsers.value || [];
+  if (!kw) return rows;
+  return rows.filter((row) =>
+    includesKeyword(
+      [row.username, row.displayName, row.role === "admin" ? "管理员" : "普通用户", row.role || ""],
+      kw
+    )
+  );
+});
 
 function mapAlgorithm(x) {
   return {
@@ -905,7 +942,8 @@ async function loadAll() {
   }
   adminDataLoading.value = true;
   try {
-    const [algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
+    const [userRes, algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
+      adminApi.listRegisteredUsers(),
       adminApi.listCommunityAlgorithms(),
       adminApi.listCommunityDatasets(),
       adminApi.listMetrics(),
@@ -913,6 +951,12 @@ async function loadAll() {
       adminApi.listComments(),
       adminApi.listReports(),
     ]);
+    registeredUsers.value = (userRes || []).map((x) => ({
+      username: String(x.username || ""),
+      displayName: String(x.display_name || ""),
+      role: String(x.role || "user"),
+      createdAt: formatTs(x.created_at),
+    }));
     algorithms.value = (algRes || []).map(mapAlgorithm);
     datasets.value = (dsRes || []).map(mapDataset);
     metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");

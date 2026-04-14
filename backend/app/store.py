@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 import redis
 
@@ -49,13 +50,90 @@ def _merge_records(redis_items: list[Dict[str, Any]], sql_items: list[Dict[str, 
         str(x.get(id_field) or ""): x for x in redis_items if isinstance(x, dict) and x.get(id_field)
     }
     for item in sql_items:
-        if isinstance(item, dict) and item.get(id_field):
-            merged[str(item.get(id_field))] = item
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get(id_field) or "")
+        if not rid:
+            continue
+        if rid in merged and id_field == "run_id":
+            merged[rid] = _pick_better_run(merged[rid], item)
+        else:
+            merged[rid] = item
     return list(merged.values())
+
+
+def _recency_ts(item: Dict[str, Any]) -> float:
+    try:
+        return float(item.get("updated_at") or item.get("created_at") or 0)
+    except Exception:
+        return 0.0
+
+
+def _pick_newer_record(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    return b if _recency_ts(b) >= _recency_ts(a) else a
+
+
+def _merge_records_prefer_newer(
+    redis_items: list[Dict[str, Any]],
+    sql_items: list[Dict[str, Any]] | None,
+    id_field: str,
+) -> list[Dict[str, Any]]:
+    """SQL 与 Redis 双写时，按 updated_at/created_at 取较新，避免列表里出现已下架但仍为旧的 SQL 快照。"""
+    if sql_items is None:
+        return redis_items
+    merged: dict[str, Dict[str, Any]] = {}
+    for x in redis_items:
+        if isinstance(x, dict) and x.get(id_field):
+            merged[str(x.get(id_field))] = x
+    for item in sql_items:
+        if not isinstance(item, dict):
+            continue
+        rid = str(item.get(id_field) or "")
+        if not rid:
+            continue
+        if rid not in merged:
+            merged[rid] = item
+        else:
+            merged[rid] = _pick_newer_record(merged[rid], item)
+    return list(merged.values())
+
+
+def _bump_updated_at(data: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(data)
+    out["updated_at"] = time.time()
+    return out
 
 
 def run_key(run_id: str) -> str:
     return f"run:{run_id}"
+
+
+# SQL 写入失败（如 payload 超过 MySQL TEXT 上限）时会回退到 Redis；列表合并时不能再用 SQL 覆盖较新的 Redis。
+_RUN_TERMINAL = frozenset({"done", "failed", "canceled"})
+
+
+def _run_recency_tuple(item: Dict[str, Any]) -> tuple:
+    st = str(item.get("status") or "").lower()
+    if st in _RUN_TERMINAL:
+        tier = 3
+    elif st in ("running", "canceling"):
+        tier = 2
+    elif st in ("queued",):
+        tier = 1
+    else:
+        tier = 0
+    fin = float(item.get("finished_at") or 0)
+    sta = float(item.get("started_at") or 0)
+    crt = float(item.get("created_at") or 0)
+    return (tier, fin, sta, crt)
+
+
+def _pick_better_run(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    if not a:
+        return b
+    if not b:
+        return a
+    return a if _run_recency_tuple(a) >= _run_recency_tuple(b) else b
 
 
 def save_run(r: redis.Redis, run_id: str, data: Dict[str, Any]) -> None:
@@ -70,18 +148,23 @@ def save_run(r: redis.Redis, run_id: str, data: Dict[str, Any]) -> None:
 
 
 def load_run(r: redis.Redis, run_id: str) -> Optional[Dict[str, Any]]:
+    redis_item = _redis_load(r, run_key(run_id))
+    sql_item: Optional[Dict[str, Any]] = None
     if sql_store.is_enabled():
         try:
-            item = sql_store.load_record("run", run_id)
-            if item is not None:
-                return item
+            sql_item = sql_store.load_record("run", run_id)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("load_run", exc)
+            sql_item = None
+        if sql_item is not None and redis_item is not None:
+            return _pick_better_run(sql_item, redis_item)
+        if sql_item is not None:
+            return sql_item
         if not _should_fallback_to_redis():
             return None
-    return _redis_load(r, run_key(run_id))
+    return redis_item
 
 
 def delete_run(r: redis.Redis, run_id: str) -> None:
@@ -170,29 +253,33 @@ def algorithm_key(algorithm_id: str) -> str:
 
 
 def save_dataset(r: redis.Redis, dataset_id: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_record("dataset", dataset_id, data)
+            sql_store.save_record("dataset", dataset_id, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_dataset", exc)
-    _redis_set(r, dataset_key(dataset_id), data)
+    _redis_set(r, dataset_key(dataset_id), payload)
 
 
 def load_dataset(r: redis.Redis, dataset_id: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_record("dataset", dataset_id)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_dataset", exc)
+    redis_item = _redis_load(r, dataset_key(dataset_id))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_record("dataset", dataset_id)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, dataset_key(dataset_id))
+            raise
+        _warn_sql_fallback("load_dataset", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def delete_dataset(r: redis.Redis, dataset_id: str) -> None:
@@ -211,9 +298,6 @@ def list_datasets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = No
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_records("dataset", limit=limit, owner_id=owner_id, include_public=include_public)
-            if not _should_fallback_to_redis():
-                sql_items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -243,7 +327,7 @@ def list_datasets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = No
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "dataset_id")
+    items = _merge_records_prefer_newer(items, sql_items, "dataset_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
@@ -253,9 +337,6 @@ def list_all_datasets(r: redis.Redis, limit: int = 5000) -> list[Dict[str, Any]]
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_records("dataset", limit=limit, filter_by_owner=False)
-            if not _should_fallback_to_redis():
-                sql_items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -274,35 +355,39 @@ def list_all_datasets(r: redis.Redis, limit: int = 5000) -> list[Dict[str, Any]]
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "dataset_id")
+    items = _merge_records_prefer_newer(items, sql_items, "dataset_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
 
 def save_algorithm(r: redis.Redis, algorithm_id: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_algorithm(algorithm_id, data)
+            sql_store.save_algorithm(algorithm_id, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_algorithm", exc)
-    _redis_set(r, algorithm_key(algorithm_id), data)
+    _redis_set(r, algorithm_key(algorithm_id), payload)
 
 
 def load_algorithm(r: redis.Redis, algorithm_id: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_algorithm(algorithm_id)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_algorithm", exc)
+    redis_item = _redis_load(r, algorithm_key(algorithm_id))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_algorithm(algorithm_id)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, algorithm_key(algorithm_id))
+            raise
+        _warn_sql_fallback("load_algorithm", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def delete_algorithm(r: redis.Redis, algorithm_id: str) -> None:
@@ -321,8 +406,6 @@ def list_algorithms(r: redis.Redis, limit: int = 500, owner_id: Optional[str] = 
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_algorithms(limit=limit, owner_id=owner_id, include_public=include_public)
-            if not _should_fallback_to_redis():
-                return sql_items
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -347,7 +430,7 @@ def list_algorithms(r: redis.Redis, limit: int = 500, owner_id: Optional[str] = 
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "algorithm_id")
+    items = _merge_records_prefer_newer(items, sql_items, "algorithm_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
@@ -357,8 +440,6 @@ def list_all_algorithms(r: redis.Redis, limit: int = 5000) -> list[Dict[str, Any
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_all_algorithms(limit=limit)
-            if not _should_fallback_to_redis():
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -375,7 +456,7 @@ def list_all_algorithms(r: redis.Redis, limit: int = 5000) -> list[Dict[str, Any
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "algorithm_id")
+    items = _merge_records_prefer_newer(items, sql_items, "algorithm_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
@@ -385,29 +466,33 @@ def preset_key(preset_id: str) -> str:
 
 
 def save_preset(r: redis.Redis, preset_id: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_record("preset", preset_id, data)
+            sql_store.save_record("preset", preset_id, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_preset", exc)
-    _redis_set(r, preset_key(preset_id), data)
+    _redis_set(r, preset_key(preset_id), payload)
 
 
 def load_preset(r: redis.Redis, preset_id: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_record("preset", preset_id)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_preset", exc)
+    redis_item = _redis_load(r, preset_key(preset_id))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_record("preset", preset_id)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, preset_key(preset_id))
+            raise
+        _warn_sql_fallback("load_preset", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def delete_preset(r: redis.Redis, preset_id: str) -> None:
@@ -426,9 +511,6 @@ def list_presets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = Non
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_records("preset", limit=limit, owner_id=owner_id, include_public=False)
-            if not _should_fallback_to_redis():
-                sql_items.sort(key=lambda x: x.get("updated_at", x.get("created_at", 0)), reverse=True)
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -452,7 +534,7 @@ def list_presets(r: redis.Redis, limit: int = 200, owner_id: Optional[str] = Non
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "preset_id")
+    items = _merge_records_prefer_newer(items, sql_items, "preset_id")
     items.sort(key=lambda x: x.get("updated_at", x.get("created_at", 0)), reverse=True)
     return items[:limit]
 
@@ -462,29 +544,33 @@ def metric_key(metric_id: str) -> str:
 
 
 def save_metric(r: redis.Redis, metric_id: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_record("metric", metric_id, data)
+            sql_store.save_record("metric", metric_id, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_metric", exc)
-    _redis_set(r, metric_key(metric_id), data)
+    _redis_set(r, metric_key(metric_id), payload)
 
 
 def load_metric(r: redis.Redis, metric_id: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_record("metric", metric_id)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_metric", exc)
+    redis_item = _redis_load(r, metric_key(metric_id))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_record("metric", metric_id)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, metric_key(metric_id))
+            raise
+        _warn_sql_fallback("load_metric", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def delete_metric(r: redis.Redis, metric_id: str) -> None:
@@ -503,9 +589,6 @@ def list_metrics(r: redis.Redis, limit: int = 500) -> list[Dict[str, Any]]:
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_records("metric", limit=limit, filter_by_owner=False)
-            if not _should_fallback_to_redis():
-                sql_items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -522,7 +605,7 @@ def list_metrics(r: redis.Redis, limit: int = 500) -> list[Dict[str, Any]]:
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "metric_id")
+    items = _merge_records_prefer_newer(items, sql_items, "metric_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
@@ -532,29 +615,33 @@ def algorithm_submission_key(submission_id: str) -> str:
 
 
 def save_algorithm_submission(r: redis.Redis, submission_id: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_algorithm_submission(submission_id, data)
+            sql_store.save_algorithm_submission(submission_id, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_algorithm_submission", exc)
-    _redis_set(r, algorithm_submission_key(submission_id), data)
+    _redis_set(r, algorithm_submission_key(submission_id), payload)
 
 
 def load_algorithm_submission(r: redis.Redis, submission_id: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_algorithm_submission(submission_id)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_algorithm_submission", exc)
+    redis_item = _redis_load(r, algorithm_submission_key(submission_id))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_algorithm_submission(submission_id)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, algorithm_submission_key(submission_id))
+            raise
+        _warn_sql_fallback("load_algorithm_submission", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def delete_algorithm_submission(r: redis.Redis, submission_id: str) -> None:
@@ -573,8 +660,6 @@ def list_algorithm_submissions(r: redis.Redis, limit: int = 5000) -> list[Dict[s
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_algorithm_submissions(limit=limit)
-            if not _should_fallback_to_redis():
-                return sql_items
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -591,7 +676,7 @@ def list_algorithm_submissions(r: redis.Redis, limit: int = 5000) -> list[Dict[s
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "submission_id")
+    items = _merge_records_prefer_newer(items, sql_items, "submission_id")
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items[:limit]
 
@@ -601,29 +686,33 @@ def user_key(username: str) -> str:
 
 
 def save_user(r: redis.Redis, username: str, data: Dict[str, Any]) -> None:
+    payload = _bump_updated_at(data)
     if sql_store.is_enabled():
         try:
-            sql_store.save_record("user", username, data)
+            sql_store.save_record("user", username, payload)
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
             _warn_sql_fallback("save_user", exc)
-    _redis_set(r, user_key(username), data)
+    _redis_set(r, user_key(username), payload)
 
 
 def load_user(r: redis.Redis, username: str) -> Optional[Dict[str, Any]]:
-    if sql_store.is_enabled():
-        try:
-            item = sql_store.load_record("user", username)
-            if item is not None:
-                return item
-        except Exception as exc:
-            if not _should_fallback_to_redis():
-                raise
-            _warn_sql_fallback("load_user", exc)
+    redis_item = _redis_load(r, user_key(username))
+    if not sql_store.is_enabled():
+        return redis_item
+    sql_item = None
+    try:
+        sql_item = sql_store.load_record("user", username)
+    except Exception as exc:
         if not _should_fallback_to_redis():
-            return None
-    return _redis_load(r, user_key(username))
+            raise
+        _warn_sql_fallback("load_user", exc)
+    if sql_item is None:
+        return redis_item
+    if redis_item is None:
+        return sql_item
+    return _pick_newer_record(sql_item, redis_item)
 
 
 def list_users(r: redis.Redis, limit: int = 1000) -> list[Dict[str, Any]]:
@@ -631,8 +720,6 @@ def list_users(r: redis.Redis, limit: int = 1000) -> list[Dict[str, Any]]:
     if sql_store.is_enabled():
         try:
             sql_items = sql_store.list_records("user", limit=limit, filter_by_owner=False)
-            if not _should_fallback_to_redis():
-                return sql_items[:limit]
         except Exception as exc:
             if not _should_fallback_to_redis():
                 raise
@@ -649,5 +736,5 @@ def list_users(r: redis.Redis, limit: int = 1000) -> list[Dict[str, Any]]:
                 items.append(data)
         except Exception:
             continue
-    items = _merge_records(items, sql_items, "username")
+    items = _merge_records_prefer_newer(items, sql_items, "username")
     return items[:limit]

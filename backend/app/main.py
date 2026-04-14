@@ -16,7 +16,7 @@ import tempfile
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,8 +24,35 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta
 from urllib.parse import quote
+from urllib import request as urllib_request, error as urllib_error
 
 from openpyxl import Workbook
+
+def _load_local_env_file() -> None:
+    root = Path(__file__).resolve().parents[2]
+    env_file = root / ".env.local"
+    if not env_file.is_file():
+        return
+    try:
+        for raw_line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
+                value = value[1:-1]
+            if key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        # 本地环境文件读取失败时不阻断启动，沿用系统环境变量。
+        return
+
+
+_load_local_env_file()
 
 from .schemas import (
     RunCreate,
@@ -57,6 +84,8 @@ from .schemas import (
     AlgorithmSubmissionPublish,
     AlgorithmSubmissionOut,
     UserCreate,
+    UserPasswordChange,
+    UserProfileUpdate,
     UserOut,
     Token,
 )
@@ -83,6 +112,7 @@ from .store import (
     list_presets,
     save_user,
     load_user,
+    list_users,
     save_metric,
     load_metric,
     delete_metric,
@@ -116,6 +146,411 @@ app = FastAPI(title="鍥惧儚澶嶅師澧炲己绠楁硶璇勬祴骞冲彴 API"
 _ADMIN_USERNAME = os.getenv("ABP_ADMIN_USERNAME", "admin").strip() or "admin"
 _ADMIN_PASSWORD = os.getenv("ABP_ADMIN_PASSWORD", "Admin@123456")
 RUN_EVAL_MODES = {"preview", "full"}
+AI_MAX_HISTORY_ITEMS = 12
+AI_DOC_TOPK = 3
+_AI_DOC_CACHE: list[dict[str, str]] | None = None
+
+
+def _ai_bool_env(name: str, default: bool = False) -> bool:
+    value = str(os.getenv(name, "")).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _ai_float_env(name: str, default: float) -> float:
+    value = str(os.getenv(name, "")).strip()
+    if not value:
+        return float(default)
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _ai_int_env(name: str, default: int) -> int:
+    value = str(os.getenv(name, "")).strip()
+    if not value:
+        return int(default)
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _default_ai_system_prompt() -> str:
+    return (
+        "你是图像与视频增强复原评测平台的 AI 客服。"
+        "请用中文回答，内容简洁、可执行。"
+        "严格基于本平台真实功能回答：社区中心、数据集管理、算法库、指标库、发起评测、任务中心、结果对比、个人信息、我的通知、管理后台。"
+        "本平台没有“任务优先级设置”“人工工单系统”等模块，不得虚构。"
+        "当用户咨询操作步骤时，优先给出页面路径与按钮名称。"
+        "不要输出 markdown 语法符号（如 **、`、#）。"
+    )
+
+
+def _iter_ai_doc_files() -> list[Path]:
+    root = Path(__file__).resolve().parents[2]
+    patterns = [
+        "docs/**/*.md",
+        "docs/**/*.txt",
+        "release/desktop-runtime/docs/**/*.md",
+        "README.md",
+        "web/README.md",
+    ]
+    files: list[Path] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for item in root.glob(pattern):
+            if not item.is_file():
+                continue
+            key = str(item.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            files.append(item.resolve())
+    return files
+
+
+def _split_doc_chunks(text: str) -> list[str]:
+    raw = str(text or "")
+    # 先按空行切段，再截断到较短片段，减少提示词开销。
+    chunks = [x.strip() for x in re.split(r"\n\s*\n+", raw) if x.strip()]
+    out: list[str] = []
+    for item in chunks:
+        one = re.sub(r"\s+", " ", item).strip()
+        if len(one) < 20:
+            continue
+        if len(one) > 520:
+            one = one[:520].rstrip() + "..."
+        out.append(one)
+    return out
+
+
+def _load_ai_doc_corpus() -> list[dict[str, str]]:
+    global _AI_DOC_CACHE
+    if _AI_DOC_CACHE is not None:
+        return _AI_DOC_CACHE
+    corpus: list[dict[str, str]] = []
+    for path in _iter_ai_doc_files():
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        rel = str(path)
+        for chunk in _split_doc_chunks(text):
+            corpus.append({"source": rel, "text": chunk})
+    _AI_DOC_CACHE = corpus
+    return corpus
+
+
+def _tokenize_for_search(text: str) -> list[str]:
+    src = str(text or "").lower()
+    # 中文（2+）/英文数字（2+）混合 token
+    tokens = re.findall(r"[\u4e00-\u9fff]{2,}|[a-z0-9_]{2,}", src, flags=re.I)
+    dedup: list[str] = []
+    seen: set[str] = set()
+    for tk in tokens:
+        if tk in seen:
+            continue
+        seen.add(tk)
+        dedup.append(tk)
+    return dedup
+
+
+def _retrieve_ai_doc_context(query: str, topk: int = AI_DOC_TOPK) -> tuple[str, list[str]]:
+    q = str(query or "").strip()
+    if not q:
+        return "", []
+    q_tokens = _tokenize_for_search(q)
+    if not q_tokens:
+        return "", []
+    corpus = _load_ai_doc_corpus()
+    scored: list[tuple[int, dict[str, str]]] = []
+    for item in corpus:
+        text = item.get("text") or ""
+        lower = text.lower()
+        score = 0
+        for tk in q_tokens:
+            if tk in lower:
+                score += 2 if len(tk) >= 4 else 1
+        if q in text:
+            score += 4
+        if score <= 0:
+            continue
+        scored.append((score, item))
+    if not scored:
+        return "", []
+    scored.sort(key=lambda x: x[0], reverse=True)
+    picked = scored[: max(1, int(topk))]
+    lines: list[str] = []
+    for _, item in picked:
+        source = item.get("source") or "docs"
+        snippet = item.get("text") or ""
+        lines.append(f"[{source}] {snippet}")
+    sources: list[str] = []
+    for _, item in picked:
+        src = str(item.get("source") or "").strip()
+        if src and src not in sources:
+            sources.append(src)
+    return "\n".join(lines), sources[: max(1, int(topk))]
+
+
+def _ai_local_faq_answer(message: str) -> str:
+    q = str(message or "").strip().lower()
+    if not q:
+        return ""
+    if ("排队" in q and "运行" in q) or ("一直排队" in q):
+        return (
+            "任务长时间排队通常与 worker 并发数或当前任务量有关。"
+            "你可以在“任务中心”查看状态；若持续不动，先确认后端 worker 是否在线，再适当增加 worker 并发。"
+            "本平台不提供任务优先级手动调整。"
+        )
+    if "怎么发起评测" in q or ("发起" in q and "评测" in q):
+        return (
+            "进入“发起评测”页面，按步骤选择任务类型、数据集和算法，确认指标后点击“启动评测任务”。"
+            "创建后可在“任务中心”查看排队、运行和完成状态。"
+        )
+    if "算法接入" in q or ("上传" in q and "算法" in q):
+        return (
+            "进入“算法库”点击“算法接入”，填写任务类型、算法信息并上传代码包，提交后等待审核。"
+            "审核通过且接入运行链路后，才能在“发起评测”中用于真实评测。"
+        )
+    if "数据集上传社区" in q or ("数据集" in q and "审核" in q):
+        return (
+            "当前版本数据集发布到社区采用发布后治理策略，不走管理员预审核。"
+            "若发布后出现问题，可通过管理后台下架、删除或处理举报。"
+        )
+    if "运行中" in q and "看不到" in q:
+        return (
+            "任务状态是后端实时更新的，快速任务可能在前端轮询间隔内从排队直接到完成。"
+            "你可以在任务详情查看 started_at、finished_at 和耗时字段确认任务确实执行过。"
+        )
+    if "ai客服" in q and ("接入" in q or "模型" in q):
+        return (
+            "AI 客服通过后端接口 /ai/chat 调用 OpenAI 兼容模型。"
+            "当前支持配置 DeepSeek、豆包等兼容服务，并结合平台文档检索增强回答。"
+        )
+    if ("综合评分" in q and ("为什么" in q or "怎么" in q)) or "评分怎么算" in q:
+        return (
+            "综合评分只在真实数据评测场景下计算。"
+            "当前按 PSNR、SSIM、NIQE 进行归一化加权，若关键指标缺失会显示为“-”。"
+        )
+    if ("评分" in q and "-" in q) or ("综合评分" in q and "没有" in q):
+        return (
+            "综合评分显示“-”通常有三种情况：不是真实数据评测、同组可比样本不足、关键指标缺失。"
+            "可在任务详情查看 data_mode 与指标字段确认原因。"
+        )
+    if ("视频" in q and "评测" in q) or ("视频" in q and "口径" in q):
+        return (
+            "视频任务使用整段视频逐帧评测并聚合指标，不是只取首帧。"
+            "任务详情可查看视频评测模式与样本统计字段。"
+        )
+    if ("删除" in q and "算法" in q) or ("算法" in q and "已移除" in q):
+        return (
+            "删除算法后，相关运行任务会执行级联清理；若存在历史记录残留，前端会显示“关联算法已删除”兜底提示。"
+            "这样可以保证历史任务可读，不影响验收演示。"
+        )
+    if ("来源" in q and "文档" in q) or ("回答依据" in q):
+        return (
+            "AI 客服会优先检索平台文档片段再组织回答。"
+            "管理员可开启“显示参考文档来源”查看当前回复引用了哪些文档。"
+        )
+    if ("为什么" in q and ("优先级" in q or "工单" in q)) or ("没有这个功能" in q):
+        return (
+            "若你提到“任务优先级、工单系统”等，本平台当前版本确实未提供这些模块。"
+            "AI 客服已按平台真实功能约束回答，不会将外部系统能力映射到本平台。"
+        )
+    if ("验收" in q and ("演示" in q or "怎么讲" in q)) or ("答辩" in q and "讲解" in q):
+        return (
+            "建议按“数据集管理 -> 算法库 -> 发起评测 -> 任务中心 -> 结果对比”顺序演示。"
+            "每一步强调页面路径、按钮名称和结果闭环，避免泛化描述。"
+        )
+    return ""
+
+
+def _ai_local_offline_reply(message: str) -> str:
+    q = str(message or "").strip().lower()
+    if not q:
+        return "你可以问我评测流程、算法接入、任务状态、通知与个人信息等问题。"
+    if any(x in q for x in ["你好", "您好", "在吗", "hello", "hi"]):
+        return (
+            "你好，我在。当前 AI 外部模型未连接，我先用平台内置知识为你解答。"
+            "你可以直接问：怎么发起评测、算法接入步骤、排队问题排查。"
+        )
+    if any(x in q for x in ["谢谢", "感谢", "ok", "好的"]):
+        return "不客气。你可以继续问我平台操作问题，我会给你步骤化答案。"
+    return (
+        "当前 AI 外部模型暂未连接，我先提供平台内置帮助。"
+        "可直接提问：发起评测步骤、算法接入步骤、任务排队排查、个人信息与通知操作。"
+    )
+
+
+def _sanitize_ai_reply_text(text: str) -> str:
+    out = str(text or "").strip()
+    if not out:
+        return ""
+    out = out.replace("**", "")
+    out = out.replace("`", "")
+    out = re.sub(r"^\s{0,3}#{1,6}\s*", "", out, flags=re.M)
+    out = re.sub(r"^\s*-\s+\*\*(.*?)\*\*\s*", r"- \1 ", out, flags=re.M)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+
+def _coerce_chat_messages(history: Any, current_message: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    if isinstance(history, list):
+        for item in history[-AI_MAX_HISTORY_ITEMS:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            if role not in {"user", "assistant", "system"}:
+                continue
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            out.append({"role": role, "content": content})
+    current = str(current_message or "").strip()
+    if current:
+        out.append({"role": "user", "content": current})
+    return out
+
+
+def _ai_extract_text_from_choice(choice_message: Any) -> str:
+    if not isinstance(choice_message, dict):
+        return ""
+    content = choice_message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _call_ai_chat_completion(
+    *,
+    message: str,
+    history: Any,
+    context: Any,
+    current_user: Optional[dict],
+    include_sources: bool = False,
+) -> dict[str, Any]:
+    faq = _ai_local_faq_answer(message)
+    if faq:
+        faq_sources: list[str] = []
+        if include_sources:
+            _, faq_sources = _retrieve_ai_doc_context(message, topk=AI_DOC_TOPK)
+        return {
+            "reply": faq,
+            "provider": "local_faq",
+            "model": "rule-based",
+            "usage": {},
+            "sources": faq_sources,
+        }
+
+    enabled = _ai_bool_env("ABP_AI_ENABLED", default=True)
+    if not enabled:
+        err.api_error(503, err.E_HTTP, "ai_service_disabled")
+
+    api_key = str(os.getenv("ABP_AI_API_KEY", "")).strip()
+    base_url = str(os.getenv("ABP_AI_BASE_URL", "https://api.deepseek.com/v1")).strip().rstrip("/")
+    model = str(os.getenv("ABP_AI_MODEL", "deepseek-chat")).strip()
+    timeout_s = max(3.0, _ai_float_env("ABP_AI_TIMEOUT_S", 20.0))
+    temperature = max(0.0, min(1.5, _ai_float_env("ABP_AI_TEMPERATURE", 0.3)))
+    max_tokens = max(128, min(4096, _ai_int_env("ABP_AI_MAX_OUTPUT_TOKENS", 800)))
+    provider_name = str(os.getenv("ABP_AI_PROVIDER_NAME", "")).strip() or "openai_compatible"
+    system_prompt = str(os.getenv("ABP_AI_SYSTEM_PROMPT", "")).strip() or _default_ai_system_prompt()
+
+    if (not api_key) or (not base_url) or (not model):
+        return {
+            "reply": _ai_local_offline_reply(message),
+            "provider": "local_offline",
+            "model": "rule-based",
+            "usage": {},
+            "sources": [],
+        }
+
+    route_path = ""
+    page_title = ""
+    if isinstance(context, dict):
+        route_path = str(context.get("route_path") or "").strip()
+        page_title = str(context.get("page_title") or "").strip()
+    username = _username_of(current_user) or "guest"
+    role = _normalize_user_role(current_user)
+    doc_context, doc_sources = _retrieve_ai_doc_context(message, topk=AI_DOC_TOPK)
+    runtime_context = (
+        f"当前登录用户：{username}（{role}）\n"
+        f"当前页面路径：{route_path or '-'}\n"
+        f"当前页面标题：{page_title or '-'}\n"
+        + ("平台文档检索片段：\n" + doc_context + "\n" if doc_context else "")
+        + "请优先基于平台文档检索片段回答。若检索片段未覆盖该问题，再给出谨慎建议并明确不确定。"
+    )
+    messages = [{"role": "system", "content": f"{system_prompt}\n\n{runtime_context}"}]
+    messages.extend(_coerce_chat_messages(history, message))
+    if len(messages) <= 1:
+        err.api_error(400, err.E_HTTP, "empty_user_message")
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    endpoint = f"{base_url}/chat/completions"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib_error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = str(e)
+        err.api_error(502, err.E_HTTP, "ai_upstream_http_error", status=e.code, detail=detail[:1200])
+    except urllib_error.URLError as e:
+        err.api_error(502, err.E_HTTP, "ai_upstream_network_error", detail=str(e)[:800])
+    except Exception as e:
+        err.api_error(502, err.E_HTTP, "ai_upstream_error", detail=str(e)[:800])
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        err.api_error(502, err.E_HTTP, "ai_upstream_invalid_json")
+
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not isinstance(choices, list) or not choices:
+        err.api_error(502, err.E_HTTP, "ai_upstream_empty_choices")
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message_text = _ai_extract_text_from_choice(first.get("message"))
+    if not message_text:
+        err.api_error(502, err.E_HTTP, "ai_upstream_empty_message")
+
+    usage = data.get("usage") if isinstance(data, dict) else None
+    return {
+        "reply": _sanitize_ai_reply_text(message_text),
+        "provider": provider_name,
+        "model": model,
+        "usage": usage if isinstance(usage, dict) else {},
+        "sources": doc_sources if include_sources else [],
+    }
 
 
 def _normalize_user_role(user: Optional[dict]) -> str:
@@ -138,12 +573,16 @@ def _ensure_admin_account(r) -> dict:
         if "created_at" not in current:
             current["created_at"] = time.time()
             changed = True
+        if not str(current.get("display_name") or "").strip():
+            current["display_name"] = "管理员"
+            changed = True
         if changed:
             save_user(r, _ADMIN_USERNAME, current)
         return current
 
     admin_user = {
         "username": _ADMIN_USERNAME,
+        "display_name": "管理员",
         "hashed_password": get_password_hash(_ADMIN_PASSWORD),
         "role": "admin",
         "created_at": time.time(),
@@ -166,6 +605,7 @@ def register(payload: UserCreate):
     
     user_data = {
         "username": username,
+        "display_name": username,
         "hashed_password": get_password_hash(payload.password),
         "role": "user",
         "created_at": time.time(),
@@ -193,6 +633,7 @@ def login(payload: UserCreate):
         "access_token": access_token,
         "token_type": "bearer",
         "username": user["username"],
+        "display_name": str(user.get("display_name") or user.get("username") or ""),
         "role": _normalize_user_role(user),
     }
 
@@ -215,13 +656,72 @@ def admin_login(payload: UserCreate):
         "access_token": access_token,
         "token_type": "bearer",
         "username": user["username"],
+        "display_name": str(user.get("display_name") or user.get("username") or ""),
         "role": "admin",
+    }
+
+
+@app.post("/ai/chat")
+def ai_chat(
+    payload: dict = Body(default={}),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+):
+    message = str((payload or {}).get("message") or "").strip()
+    if not message:
+        err.api_error(400, err.E_HTTP, "message_required")
+    history = (payload or {}).get("history")
+    context = (payload or {}).get("context")
+    raw_include_sources = (payload or {}).get("include_sources")
+    if isinstance(raw_include_sources, bool):
+        requested_sources = raw_include_sources
+    else:
+        requested_sources = str(raw_include_sources or "").strip().lower() in {"1", "true", "yes", "on"}
+    allow_sources = _normalize_user_role(current_user) == "admin" and requested_sources
+    result = _call_ai_chat_completion(
+        message=message,
+        history=history,
+        context=context,
+        current_user=current_user,
+        include_sources=allow_sources,
+    )
+    return {
+        "ok": True,
+        "reply": result.get("reply", ""),
+        "provider": result.get("provider", "openai_compatible"),
+        "model": result.get("model", ""),
+        "usage": result.get("usage", {}),
+        "sources": result.get("sources", []),
     }
 
 
 @app.get("/me", response_model=UserOut)
 def get_me(current_user: dict = Depends(get_current_user)):
-    return UserOut(**{**current_user, "role": _normalize_user_role(current_user)})
+    return UserOut(**{
+        **current_user,
+        "display_name": str((current_user or {}).get("display_name") or (current_user or {}).get("username") or ""),
+        "role": _normalize_user_role(current_user),
+    })
+
+
+@app.patch("/me/profile", response_model=UserOut)
+def update_me_profile(payload: UserProfileUpdate, current_user: dict = Depends(get_current_user)):
+    username = _username_of(current_user)
+    r = make_redis()
+    user = load_user(r, username)
+    if not user:
+        err.api_error(404, err.E_HTTP, "user_not_found")
+    display_name = str(payload.display_name or "").strip()
+    if not display_name:
+        err.api_error(400, err.E_HTTP, "display_name_required")
+    if len(display_name) > 32:
+        err.api_error(400, err.E_HTTP, "display_name_too_long")
+    user["display_name"] = display_name
+    save_user(r, username, user)
+    return UserOut(**{
+        **user,
+        "display_name": display_name,
+        "role": _normalize_user_role(user),
+    })
 
 
 @app.get("/me/notices", response_model=list[NoticeOut])
@@ -244,6 +744,58 @@ def mark_notice_read(notice_id: str, current_user: dict = Depends(get_current_us
         err.api_error(404, err.E_HTTP, "notice_not_found", notice_id=notice_id)
     cur["read"] = True
     _save_notice(r, username, cur)
+    return {"ok": True}
+
+
+@app.post("/me/notices/read-all")
+def mark_all_notices_read(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    username = _username_of(current_user)
+    items = _list_notices(r, username, unread_only=True)
+    count = 0
+    for item in items:
+        if bool(item.get("read")):
+            continue
+        item["read"] = True
+        _save_notice(r, username, item)
+        count += 1
+    return {"ok": True, "updated": count}
+
+
+@app.post("/me/notices/clear-read")
+def clear_read_notices(current_user: dict = Depends(get_current_user)):
+    r = make_redis()
+    username = _username_of(current_user)
+    items = _list_notices(r, username, unread_only=False)
+    deleted = 0
+    for item in items:
+        if not bool(item.get("read")):
+            continue
+        notice_id = str(item.get("notice_id") or "").strip()
+        if not notice_id:
+            continue
+        _delete_notice(r, username, notice_id)
+        deleted += 1
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/me/password")
+def change_my_password(payload: UserPasswordChange, current_user: dict = Depends(get_current_user)):
+    username = _username_of(current_user)
+    r = make_redis()
+    user = load_user(r, username)
+    if not user:
+        err.api_error(404, err.E_HTTP, "user_not_found")
+    old_password = str(payload.old_password or "")
+    new_password = str(payload.new_password or "")
+    if not verify_password(old_password, str(user.get("hashed_password") or "")):
+        err.api_error(400, err.E_HTTP, "old_password_incorrect")
+    if len(new_password) < 6:
+        err.api_error(400, err.E_HTTP, "new_password_too_short")
+    if old_password == new_password:
+        err.api_error(400, err.E_HTTP, "new_password_same_as_old")
+    user["hashed_password"] = get_password_hash(new_password)
+    save_user(r, username, user)
     return {"ok": True}
 
 
@@ -305,6 +857,51 @@ TASK_LABEL_BY_TYPE = {
 }
 TASK_TYPE_BY_LABEL = {v: k for k, v in TASK_LABEL_BY_TYPE.items()}
 UNKNOWN_ALGORITHM_TASK_LABEL = "\u5f85\u786e\u8ba4"
+VALID_DATASET_TASK_TYPE_KEYS = frozenset(TASK_LABEL_BY_TYPE.keys())
+
+
+def _normalize_dataset_task_types(raw: Any) -> list[str]:
+    """数据集「适用任务」：与平台算法任务键一致，去重保序。"""
+    out: list[str] = []
+    if raw is None:
+        return out
+    seq = [raw] if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+    for x in seq:
+        k = str(x or "").strip().lower()
+        if k in VALID_DATASET_TASK_TYPE_KEYS and k not in out:
+            out.append(k)
+    return out
+
+
+def _apply_task_types_from_scan_meta(cur: dict, meta: dict | None) -> None:
+    """根据扫描协议得到的 supported_task_types 自动同步到 dataset.task_types。"""
+    if not isinstance(meta, dict):
+        return
+    sup = meta.get("supported_task_types")
+    if not isinstance(sup, list):
+        return
+    cur["task_types"] = _normalize_dataset_task_types(sup)
+
+
+def _require_task_types_for_user_public_dataset(cur: dict) -> None:
+    """用户数据集公开到社区前须有可识别的适用任务（task_types 或扫描 meta）。"""
+    if str(cur.get("owner_id") or "").strip() == "system":
+        return
+    if str(cur.get("visibility") or "private").strip().lower() != "public":
+        return
+    tts = _normalize_dataset_task_types(cur.get("task_types"))
+    if len(tts) >= 1:
+        return
+    meta = cur.get("meta") if isinstance(cur.get("meta"), dict) else {}
+    sup = meta.get("supported_task_types") if isinstance(meta.get("supported_task_types"), list) else []
+    if len(_normalize_dataset_task_types(sup)) >= 1:
+        return
+    err.api_error(
+        400,
+        err.E_HTTP,
+        "dataset_task_types_required_for_public",
+        allowed=sorted(VALID_DATASET_TASK_TYPE_KEYS),
+    )
 VALID_METRIC_DIRECTIONS = {"higher_better", "lower_better"}
 VALID_METRIC_IMPLEMENTATION_TYPES = {"builtin", "python", "formula"}
 VALID_METRIC_STATUSES = {"pending", "approved", "rejected"}
@@ -1339,6 +1936,7 @@ def _ensure_catalog_defaults(r):
         "created_at": created,
         "storage_path": str(demo_ds_dir),
         "meta": demo_meta,
+        "task_types": list(TASK_LABEL_BY_TYPE.keys()),
     }
     cur_ds = load_dataset(r, demo_ds_id)
     if not cur_ds:
@@ -1363,6 +1961,9 @@ def _ensure_catalog_defaults(r):
             cur_ds["meta"] = {}
         if demo_meta:
             cur_ds["meta"] = {**cur_ds["meta"], **demo_meta}
+            need_patch = True
+        if not isinstance(cur_ds.get("task_types"), list) or not cur_ds.get("task_types"):
+            cur_ds["task_types"] = list(TASK_LABEL_BY_TYPE.keys())
             need_patch = True
         if need_patch:
             save_dataset(r, demo_ds_id, cur_ds)
@@ -1848,6 +2449,15 @@ def _load_notice(r, username: str, notice_id: str) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
+def _delete_notice(r, username: str, notice_id: str) -> None:
+    owner = str(username or "").strip()
+    nid = str(notice_id or "").strip()
+    if not owner or not nid:
+        return
+    _sql_record_delete("notice", _notice_record_id(owner, nid))
+    r.delete(_notice_key(owner, nid))
+
+
 def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
     owner = str(username or "").strip()
     if not owner:
@@ -1982,12 +2592,96 @@ def _delete_algorithm_record_with_related_state(r, algorithm: dict) -> None:
     algorithm_id = str((algorithm or {}).get("algorithm_id") or "").strip()
     if not algorithm_id:
         return
+    # 先清理关联 Run，避免任务中心残留「已删除算法」的历史任务条目。
+    for run in list_all_runs(r, limit=50000) or []:
+        run_id = str(run.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        if str(run.get("algorithm_id") or "").strip() != algorithm_id:
+            continue
+        try:
+            r.set(f"run_cancel:{run_id}", "1", ex=3600)
+        except Exception:
+            pass
+        delete_run(r, run_id)
     delete_algorithm(r, algorithm_id)
     owner_id = str((algorithm or {}).get("owner_id") or "").strip()
     if owner_id:
         for preset in list_presets(r, limit=5000, owner_id=owner_id) or []:
-            if str(preset.get("algorithm_id") or "") == algorithm_id:
+            preset_primary_algorithm_id = str(preset.get("algorithm_id") or "").strip()
+            preset_algorithm_ids = [
+                str(x or "").strip()
+                for x in (preset.get("algorithm_ids") or [])
+                if str(x or "").strip()
+            ]
+            if (
+                preset_primary_algorithm_id == algorithm_id
+                or algorithm_id in preset_algorithm_ids
+            ):
                 delete_preset(r, str(preset.get("preset_id") or ""))
+
+
+def _delete_algorithm_submission_by_record(r, cur: dict) -> None:
+    """删除一条接入申请及其关联用户侧算法、磁盘包（与 DELETE /algorithm-submissions/{id} 一致）。"""
+    submission_id = str(cur.get("submission_id") or "").strip()
+    if not submission_id:
+        return
+    community_algorithm_id = str(cur.get("community_algorithm_id") or "").strip()
+    if community_algorithm_id:
+        community_algorithm = load_algorithm(r, community_algorithm_id)
+        if community_algorithm and str(community_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
+            _delete_algorithm_record_with_related_state(r, community_algorithm)
+    owner_algorithm_id = str(cur.get("owner_algorithm_id") or "").strip()
+    if owner_algorithm_id:
+        owner_algorithm = load_algorithm(r, owner_algorithm_id)
+        if owner_algorithm and str(owner_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
+            _delete_algorithm_record_with_related_state(r, owner_algorithm)
+
+    delete_algorithm_submission(r, submission_id)
+    has_archive_reference = False
+    for data in _list_all_algorithm_records(r):
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("source_submission_id") or "").strip() == submission_id:
+            has_archive_reference = True
+            break
+    if not str(cur.get("platform_algorithm_id") or "").strip() and not has_archive_reference:
+        try:
+            shutil.rmtree(_algorithm_submission_dir(str(cur.get("owner_id") or "system"), submission_id), ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _purge_user_algorithm_library(r, target_username: str) -> dict[str, int]:
+    """删除某用户名下所有接入申请与用户算法（不含平台内置）。"""
+    target_username = str(target_username or "").strip()
+    _ensure_catalog_defaults(r)
+    removed_submissions = 0
+    subs = [
+        s
+        for s in (_list_all_algorithm_submissions(r) or [])
+        if str(s.get("owner_id") or "").strip() == target_username
+    ]
+    for cur in subs:
+        if not isinstance(cur, dict):
+            continue
+        _delete_algorithm_submission_by_record(r, cur)
+        removed_submissions += 1
+
+    removed_algorithms = 0
+    for x in list_algorithms(r, limit=5000, owner_id=target_username, include_public=True) or []:
+        if not isinstance(x, dict):
+            continue
+        aid = str(x.get("algorithm_id") or "").strip()
+        if not aid or aid in BUILTIN_ALGORITHM_IDS:
+            continue
+        if str(x.get("owner_id") or "").strip() != target_username:
+            continue
+        _delete_algorithm_record_with_related_state(r, x)
+        removed_algorithms += 1
+
+    _ensure_catalog_defaults(r)
+    return {"removed_submissions": removed_submissions, "removed_algorithms": removed_algorithms}
 
 
 def _delete_metric_record_with_related_state(r, metric: dict) -> None:
@@ -2591,8 +3285,27 @@ def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: O
     include_public = str(scope or "manage").lower() == "community"
     if include_public:
         owner_id = None
-        items = list_datasets(r, limit=limit, owner_id=owner_id, include_public=True)
-        return [item for item in items if str(item.get("owner_id") or "") == "system" or _dataset_is_publicly_available(item)][:limit]
+        # 多取候选再按 load_dataset 校准，避免 SQL 列表与 Redis 不一致时出现「已下架仍展示」
+        pool_limit = max(int(limit or 200) * 4, 400)
+        items = list_datasets(r, limit=pool_limit, owner_id=owner_id, include_public=True)
+        out: list = []
+        seen: set[str] = set()
+        for it in sorted(items, key=lambda x: float(x.get("created_at") or 0), reverse=True):
+            did = str(it.get("dataset_id") or "").strip()
+            if not did or did in seen:
+                continue
+            cur = load_dataset(r, did)
+            if not cur:
+                continue
+            if str(cur.get("owner_id") or "").strip().lower() == "system":
+                continue
+            if not _dataset_is_publicly_available(cur):
+                continue
+            out.append(cur)
+            seen.add(did)
+            if len(out) >= int(limit or 200):
+                break
+        return out
 
     if not owner_id:
         return []
@@ -2610,6 +3323,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
     visibility = _normalize_visibility(payload.visibility)
     allow_use = visibility == "public"
     allow_download = visibility == "public"
+    task_types = _normalize_dataset_task_types(payload.task_types)
     existing_dataset = None
     
     if existing_dataset:
@@ -2626,6 +3340,7 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "visibility": visibility,
             "allow_use": allow_use,
             "allow_download": allow_download,
+            "task_types": task_types,
         }
     else:
         # 鍒涘缓鏂版暟鎹泦
@@ -2644,9 +3359,11 @@ def create_dataset(payload: DatasetCreate, current_user: dict = Depends(get_curr
             "allow_use": allow_use,
             "allow_download": allow_download,
             "download_count": 0,
+            "task_types": task_types,
         }
     
     save_dataset(r, dataset_id, data)
+    _require_task_types_for_user_public_dataset(data)
     return DatasetOut(**data)
 
 
@@ -2669,10 +3386,13 @@ def patch_dataset(dataset_id: str, payload: DatasetPatch, current_user: dict = D
         cur["size"] = _validate_text_encoding(payload.size, "dataset.size")
     if payload.description is not None:
         cur["description"] = _validate_text_encoding(payload.description, "dataset.description")
+    if payload.task_types is not None:
+        cur["task_types"] = _normalize_dataset_task_types(payload.task_types)
     if payload.visibility is not None:
         cur["visibility"] = _normalize_visibility(payload.visibility)
         if str(cur.get("visibility", "private")) == "public" and not _dataset_has_files(_dataset_dir_from_record(cur)):
             err.api_error(400, err.E_HTTP, "empty_dataset_not_allowed", dataset_id=dataset_id)
+    _require_task_types_for_user_public_dataset(cur)
     is_public = str(cur.get("visibility", "private")) == "public"
     cur["allow_use"] = is_public
     cur["allow_download"] = is_public
@@ -3176,6 +3896,7 @@ def scan_dataset(
     meta["type_mismatch"] = bool(current_type and current_type != t)
     cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
+    _apply_task_types_from_scan_meta(cur, meta)
     cur["source_owner_id"] = str(cur.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "") or None
     cur["source_dataset_id"] = str(cur.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "") or None
     save_dataset(r, dataset_id, cur)
@@ -3230,6 +3951,7 @@ def import_dataset_zip(dataset_id: str, payload: DatasetImportZip, current_user:
     meta["type_mismatch"] = bool(current_type and current_type != t)
     cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
+    _apply_task_types_from_scan_meta(cur, meta)
     cur["source_owner_id"] = str(cur.get("source_owner_id") or meta.get("downloaded_from_owner_id") or "") or None
     cur["source_dataset_id"] = str(cur.get("source_dataset_id") or meta.get("downloaded_from_dataset_id") or "") or None
     save_dataset(r, dataset_id, cur)
@@ -3295,6 +4017,7 @@ def import_dataset_zip_file(
     meta["type_mismatch"] = bool(current_type and current_type != t)
     cur["size"] = _size_by_declared_type(current_type, t, size, meta)
     cur["meta"] = meta
+    _apply_task_types_from_scan_meta(cur, meta)
     save_dataset(r, dataset_id, cur)
     
     # 澧炲姞鏁版嵁闆嗙増鏈彿锛屼娇缂撳瓨澶辨晥
@@ -3669,30 +4392,7 @@ def delete_algorithm_submission_for_current_user(submission_id: str, current_use
     if str(cur.get("owner_id") or "") != username and not is_admin:
         err.api_error(403, err.E_HTTP, "forbidden_access")
 
-    community_algorithm_id = str(cur.get("community_algorithm_id") or "").strip()
-    if community_algorithm_id:
-        community_algorithm = load_algorithm(r, community_algorithm_id)
-        if community_algorithm and str(community_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
-            _delete_algorithm_record_with_related_state(r, community_algorithm)
-    owner_algorithm_id = str(cur.get("owner_algorithm_id") or "").strip()
-    if owner_algorithm_id:
-        owner_algorithm = load_algorithm(r, owner_algorithm_id)
-        if owner_algorithm and str(owner_algorithm.get("owner_id") or "") == str(cur.get("owner_id") or ""):
-            _delete_algorithm_record_with_related_state(r, owner_algorithm)
-
-    delete_algorithm_submission(r, submission_id)
-    has_archive_reference = False
-    for data in _list_all_algorithm_records(r):
-        if not isinstance(data, dict):
-            continue
-        if str(data.get("source_submission_id") or "").strip() == submission_id:
-            has_archive_reference = True
-            break
-    if not str(cur.get("platform_algorithm_id") or "").strip() and not has_archive_reference:
-        try:
-            shutil.rmtree(_algorithm_submission_dir(str(cur.get("owner_id") or "system"), submission_id), ignore_errors=True)
-        except Exception:
-            pass
+    _delete_algorithm_submission_by_record(r, cur)
     return {"ok": True, "submission_id": submission_id}
 
 
@@ -3752,6 +4452,48 @@ def unpublish_algorithm_submission_from_community(submission_id: str, current_us
     cur["community_published_at"] = None
     save_algorithm_submission(r, submission_id, cur)
     return _algorithm_submission_to_out(cur)
+
+
+@app.get("/admin/users", response_model=list[UserOut])
+def admin_list_registered_users(
+    limit: int = Query(2000, ge=1, le=10000),
+    current_user: dict = Depends(get_current_user),
+):
+    """列出已注册用户的用户名等信息（管理员）。"""
+    _require_admin(current_user)
+    r = make_redis()
+    items = list_users(r, limit=limit) or []
+    out: list[UserOut] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        u = str(raw.get("username") or "").strip()
+        if not u:
+            continue
+        out.append(
+            UserOut(
+                username=u,
+                display_name=str(raw.get("display_name") or ""),
+                role=str(raw.get("role") or "user"),
+                created_at=float(raw.get("created_at") or 0),
+            )
+        )
+    out.sort(key=lambda x: (str(x.username or "").lower(), str(x.username or "")))
+    return out
+
+
+@app.post("/admin/users/{username}/purge-algorithms")
+def admin_purge_user_algorithms(username: str, current_user: dict = Depends(get_current_user)):
+    """管理员：清理指定用户的用户算法、接入申请及关联运行记录（不含 system 内置）。"""
+    _require_admin(current_user)
+    target = str(username or "").strip()
+    if not target or target == "system":
+        err.api_error(400, err.E_HTTP, "invalid_username", username=target)
+    if target == _ADMIN_USERNAME:
+        err.api_error(403, err.E_HTTP, "admin_purge_forbidden", detail="reserved account")
+    r = make_redis()
+    counts = _purge_user_algorithm_library(r, target)
+    return {"ok": True, "username": target, **counts}
 
 
 @app.get("/admin/algorithm-submissions", response_model=list[AlgorithmSubmissionOut])
@@ -4706,12 +5448,21 @@ def create_preset(payload: PresetCreate, current_user: dict = Depends(get_curren
         err.api_error(409, err.E_PRESET_ID_EXISTS, "preset_id_exists", preset_id=preset_id)
     created = time.time()
     owner_id = current_user["username"]
+    normalized_algorithm_ids = [
+        str(x or "").strip() for x in (payload.algorithm_ids or []) if str(x or "").strip()
+    ]
+    algorithm_id = str(payload.algorithm_id or "").strip()
+    if not normalized_algorithm_ids and algorithm_id:
+        normalized_algorithm_ids = [algorithm_id]
+    if not algorithm_id and normalized_algorithm_ids:
+        algorithm_id = normalized_algorithm_ids[0]
     data = {
         "preset_id": preset_id,
         "name": _validate_text_encoding(payload.name, "preset.name"),
         "task_type": payload.task_type,
         "dataset_id": payload.dataset_id,
-        "algorithm_id": payload.algorithm_id,
+        "algorithm_id": algorithm_id,
+        "algorithm_ids": normalized_algorithm_ids,
         "metrics": payload.metrics or [],
         "params": payload.params or {},
         "owner_id": owner_id,
@@ -4739,6 +5490,15 @@ def patch_preset(preset_id: str, payload: PresetPatch, current_user: dict = Depe
         cur["dataset_id"] = payload.dataset_id
     if payload.algorithm_id is not None:
         cur["algorithm_id"] = payload.algorithm_id
+    if payload.algorithm_ids is not None:
+        cur["algorithm_ids"] = [
+            str(x or "").strip() for x in (payload.algorithm_ids or []) if str(x or "").strip()
+        ]
+        if not str(cur.get("algorithm_id") or "").strip() and cur["algorithm_ids"]:
+            cur["algorithm_id"] = cur["algorithm_ids"][0]
+    if payload.algorithm_id is not None and payload.algorithm_ids is None:
+        aid = str(payload.algorithm_id or "").strip()
+        cur["algorithm_ids"] = [aid] if aid else []
     if payload.metrics is not None:
         cur["metrics"] = payload.metrics
     if payload.params is not None:

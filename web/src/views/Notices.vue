@@ -3,10 +3,13 @@
     <div class="hero">
       <div>
         <div class="hero-title">我的通知</div>
-        <div class="hero-subtitle">查看管理员处理结果、审核反馈和系统提醒，并按需标记已读。</div>
+        <div class="hero-subtitle">查看处理结果、审核反馈和系统提醒，支持筛选与一键已读。</div>
       </div>
       <div class="hero-actions">
         <el-tag type="danger" effect="light">未读 {{ unreadCount }}</el-tag>
+        <el-segmented v-model="activeFilter" :options="filterOptions" />
+        <el-button @click="markAllRead" :loading="markingAll" :disabled="unreadCount === 0">全部标记已读</el-button>
+        <el-button @click="clearRead" :loading="clearingRead" :disabled="readCount === 0">清理已读记录</el-button>
         <el-button @click="loadNotices" :loading="loading">刷新</el-button>
       </div>
     </div>
@@ -16,13 +19,13 @@
     </div>
 
     <template v-else>
-      <div v-if="!loading && notices.length === 0" class="empty-card">
-        当前暂无通知。
+      <div v-if="!loading && filteredNotices.length === 0" class="empty-card">
+        {{ notices.length === 0 ? "当前暂无通知。" : "当前筛选条件下暂无通知。" }}
       </div>
 
       <div v-else class="notice-list">
         <div
-          v-for="notice in notices"
+          v-for="notice in filteredNotices"
           :key="notice.notice_id"
           class="notice-card"
           :class="{ 'notice-card--read': notice.read }"
@@ -67,9 +70,23 @@ import { useAppStore } from "../stores/app";
 
 const store = useAppStore();
 const loading = ref(false);
+const markingAll = ref(false);
+const clearingRead = ref(false);
 const notices = ref([]);
+const activeFilter = ref("all");
+const filterOptions = [
+  { label: "全部", value: "all" },
+  { label: "未读", value: "unread" },
+  { label: "已读", value: "read" },
+];
 
 const unreadCount = computed(() => notices.value.filter((item) => !item?.read).length);
+const readCount = computed(() => notices.value.filter((item) => !!item?.read).length);
+const filteredNotices = computed(() => {
+  if (activeFilter.value === "unread") return notices.value.filter((item) => !item?.read);
+  if (activeFilter.value === "read") return notices.value.filter((item) => !!item?.read);
+  return notices.value;
+});
 
 function kindLabel(kind) {
   const value = String(kind || "").toLowerCase();
@@ -124,6 +141,43 @@ async function handleMarkRead(noticeId) {
   }
 }
 
+async function markAllRead() {
+  if (unreadCount.value <= 0) {
+    ElMessage.info("当前没有未读通知。");
+    return;
+  }
+  markingAll.value = true;
+  try {
+    const out = await http.post("/me/notices/read-all");
+    const updated = Number(out?.updated || 0);
+    notices.value = notices.value.map((item) => ({ ...item, read: true }));
+    store.notices = [];
+    ElMessage.success(`已标记 ${updated} 条未读通知`);
+  } catch (error) {
+    ElMessage.error(`批量标记失败：${error?.message || error}`);
+  } finally {
+    markingAll.value = false;
+  }
+}
+
+async function clearRead() {
+  if (readCount.value <= 0) {
+    ElMessage.info("当前没有已读记录。");
+    return;
+  }
+  clearingRead.value = true;
+  try {
+    const out = await http.post("/me/notices/clear-read");
+    const deleted = Number(out?.deleted || 0);
+    notices.value = notices.value.filter((item) => !item?.read);
+    ElMessage.success(`已清理 ${deleted} 条已读记录`);
+  } catch (error) {
+    ElMessage.error(`清理失败：${error?.message || error}`);
+  } finally {
+    clearingRead.value = false;
+  }
+}
+
 onMounted(loadNotices);
 </script>
 
@@ -161,6 +215,7 @@ onMounted(loadNotices);
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .empty-card {

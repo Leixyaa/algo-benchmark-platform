@@ -34,9 +34,13 @@
       </div>
 
       <div class="toolbar-row" v-else-if="tab === 'datasets'">
-        <el-select v-model="datasetTypeFilter" clearable placeholder="全部类型" class="filter-select">
+        <el-select v-model="datasetTypeFilter" clearable placeholder="全部介质" class="filter-select">
           <el-option label="图像" value="图像" />
           <el-option label="视频" value="视频" />
+          <el-option label="图像/视频" value="图像/视频" />
+        </el-select>
+        <el-select v-model="datasetTaskFilter" clearable placeholder="全部任务" class="filter-select">
+          <el-option v-for="(label, key) in TASK_LABEL_BY_TYPE" :key="key" :label="label" :value="key" />
         </el-select>
       </div>
 
@@ -94,7 +98,12 @@
         class="data-table"
       >
         <el-table-column prop="name" label="数据集名称" min-width="220" />
-        <el-table-column prop="type" label="类型" width="100" />
+        <el-table-column prop="type" label="介质" width="100" />
+        <el-table-column label="适用任务" min-width="200">
+          <template #default="{ row }">
+            {{ formatDatasetTaskTypes(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="size" label="规模" width="140" />
         <el-table-column prop="uploaderId" label="上传者" width="140" />
         <el-table-column prop="downloadCount" label="下载量" width="100" />
@@ -176,7 +185,8 @@
             <span v-if="detailType === 'algorithm'">任务：{{ detailItem.task || "-" }}</span>
             <span v-if="detailType === 'algorithm'">实现方式：{{ detailItem.impl || "-" }}</span>
             <span v-if="detailType === 'algorithm'">版本：{{ detailItem.version || "-" }}</span>
-            <span v-if="detailType === 'dataset'">类型：{{ detailItem.type || "-" }}</span>
+            <span v-if="detailType === 'dataset'">介质：{{ detailItem.type || "-" }}</span>
+            <span v-if="detailType === 'dataset'">适用任务：{{ formatDatasetTaskTypes(detailItem) }}</span>
             <span v-if="detailType === 'dataset'">规模：{{ detailItem.size || "-" }}</span>
             <span v-if="detailType === 'metric'">标识：{{ detailItem.metricKey || "-" }}</span>
             <span v-if="detailType === 'metric'">方向：{{ detailItem.direction === "lower_better" ? "越小越好" : "越大越好" }}</span>
@@ -331,6 +341,7 @@ import { algorithmsApi } from "../api/algorithms";
 import { metricsApi } from "../api/metrics";
 import { communityApi } from "../api/community";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { datasetSupportsTaskType } from "../utils/datasetTask";
 
 const store = useAppStore();
 const communityAlgorithms = ref([]);
@@ -345,6 +356,7 @@ const sortBy = ref("newest");
 const taskFilter = ref("");
 const implFilter = ref("");
 const datasetTypeFilter = ref("");
+const datasetTaskFilter = ref("");
 const metricDirectionFilter = ref("");
 const downloadingAlgorithmIds = ref(new Set());
 const downloadingDatasetIds = ref(new Set());
@@ -364,6 +376,8 @@ const reportVisible = ref(false);
 const reportSubmitting = ref(false);
 const reportReason = ref("");
 const reportTarget = ref({ mode: "resource", comment: null });
+/** keep-alive 缓存下，从其它页返回时需重新拉列表，否则会看到已下架/已删除前的旧数据 */
+const communityWasLeftOnce = ref(false);
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -394,6 +408,7 @@ function mapAlgorithm(x) {
 }
 
 function mapDataset(x) {
+  const meta = x.meta && typeof x.meta === "object" ? x.meta : {};
   return {
     id: x.dataset_id,
     name: x.name,
@@ -403,9 +418,29 @@ function mapDataset(x) {
     downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     uploaderId: String(x.owner_id || ""),
+    taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
+    meta,
     createdAt: formatTs(x.created_at),
     raw: x,
   };
+}
+
+function formatDatasetTaskTypes(row) {
+  const rawTt = row?.raw?.task_types;
+  const list = Array.isArray(row?.taskTypes) && row.taskTypes.length
+    ? row.taskTypes
+    : Array.isArray(rawTt)
+      ? rawTt
+      : [];
+  if (list.length) return list.map((k) => TASK_LABEL_BY_TYPE[k] || k).join(" / ");
+  const sup = row?.meta?.supported_task_types || row?.raw?.meta?.supported_task_types;
+  if (Array.isArray(sup) && sup.length) return sup.map((k) => TASK_LABEL_BY_TYPE[k] || k).join(" / ");
+  const pairs = row?.meta?.pairs_by_task || row?.raw?.meta?.pairs_by_task;
+  if (pairs && typeof pairs === "object") {
+    const keys = Object.keys(pairs).filter((k) => Number(pairs[k] ?? 0) > 0);
+    if (keys.length) return keys.map((k) => TASK_LABEL_BY_TYPE[k] || k).join(" / ");
+  }
+  return "未标注";
 }
 
 function mapMetric(x) {
@@ -870,10 +905,14 @@ onMounted(async () => {
 
 onActivated(() => {
   window.addEventListener("focus", handleWindowFocus);
+  if (communityWasLeftOnce.value) {
+    loadCommunity().catch(() => {});
+  }
 });
 
 onDeactivated(() => {
   window.removeEventListener("focus", handleWindowFocus);
+  communityWasLeftOnce.value = true;
 });
 
 onBeforeUnmount(() => {
@@ -909,7 +948,7 @@ const publicDatasets = computed(() =>
   (communityDatasets.value || []).filter((item) => {
     const ownerId = String(item?.raw?.owner_id || "");
     const visibility = String(item?.visibility || item?.raw?.visibility || "").toLowerCase();
-    if (ownerId === "system") return true;
+    if (ownerId === "system") return false;
     return visibility === "public";
   })
 );
@@ -943,7 +982,19 @@ const filteredAlgorithms = computed(() => {
 const filteredDatasets = computed(() => {
   const items = publicDatasets.value.filter((item) => {
     if (datasetTypeFilter.value && item.type !== datasetTypeFilter.value) return false;
-    return byKeyword([item.name, item.id, item.type, item.size, item.description, item.uploaderId, item.downloadCount]);
+    if (datasetTaskFilter.value) {
+      if (!datasetSupportsTaskType(item, datasetTaskFilter.value)) return false;
+    }
+    return byKeyword([
+      item.name,
+      item.id,
+      item.type,
+      formatDatasetTaskTypes(item),
+      item.size,
+      item.description,
+      item.uploaderId,
+      item.downloadCount,
+    ]);
   });
   return sortItems(items);
 });

@@ -17,6 +17,8 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="Asia/Shanghai",
     enable_utc=False,
+    # Celery 6+ 将改变启动阶段 broker 重试行为；显式开启以保持与当前版本一致
+    broker_connection_retry_on_startup=True,
 )
 
 # 关键：让 worker 启动时加载任务模块，否则 runs.execute 在 worker 里不会注册。

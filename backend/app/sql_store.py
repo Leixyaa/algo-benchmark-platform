@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 
 try:
@@ -19,14 +21,16 @@ try:
         delete,
         insert,
         select,
+        text,
         update,
     )
     from sqlalchemy.engine import Engine
+    from sqlalchemy.exc import OperationalError as SAOperationalError
 except Exception:  # pragma: no cover - optional dependency until SQL store is enabled
     Boolean = Column = Float = MetaData = String = Table = Text = None  # type: ignore
-    create_engine = delete = insert = select = update = None  # type: ignore
+    create_engine = delete = insert = select = text = update = None  # type: ignore
     Engine = object  # type: ignore
-
+    SAOperationalError = None  # type: ignore
 
 SQL_STORE_URL_ENV = "ABP_SQL_STORE_URL"
 MYSQL_STORE_URL_ENV = "ABP_MYSQL_URL"
@@ -46,7 +50,52 @@ def allow_redis_fallback() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def is_transient_mysql_schema_error(exc: BaseException) -> bool:
+    """MySQL 在并发 DDL / 在线改表时可能返回 1683/1684，应短暂重试而非直接回退。"""
+    if SAOperationalError is not None and isinstance(exc, SAOperationalError):
+        orig = getattr(exc, "orig", None)
+        args = getattr(orig, "args", None) if orig is not None else None
+        if args and args[0] in (1683, 1684):
+            return True
+    args = getattr(exc, "args", ()) or ()
+    if len(args) >= 1 and args[0] in (1683, 1684):
+        return True
+    msg = str(exc).lower()
+    return "concurrent ddl" in msg or "being modified by concurrent ddl" in msg
+
+
+T = TypeVar("T")
+
+
+def with_ddl_retry(fn: Callable[[], T], *, attempts: int = 14, base_delay: float = 0.025) -> T:
+    last: BaseException | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            last = exc
+            if i < attempts - 1 and is_transient_mysql_schema_error(exc):
+                time.sleep(base_delay * (1.55 ** i))
+                continue
+            raise
+    raise last  # type: ignore[misc]
+
+
+_schema_init_rlock = threading.RLock()
+
 metadata = MetaData() if MetaData else None
+
+
+def _payload_json_column() -> Any:
+    """MySQL 默认 Text≈64KiB，评测 run 的 payload 易超限；生产库用 LONGTEXT。"""
+    if Column is None or Text is None:
+        return None
+    try:
+        from sqlalchemy.dialects.mysql import LONGTEXT
+
+        return Column("payload_json", Text().with_variant(LONGTEXT(), "mysql"), nullable=False)
+    except Exception:
+        return Column("payload_json", Text, nullable=False)
 
 
 def _table(name: str, *columns: Any) -> Any:
@@ -68,7 +117,7 @@ def _record_table(name: str, pk_name: str, *extra_columns: Any) -> Any:
         Column("created_at", Float, index=True),
         Column("updated_at", Float, index=True),
         Column("sort_at", Float, index=True),
-        Column("payload_json", Text, nullable=False),
+        _payload_json_column(),
     )
 
 
@@ -91,7 +140,7 @@ if metadata is not None:
         Column("runtime_ready", Boolean),
         Column("created_at", Float, index=True),
         Column("updated_at", Float, index=True),
-        Column("payload_json", Text, nullable=False),
+        _payload_json_column(),
     )
 
     algorithm_submissions_table = _table(
@@ -107,7 +156,7 @@ if metadata is not None:
         Column("platform_algorithm_id", String(191), index=True),
         Column("created_at", Float, index=True),
         Column("reviewed_at", Float, index=True),
-        Column("payload_json", Text, nullable=False),
+        _payload_json_column(),
     )
 
     runs_table = _record_table(
@@ -184,7 +233,7 @@ if metadata is not None:
         Column("created_at", Float, index=True),
         Column("updated_at", Float, index=True),
         Column("sort_at", Float, index=True),
-        Column("payload_json", Text, nullable=False),
+        _payload_json_column(),
     )
 else:
     algorithms_table = None
@@ -213,12 +262,66 @@ def get_engine() -> Engine:
     return create_engine(url, pool_pre_ping=True, future=True, connect_args=connect_args)
 
 
+def _ensure_mysql_payload_longtext(engine: Any) -> None:
+    """已有库若仍为 TEXT，升级为 LONGTEXT；已 LONGTEXT 则跳过，避免每次启动触发无谓 DDL。"""
+    if text is None:
+        return
+    try:
+        dialect = engine.dialect.name
+    except Exception:
+        return
+    if dialect not in ("mysql", "mariadb"):
+        return
+    tables = (
+        "abp_algorithms",
+        "abp_algorithm_submissions",
+        "abp_runs",
+        "abp_datasets",
+        "abp_presets",
+        "abp_metrics",
+        "abp_users",
+        "abp_comments",
+        "abp_notices",
+        "abp_reports",
+        "abp_store_records",
+    )
+
+    def _run_alters() -> None:
+        with engine.begin() as conn:
+            for t in tables:
+                try:
+                    row = conn.execute(
+                        text(
+                            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+                            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tn AND COLUMN_NAME = 'payload_json'"
+                        ),
+                        {"tn": t},
+                    ).first()
+                    col = str(row[0] if row else "").lower()
+                    if "longtext" in col:
+                        continue
+                    if not col:
+                        continue
+                    conn.execute(text(f"ALTER TABLE `{t}` MODIFY COLUMN `payload_json` LONGTEXT NOT NULL"))
+                except Exception:
+                    continue
+
+    with_ddl_retry(_run_alters)
+
+
 def init_schema() -> None:
     if not is_enabled():
         return
     if metadata is None:
         raise RuntimeError("SQL store dependencies are not installed. Install SQLAlchemy and PyMySQL first.")
-    metadata.create_all(get_engine())
+
+    def _bootstrap() -> None:
+        engine = get_engine()
+        metadata.create_all(engine)
+        _ensure_mysql_payload_longtext(engine)
+
+    with _schema_init_rlock:
+        with_ddl_retry(_bootstrap)
 
 
 def _dump(data: Dict[str, Any]) -> str:
@@ -295,12 +398,14 @@ def _run_values(record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _dataset_values(record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(data or {})
+    tts = item.get("task_types") if isinstance(item.get("task_types"), list) else []
+    primary_task = str(tts[0] if tts else item.get("task_type") or "")[:64]
     return {
         "dataset_id": str(item.get("dataset_id") or record_id),
         **_record_base_row(item, owner_id=str(item.get("owner_id") or "system"), visibility=str(item.get("visibility") or "private")),
         "name": str(item.get("name") or ""),
-        "task_type": str(item.get("task_type") or ""),
-        "data_type": str(item.get("data_type") or ""),
+        "task_type": primary_task,
+        "data_type": str(item.get("data_type") or item.get("type") or ""),
     }
 
 
@@ -447,48 +552,60 @@ def save_algorithm(algorithm_id: str, data: Dict[str, Any]) -> None:
 
 
 def load_algorithm(algorithm_id: str) -> Optional[Dict[str, Any]]:
-    init_schema()
-    stmt = select(algorithms_table.c.payload_json).where(algorithms_table.c.algorithm_id == algorithm_id)
-    with get_engine().connect() as conn:
-        row = conn.execute(stmt).first()
-    return _load(row[0]) if row else None
+    def _do() -> Optional[Dict[str, Any]]:
+        init_schema()
+        stmt = select(algorithms_table.c.payload_json).where(algorithms_table.c.algorithm_id == algorithm_id)
+        with get_engine().connect() as conn:
+            row = conn.execute(stmt).first()
+        return _load(row[0]) if row else None
+
+    return with_ddl_retry(_do)
 
 
 def delete_algorithm(algorithm_id: str) -> None:
-    init_schema()
-    with get_engine().begin() as conn:
-        conn.execute(delete(algorithms_table).where(algorithms_table.c.algorithm_id == algorithm_id))
+    def _do() -> None:
+        init_schema()
+        with get_engine().begin() as conn:
+            conn.execute(delete(algorithms_table).where(algorithms_table.c.algorithm_id == algorithm_id))
+
+    with_ddl_retry(_do)
 
 
 def list_algorithms(limit: int = 500, owner_id: Optional[str] = None, include_public: bool = False) -> list[Dict[str, Any]]:
-    init_schema()
-    stmt = select(algorithms_table.c.payload_json).order_by(algorithms_table.c.created_at.desc()).limit(int(limit or 500))
-    if owner_id:
-        visibility_filter = algorithms_table.c.visibility == "public"
-        if include_public:
-            stmt = stmt.where(
-                (algorithms_table.c.owner_id == "system")
-                | (algorithms_table.c.owner_id == owner_id)
-                | visibility_filter
-            )
+    def _do() -> list[Dict[str, Any]]:
+        init_schema()
+        stmt = select(algorithms_table.c.payload_json).order_by(algorithms_table.c.created_at.desc()).limit(int(limit or 500))
+        if owner_id:
+            visibility_filter = algorithms_table.c.visibility == "public"
+            if include_public:
+                stmt = stmt.where(
+                    (algorithms_table.c.owner_id == "system")
+                    | (algorithms_table.c.owner_id == owner_id)
+                    | visibility_filter
+                )
+            else:
+                stmt = stmt.where((algorithms_table.c.owner_id == "system") | (algorithms_table.c.owner_id == owner_id))
         else:
-            stmt = stmt.where((algorithms_table.c.owner_id == "system") | (algorithms_table.c.owner_id == owner_id))
-    else:
-        if include_public:
-            stmt = stmt.where((algorithms_table.c.owner_id == "system") | (algorithms_table.c.visibility == "public"))
-        else:
-            stmt = stmt.where(algorithms_table.c.owner_id == "system")
-    with get_engine().connect() as conn:
-        rows = conn.execute(stmt).all()
-    return [item for item in (_load(row[0]) for row in rows) if item]
+            if include_public:
+                stmt = stmt.where((algorithms_table.c.owner_id == "system") | (algorithms_table.c.visibility == "public"))
+            else:
+                stmt = stmt.where(algorithms_table.c.owner_id == "system")
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [item for item in (_load(row[0]) for row in rows) if item]
+
+    return with_ddl_retry(_do)
 
 
 def list_all_algorithms(limit: int = 5000) -> list[Dict[str, Any]]:
-    init_schema()
-    stmt = select(algorithms_table.c.payload_json).order_by(algorithms_table.c.created_at.desc()).limit(int(limit or 5000))
-    with get_engine().connect() as conn:
-        rows = conn.execute(stmt).all()
-    return [item for item in (_load(row[0]) for row in rows) if item]
+    def _do() -> list[Dict[str, Any]]:
+        init_schema()
+        stmt = select(algorithms_table.c.payload_json).order_by(algorithms_table.c.created_at.desc()).limit(int(limit or 5000))
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [item for item in (_load(row[0]) for row in rows) if item]
+
+    return with_ddl_retry(_do)
 
 
 def save_algorithm_submission(submission_id: str, data: Dict[str, Any]) -> None:
@@ -511,65 +628,79 @@ def delete_algorithm_submission(submission_id: str) -> None:
 
 
 def list_algorithm_submissions(limit: int = 5000) -> list[Dict[str, Any]]:
-    init_schema()
-    stmt = select(algorithm_submissions_table.c.payload_json).order_by(algorithm_submissions_table.c.created_at.desc()).limit(int(limit or 5000))
-    with get_engine().connect() as conn:
-        rows = conn.execute(stmt).all()
-    return [item for item in (_load(row[0]) for row in rows) if item]
+    def _do() -> list[Dict[str, Any]]:
+        init_schema()
+        stmt = select(algorithm_submissions_table.c.payload_json).order_by(
+            algorithm_submissions_table.c.created_at.desc()
+        ).limit(int(limit or 5000))
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [item for item in (_load(row[0]) for row in rows) if item]
+
+    return with_ddl_retry(_do)
 
 
 def save_record(record_type: str, record_id: str, data: Dict[str, Any]) -> None:
-    spec = _record_spec(record_type)
-    if spec is not None and spec.get("table") is not None:
-        values = spec["values"](record_id, data)
-        _upsert(spec["table"], spec["pk"], values[spec["pk"]], values)
-        return
-    values = _record_values(record_type, record_id, data)
-    init_schema()
-    engine = get_engine()
-    with engine.begin() as conn:
-        result = conn.execute(
-            update(store_records_table)
-            .where(
-                (store_records_table.c.record_type == values["record_type"])
-                & (store_records_table.c.record_id == values["record_id"])
+    def _do() -> None:
+        spec = _record_spec(record_type)
+        if spec is not None and spec.get("table") is not None:
+            values = spec["values"](record_id, data)
+            _upsert(spec["table"], spec["pk"], values[spec["pk"]], values)
+            return
+        values = _record_values(record_type, record_id, data)
+        init_schema()
+        engine = get_engine()
+        with engine.begin() as conn:
+            result = conn.execute(
+                update(store_records_table)
+                .where(
+                    (store_records_table.c.record_type == values["record_type"])
+                    & (store_records_table.c.record_id == values["record_id"])
+                )
+                .values(**values)
             )
-            .values(**values)
-        )
-        if int(result.rowcount or 0) == 0:
-            conn.execute(insert(store_records_table).values(**values))
+            if int(result.rowcount or 0) == 0:
+                conn.execute(insert(store_records_table).values(**values))
+
+    with_ddl_retry(_do)
 
 
 def load_record(record_type: str, record_id: str) -> Optional[Dict[str, Any]]:
-    spec = _record_spec(record_type)
-    init_schema()
-    if spec is not None and spec.get("table") is not None:
-        stmt = select(spec["table"].c.payload_json).where(spec["table"].c[spec["pk"]] == str(record_id))
+    def _do() -> Optional[Dict[str, Any]]:
+        spec = _record_spec(record_type)
+        init_schema()
+        if spec is not None and spec.get("table") is not None:
+            stmt = select(spec["table"].c.payload_json).where(spec["table"].c[spec["pk"]] == str(record_id))
+            with get_engine().connect() as conn:
+                row = conn.execute(stmt).first()
+            if row:
+                return _load(row[0])
+        stmt = select(store_records_table.c.payload_json).where(
+            (store_records_table.c.record_type == str(record_type))
+            & (store_records_table.c.record_id == str(record_id))
+        )
         with get_engine().connect() as conn:
             row = conn.execute(stmt).first()
-        if row:
-            return _load(row[0])
-    stmt = select(store_records_table.c.payload_json).where(
-        (store_records_table.c.record_type == str(record_type))
-        & (store_records_table.c.record_id == str(record_id))
-    )
-    with get_engine().connect() as conn:
-        row = conn.execute(stmt).first()
-    return _load(row[0]) if row else None
+        return _load(row[0]) if row else None
+
+    return with_ddl_retry(_do)
 
 
 def delete_record(record_type: str, record_id: str) -> None:
-    init_schema()
-    with get_engine().begin() as conn:
-        spec = _record_spec(record_type)
-        if spec is not None and spec.get("table") is not None:
-            conn.execute(delete(spec["table"]).where(spec["table"].c[spec["pk"]] == str(record_id)))
-        conn.execute(
-            delete(store_records_table).where(
-                (store_records_table.c.record_type == str(record_type))
-                & (store_records_table.c.record_id == str(record_id))
+    def _do() -> None:
+        init_schema()
+        with get_engine().begin() as conn:
+            spec = _record_spec(record_type)
+            if spec is not None and spec.get("table") is not None:
+                conn.execute(delete(spec["table"]).where(spec["table"].c[spec["pk"]] == str(record_id)))
+            conn.execute(
+                delete(store_records_table).where(
+                    (store_records_table.c.record_type == str(record_type))
+                    & (store_records_table.c.record_id == str(record_id))
+                )
             )
-        )
+
+    with_ddl_retry(_do)
 
 
 def list_records(
@@ -579,70 +710,73 @@ def list_records(
     include_public: bool = False,
     filter_by_owner: bool = True,
 ) -> list[Dict[str, Any]]:
-    init_schema()
-    spec = _record_spec(record_type)
-    specific_items: list[Dict[str, Any]] = []
-    if spec is not None and spec.get("table") is not None:
+    def _do() -> list[Dict[str, Any]]:
+        init_schema()
+        spec = _record_spec(record_type)
+        specific_items: list[Dict[str, Any]] = []
+        if spec is not None and spec.get("table") is not None:
+            stmt = (
+                select(spec["table"].c.payload_json)
+                .order_by(spec["table"].c.sort_at.desc())
+                .limit(int(limit or 500))
+            )
+            if filter_by_owner:
+                if owner_id:
+                    if include_public:
+                        stmt = stmt.where(
+                            (spec["table"].c.owner_id == "system")
+                            | (spec["table"].c.owner_id == owner_id)
+                            | (spec["table"].c.visibility == "public")
+                        )
+                    else:
+                        stmt = stmt.where((spec["table"].c.owner_id == "system") | (spec["table"].c.owner_id == owner_id))
+                elif include_public:
+                    stmt = stmt.where((spec["table"].c.owner_id == "system") | (spec["table"].c.visibility == "public"))
+                else:
+                    stmt = stmt.where(spec["table"].c.owner_id == "system")
+            with get_engine().connect() as conn:
+                rows = conn.execute(stmt).all()
+            specific_items = [item for item in (_load(row[0]) for row in rows) if item]
+
         stmt = (
-            select(spec["table"].c.payload_json)
-            .order_by(spec["table"].c.sort_at.desc())
+            select(store_records_table.c.payload_json)
+            .where(store_records_table.c.record_type == str(record_type))
+            .order_by(store_records_table.c.sort_at.desc())
             .limit(int(limit or 500))
         )
         if filter_by_owner:
             if owner_id:
                 if include_public:
                     stmt = stmt.where(
-                        (spec["table"].c.owner_id == "system")
-                        | (spec["table"].c.owner_id == owner_id)
-                        | (spec["table"].c.visibility == "public")
+                        (store_records_table.c.owner_id == "system")
+                        | (store_records_table.c.owner_id == owner_id)
+                        | (store_records_table.c.visibility == "public")
                     )
                 else:
-                    stmt = stmt.where((spec["table"].c.owner_id == "system") | (spec["table"].c.owner_id == owner_id))
+                    stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.owner_id == owner_id))
             elif include_public:
-                stmt = stmt.where((spec["table"].c.owner_id == "system") | (spec["table"].c.visibility == "public"))
+                stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.visibility == "public"))
             else:
-                stmt = stmt.where(spec["table"].c.owner_id == "system")
+                stmt = stmt.where(store_records_table.c.owner_id == "system")
         with get_engine().connect() as conn:
             rows = conn.execute(stmt).all()
-        specific_items = [item for item in (_load(row[0]) for row in rows) if item]
+        generic_items = [item for item in (_load(row[0]) for row in rows) if item]
+        if not specific_items:
+            return generic_items
+        merged: dict[str, Dict[str, Any]] = {}
+        identity_key = "username" if record_type == "user" else f"{record_type}_id"
+        if record_type == "comment":
+            identity_key = "comment_id"
+        elif record_type == "notice":
+            identity_key = "notice_id"
+        elif record_type == "report":
+            identity_key = "report_id"
+        for item in generic_items:
+            merged[str(item.get(identity_key) or item.get("record_id") or "")] = item
+        for item in specific_items:
+            merged[str(item.get(identity_key) or item.get("record_id") or "")] = item
+        items = list(merged.values())
+        items.sort(key=lambda item: float(item.get("updated_at") or item.get("created_at") or 0), reverse=True)
+        return items[: int(limit or 500)]
 
-    stmt = (
-        select(store_records_table.c.payload_json)
-        .where(store_records_table.c.record_type == str(record_type))
-        .order_by(store_records_table.c.sort_at.desc())
-        .limit(int(limit or 500))
-    )
-    if filter_by_owner:
-        if owner_id:
-            if include_public:
-                stmt = stmt.where(
-                    (store_records_table.c.owner_id == "system")
-                    | (store_records_table.c.owner_id == owner_id)
-                    | (store_records_table.c.visibility == "public")
-                )
-            else:
-                stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.owner_id == owner_id))
-        elif include_public:
-            stmt = stmt.where((store_records_table.c.owner_id == "system") | (store_records_table.c.visibility == "public"))
-        else:
-            stmt = stmt.where(store_records_table.c.owner_id == "system")
-    with get_engine().connect() as conn:
-        rows = conn.execute(stmt).all()
-    generic_items = [item for item in (_load(row[0]) for row in rows) if item]
-    if not specific_items:
-        return generic_items
-    merged: dict[str, Dict[str, Any]] = {}
-    identity_key = "username" if record_type == "user" else f"{record_type}_id"
-    if record_type == "comment":
-        identity_key = "comment_id"
-    elif record_type == "notice":
-        identity_key = "notice_id"
-    elif record_type == "report":
-        identity_key = "report_id"
-    for item in generic_items:
-        merged[str(item.get(identity_key) or item.get("record_id") or "")] = item
-    for item in specific_items:
-        merged[str(item.get(identity_key) or item.get("record_id") or "")] = item
-    items = list(merged.values())
-    items.sort(key=lambda item: float(item.get("updated_at") or item.get("created_at") or 0), reverse=True)
-    return items[: int(limit or 500)]
+    return with_ddl_retry(_do)

@@ -27,22 +27,30 @@ function currentAuthRole() {
   return sessionStorage.getItem("userRole") || localStorage.getItem("userRole") || "user";
 }
 
-function setAuthSession({ username = "", token = "", role = "user" } = {}) {
+function currentAuthDisplayName() {
+  return sessionStorage.getItem("userDisplayName") || localStorage.getItem("userDisplayName") || "";
+}
+
+function setAuthSession({ username = "", token = "", role = "user", displayName = "" } = {}) {
   localStorage.removeItem("token");
   localStorage.removeItem("username");
   localStorage.removeItem("userRole");
+  localStorage.removeItem("userDisplayName");
   if (token) sessionStorage.setItem("token", token);
   else sessionStorage.removeItem("token");
   if (username) sessionStorage.setItem("username", username);
   else sessionStorage.removeItem("username");
   if (role) sessionStorage.setItem("userRole", role);
   else sessionStorage.removeItem("userRole");
+  if (displayName) sessionStorage.setItem("userDisplayName", displayName);
+  else sessionStorage.removeItem("userDisplayName");
 }
 
 function clearAuthSession() {
   sessionStorage.removeItem("token");
   sessionStorage.removeItem("username");
   sessionStorage.removeItem("userRole");
+  sessionStorage.removeItem("userDisplayName");
 }
 
 function _scopeName(username) {
@@ -201,7 +209,7 @@ function normalizeStatusCN(status) {
   if (["done", "completed", "success", "已完成"].includes(s)) return "已完成";
   if (["running", "运行中"].includes(s)) return "运行中";
   if (["queued", "pending", "排队中"].includes(s)) return "排队中";
-  if (["failed", "error", "澶辫触"].includes(s)) return "澶辫触";
+  if (["failed", "error", "失败", "澶辫触"].includes(s)) return "失败";
   if (["canceling", "cancelling", "取消中"].includes(s)) return "取消中";
   if (["canceled", "cancelled", "已取消"].includes(s)) return "已取消";
   return String(status ?? "");
@@ -384,6 +392,7 @@ function ensureBaselineAlgorithms(algs) {
 }
 
 function mapDatasetOut(x) {
+  const meta = x.meta && typeof x.meta === "object" ? x.meta : {};
   return {
     id: x.dataset_id,
     name: x.name,
@@ -394,6 +403,8 @@ function mapDatasetOut(x) {
     visibility: x.visibility || "private",
     allowUse: Boolean(x.allow_use),
     allowDownload: Boolean(x.allow_download),
+    taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
+    meta,
     createdAt: formatTs(x.created_at),
     uploaderId: String(x.owner_id || ""),
     sourceUploaderId: String(x.source_owner_id || x?.meta?.downloaded_from_owner_id || ""),
@@ -478,7 +489,7 @@ function formatMetricDisplayName(metricKey, metricsCatalog = []) {
 }
 
 function isTerminal(statusCN) {
-  return statusCN === "已完成" || statusCN === "澶辫触" || statusCN === "已取消";
+  return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
 
 // runId -> timerId
@@ -493,6 +504,7 @@ export const useAppStore = defineStore("app", {
       // 用户状态
       user: {
         username: currentAuthUsername(),
+        displayName: currentAuthDisplayName() || currentAuthUsername(),
         token: currentAuthToken(),
         role: currentAuthRole(),
         isLoggedIn: !!currentAuthToken(),
@@ -584,10 +596,11 @@ export const useAppStore = defineStore("app", {
         this._algorithmsFetchPromise = null;
         this._metricsFetchPromise = null;
         this.user.username = res.username;
+        this.user.displayName = res.display_name || res.username;
         this.user.token = res.access_token;
         this.user.role = res.role || "user";
         this.user.isLoggedIn = true;
-        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "user" });
+        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "user", displayName: this.user.displayName });
         const loaded = loadState(res.username) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
@@ -626,10 +639,11 @@ export const useAppStore = defineStore("app", {
         this._algorithmsFetchPromise = null;
         this._metricsFetchPromise = null;
         this.user.username = res.username;
+        this.user.displayName = res.display_name || res.username;
         this.user.token = res.access_token;
         this.user.role = res.role || "admin";
         this.user.isLoggedIn = true;
-        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "admin" });
+        setAuthSession({ username: res.username, token: res.access_token, role: res.role || "admin", displayName: this.user.displayName });
         const loaded = loadState(res.username) || {};
         this.datasets = loaded?.datasets?.length ? loaded.datasets : [];
         this.algorithms = ensureBaselineAlgorithms(loaded?.algorithms?.length ? loaded.algorithms : []);
@@ -647,6 +661,7 @@ export const useAppStore = defineStore("app", {
     logout() {
       this.stopPollingAll();
       this.user.username = "";
+      this.user.displayName = "";
       this.user.token = "";
         this.user.role = "user";
         this.user.isLoggedIn = false;
@@ -666,6 +681,17 @@ export const useAppStore = defineStore("app", {
         this.metricsCatalog = loaded?.metricsCatalog || [];
         this.presets = loaded?.presets || [];
         this.runs = loaded?.runs || [];
+      },
+
+      setDisplayName(displayName) {
+        const next = String(displayName || "").trim() || this.user.username || "";
+        this.user.displayName = next;
+        setAuthSession({
+          username: this.user.username,
+          token: this.user.token,
+          role: this.user.role || "user",
+          displayName: next,
+        });
       },
 
       async fetchUnreadNotices() {
@@ -774,6 +800,9 @@ export const useAppStore = defineStore("app", {
         taskType: x.task_type,
         datasetId: x.dataset_id,
         algorithmId: x.algorithm_id,
+        algorithmIds: Array.isArray(x.algorithm_ids) && x.algorithm_ids.length
+          ? x.algorithm_ids
+          : (x.algorithm_id ? [x.algorithm_id] : []),
         metrics: Array.isArray(x.metrics) ? x.metrics : [],
         params: x.params ?? {},
         createdAt: formatTs(x.created_at),
@@ -794,6 +823,7 @@ export const useAppStore = defineStore("app", {
         visibility: payload?.visibility,
         allow_use: payload?.allowUse,
         allow_download: payload?.allowDownload,
+        task_types: payload?.taskTypes,
       });
       const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === ds.id);
@@ -804,7 +834,7 @@ export const useAppStore = defineStore("app", {
     },
 
     async updateDataset(id, patch) {
-      const out = await datasetsApi.patchDataset(id, {
+      const body = {
         name: patch?.name,
         type: patch?.type,
         size: patch?.size,
@@ -812,7 +842,9 @@ export const useAppStore = defineStore("app", {
         visibility: patch?.visibility,
         allow_use: patch?.allowUse,
         allow_download: patch?.allowDownload,
-      });
+      };
+      if (patch?.taskTypes !== undefined) body.task_types = patch.taskTypes;
+      const out = await datasetsApi.patchDataset(id, body);
       const ds = mapDatasetOut(out);
       const idx = this.datasets.findIndex((d) => d.id === id);
       if (idx >= 0) this.datasets[idx] = { ...this.datasets[idx], ...ds };
@@ -903,12 +935,17 @@ export const useAppStore = defineStore("app", {
     },
 
     async createPreset(payload) {
+      const normalizedAlgorithmIds = Array.isArray(payload?.algorithmIds)
+        ? payload.algorithmIds.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const primaryAlgorithmId = String(payload?.algorithmId || normalizedAlgorithmIds[0] || "").trim();
       const out = await presetsApi.createPreset({
         preset_id: payload?.id,
         name: payload?.name,
         task_type: payload?.taskType || toTaskType(payload?.task),
         dataset_id: payload?.datasetId,
-        algorithm_id: payload?.algorithmId,
+        algorithm_id: primaryAlgorithmId,
+        algorithm_ids: normalizedAlgorithmIds,
         metrics: Array.isArray(payload?.metrics) ? payload.metrics : [],
         params: payload?.params ?? {},
       });
@@ -918,6 +955,9 @@ export const useAppStore = defineStore("app", {
         taskType: out.task_type,
         datasetId: out.dataset_id,
         algorithmId: out.algorithm_id,
+        algorithmIds: Array.isArray(out.algorithm_ids) && out.algorithm_ids.length
+          ? out.algorithm_ids
+          : (out.algorithm_id ? [out.algorithm_id] : []),
         metrics: Array.isArray(out.metrics) ? out.metrics : [],
         params: out.params ?? {},
         createdAt: formatTs(out.created_at),
@@ -985,8 +1025,15 @@ export const useAppStore = defineStore("app", {
       await algorithmsApi.deleteAlgorithm(id);
       const idx = this.algorithms.findIndex((a) => a.id === id);
       if (idx >= 0) this.algorithms.splice(idx, 1);
+      // 删除算法后，同步清理本地任务中心与预设里的关联引用，避免残留脏数据。
+      this.runs = (this.runs || []).filter((run) => String(run?.algorithmId || "") !== String(id));
+      this.presets = (this.presets || []).filter((preset) => {
+        if (String(preset?.algorithmId || "") === String(id)) return false;
+        const ids = Array.isArray(preset?.algorithmIds) ? preset.algorithmIds.map((x) => String(x || "")) : [];
+        return !ids.includes(String(id));
+      });
       this.algorithms = ensureBaselineAlgorithms(this.algorithms);
-      saveState({ algorithms: this.algorithms });
+      saveState({ algorithms: this.algorithms, runs: this.runs, presets: this.presets });
     },
 
     async removeMetric(id) {
@@ -1114,7 +1161,7 @@ export const useAppStore = defineStore("app", {
 
     async cancelRun(runId) {
       const prev = this.runs.find((r) => r.id === runId);
-      if (prev && (prev.status === "已完成" || prev.status === "澶辫触" || prev.status === "已取消")) return;
+      if (prev && (prev.status === "已完成" || prev.status === "失败" || prev.status === "已取消")) return;
 
       this._upsertRun({ id: runId, status: "取消中" });
       try {
@@ -1198,6 +1245,8 @@ export const useAppStore = defineStore("app", {
 
         status: statusCN,
         createdAt: formatTs(out.created_at),
+        startedAt: formatTs(out.started_at),
+        finishedAt: formatTs(out.finished_at),
 
         // 琛ㄦ牸鐩存帴鐢細鎵佸钩瀛楁
         psnr: metrics.PSNR ?? metrics.psnr ?? null,

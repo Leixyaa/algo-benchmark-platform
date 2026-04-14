@@ -46,9 +46,14 @@
         <el-tab-pane label="用户数据集" name="owned">
           <el-table :data="ownedDatasets" border stripe class="data-table">
             <el-table-column prop="name" label="名称" min-width="180" />
-            <el-table-column prop="type" label="类型" width="110">
+            <el-table-column prop="type" label="介质" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || '-' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="适用任务" min-width="200">
+              <template #default="{ row }">
+                <span class="task-cell">{{ formatDatasetTaskTypes(row) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="size" label="规模" width="190">
@@ -66,6 +71,7 @@
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item v-if="isDatasetAdmin" command="id">查看/修改 ID</el-dropdown-item>
+                      <el-dropdown-item command="edit-tasks">适用任务</el-dropdown-item>
                       <el-dropdown-item command="community">{{ isSelfPublishedDataset(row) ? "更新社区信息" : "上传到社区" }}</el-dropdown-item>
                       <el-dropdown-item v-if="isSelfPublishedDataset(row)" command="unpublish-community">下架社区</el-dropdown-item>
                       <el-dropdown-item command="export">下载到本地</el-dropdown-item>
@@ -86,9 +92,14 @@
         <el-tab-pane label="社区数据集" name="community">
           <el-table :data="downloadedDatasets" border stripe class="data-table">
             <el-table-column prop="name" label="名称" min-width="180" />
-            <el-table-column prop="type" label="类型" width="110">
+            <el-table-column prop="type" label="介质" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.type === '视频' ? 'warning' : 'success'" size="small">{{ row.type || '-' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="适用任务" min-width="200">
+              <template #default="{ row }">
+                <span class="task-cell">{{ formatDatasetTaskTypes(row) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="size" label="规模" width="190">
@@ -126,13 +137,19 @@
         <el-form-item label="数据集名称">
           <el-input v-model="form.name" placeholder="例如：RESIDE Indoor 测试集" />
         </el-form-item>
-        <el-form-item label="数据集类型">
+        <el-form-item label="介质类型">
           <el-select v-model="form.type" style="width: 100%">
             <el-option label="图像" value="图像" />
             <el-option label="视频" value="视频" />
             <el-option label="图像/视频" value="图像/视频" />
           </el-select>
         </el-form-item>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="适用任务由系统在导入或扫描后按目录协议自动识别，无需在此填写。"
+        />
         <el-form-item label="规模描述">
           <el-input v-model="form.size" placeholder="例如：500 张 / 30 段" />
         </el-form-item>
@@ -140,6 +157,24 @@
       <template #footer>
         <el-button class="centered-btn" @click="closeCreate">取消</el-button>
         <el-button type="primary" class="centered-btn" @click="submitCreate">确认创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showTaskTypesDialog" title="设置适用任务" width="480px" @closed="taskTypesEditId = ''">
+      <p class="dialog-hint">默认由扫描自动识别；此处可手动覆盖，便于分类或与自动结果不一致时修正。</p>
+      <el-select
+        v-model="editTaskForm.taskTypes"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        placeholder="请选择"
+        style="width: 100%"
+      >
+        <el-option v-for="(label, key) in TASK_LABEL_BY_TYPE" :key="key" :label="label" :value="key" />
+      </el-select>
+      <template #footer>
+        <el-button @click="showTaskTypesDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveTaskTypesEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -154,7 +189,8 @@ import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
 import { authFetch } from "../api/http";
 import { datasetsApi } from "../api/datasets";
-import { useAppStore } from "../stores/app";
+import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { datasetHasRecognizedTasks } from "../utils/datasetTask";
 
 const store = useAppStore();
 
@@ -181,6 +217,10 @@ const form = reactive({
   type: "图像",
   size: "",
 });
+
+const showTaskTypesDialog = ref(false);
+const taskTypesEditId = ref("");
+const editTaskForm = reactive({ taskTypes: [] });
 
 const visibleDatasets = computed(() =>
   (store.datasets || []).filter((d) => String(d?.raw?.owner_id || "") === String(store.user?.username || ""))
@@ -252,11 +292,46 @@ watch(
   { deep: true, immediate: true }
 );
 
+function formatDatasetTaskTypes(row) {
+  const raw = row?.raw?.task_types;
+  const list = Array.isArray(row?.taskTypes) ? row.taskTypes : Array.isArray(raw) ? raw : [];
+  if (list.length) return list.map((k) => TASK_LABEL_BY_TYPE[k] || k).join(" / ");
+  const sup = row?.meta?.supported_task_types || row?.raw?.meta?.supported_task_types;
+  if (Array.isArray(sup) && sup.length) return sup.map((k) => TASK_LABEL_BY_TYPE[k] || k).join(" / ");
+  return "未识别（请先导入或扫描）";
+}
+
 function openCreate() {
   form.name = "";
   form.type = "图像";
   form.size = "";
   showCreate.value = true;
+}
+
+function openEditTaskTypes(id) {
+  const d = getDatasetById(id);
+  taskTypesEditId.value = id;
+  const raw = d?.raw?.task_types;
+  editTaskForm.taskTypes = Array.isArray(d?.taskTypes)
+    ? [...d.taskTypes]
+    : Array.isArray(raw)
+      ? [...raw]
+      : [];
+  showTaskTypesDialog.value = true;
+}
+
+async function saveTaskTypesEdit() {
+  if (!editTaskForm.taskTypes?.length) {
+    ElMessage({ type: "warning", message: "请至少选择一种适用任务" });
+    return;
+  }
+  try {
+    await store.updateDataset(taskTypesEditId.value, { taskTypes: [...editTaskForm.taskTypes] });
+    showTaskTypesDialog.value = false;
+    ElMessage({ type: "success", message: "适用任务已更新" });
+  } catch (e) {
+    ElMessage({ type: "error", message: `保存失败：${e?.message || e}` });
+  }
 }
 
 function closeCreate() {
@@ -349,6 +424,10 @@ async function handleDatasetAction(id, command) {
   }
   if (command === "id") {
     await editDatasetId(id);
+    return;
+  }
+  if (command === "edit-tasks") {
+    openEditTaskTypes(id);
     return;
   }
   if (command === "community") {
@@ -444,6 +523,13 @@ async function uploadDatasetToCommunity(id) {
   const current = ownedDatasets.value.find((item) => item.id === id);
   if (!current) {
     ElMessage({ type: "warning", message: "未找到当前数据集" });
+    return;
+  }
+  if (!datasetHasRecognizedTasks(current)) {
+    ElMessage({
+      type: "warning",
+      message: "请先导入数据并执行扫描，使系统识别出适用任务；也可在「管理 → 适用任务」中手动指定后再发布。",
+    });
     return;
   }
   const alreadyPublished = isSelfPublishedDataset(current);
