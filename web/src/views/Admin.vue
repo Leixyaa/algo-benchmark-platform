@@ -52,7 +52,7 @@
         >
           <el-table-column prop="name" label="算法名称" min-width="220" />
           <el-table-column prop="task" label="任务" width="120" />
-          <el-table-column prop="uploaderId" label="上传者" width="140" />
+          <el-table-column prop="uploaderId" label="上传者" width="140" :formatter="userLabelCell" />
           <el-table-column prop="downloadCount" label="下载量" width="100" />
           <el-table-column prop="createdAt" label="发布时间" width="180" />
           <el-table-column label="操作" width="320">
@@ -95,7 +95,7 @@
           <el-table-column prop="name" label="数据集名称" min-width="220" />
           <el-table-column prop="type" label="类型" width="100" />
           <el-table-column prop="size" label="规模" width="140" />
-          <el-table-column prop="uploaderId" label="上传者" width="140" />
+          <el-table-column prop="uploaderId" label="上传者" width="140" :formatter="userLabelCell" />
           <el-table-column prop="downloadCount" label="下载量" width="100" />
           <el-table-column prop="createdAt" label="发布时间" width="180" />
           <el-table-column label="操作" width="220">
@@ -138,7 +138,7 @@
               {{ row.direction === "lower_better" ? "越小越好" : "越大越好" }}
             </template>
           </el-table-column>
-          <el-table-column prop="uploaderId" label="提交人" width="140" />
+          <el-table-column prop="uploaderId" label="提交人" width="140" :formatter="userLabelCell" />
           <el-table-column label="代码文件" width="180">
             <template #default="{ row }">
               {{ row.codeFilename || "-" }}
@@ -174,7 +174,7 @@
         >
           <el-table-column prop="name" label="算法名称" min-width="180" />
           <el-table-column prop="taskLabel" label="任务" width="110" />
-          <el-table-column prop="uploaderId" label="提交人" width="140" />
+          <el-table-column prop="uploaderId" label="提交人" width="140" :formatter="userLabelCell" />
           <el-table-column prop="archiveFilename" label="代码包" min-width="180" show-overflow-tooltip />
           <el-table-column prop="version" label="版本" width="100" />
           <el-table-column label="运行链路" width="110">
@@ -213,7 +213,7 @@
         >
           <el-table-column prop="targetTypeLabel" label="举报类型" width="120" />
           <el-table-column prop="targetId" label="举报对象ID" min-width="180" />
-          <el-table-column prop="reporterId" label="举报人ID" width="140" />
+          <el-table-column prop="reporterId" label="举报人" width="140" :formatter="userLabelCell" />
           <el-table-column prop="reason" label="举报原因" min-width="260" show-overflow-tooltip />
           <el-table-column prop="createdAt" label="举报时间" width="180" />
           <el-table-column label="操作" width="160">
@@ -245,10 +245,10 @@
         >
           <el-table-column prop="name" label="指标名称" min-width="180" />
           <el-table-column prop="targetId" label="指标标识" min-width="180" />
-          <el-table-column prop="submitterId" label="提交人" width="140" />
+          <el-table-column prop="submitterId" label="提交人" width="140" :formatter="userLabelCell" />
           <el-table-column prop="statusLabel" label="状态" width="100" />
           <el-table-column prop="resolution" label="处理说明" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="resolvedBy" label="处理人" width="120" />
+          <el-table-column prop="resolvedBy" label="处理人" width="120" :formatter="userLabelCell" />
           <el-table-column prop="resolvedAt" label="处理时间" width="180" />
           <el-table-column prop="createdAt" label="提交时间" width="180" />
         </el-table>
@@ -273,7 +273,7 @@
         >
           <el-table-column prop="name" label="算法名称" min-width="180" />
           <el-table-column prop="taskLabel" label="任务" width="110" />
-          <el-table-column prop="submitterId" label="提交人" width="140" />
+          <el-table-column prop="submitterId" label="提交人" width="140" :formatter="userLabelCell" />
           <el-table-column prop="archiveFilename" label="代码包" min-width="170" show-overflow-tooltip />
           <el-table-column prop="statusLabel" label="状态" width="100" />
           <el-table-column prop="resolution" label="审核说明" min-width="220" show-overflow-tooltip />
@@ -284,26 +284,9 @@
             </template>
           </el-table-column>
           <el-table-column prop="platformAlgorithmId" label="平台算法" min-width="170" />
-          <el-table-column prop="resolvedBy" label="审核人" width="120" />
+          <el-table-column prop="resolvedBy" label="审核人" width="120" :formatter="userLabelCell" />
           <el-table-column prop="resolvedAt" label="审核时间" width="180" />
           <el-table-column prop="createdAt" label="提交时间" width="180" />
-          <el-table-column label="操作" width="180" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                v-if="row.canPromoteToPlatform"
-                size="small"
-                type="primary"
-                plain
-                @click="promoteAlgorithmSubmission(row)"
-                :loading="promotingSubmissionIds.has(row.id)"
-              >
-                收录为平台算法
-              </el-button>
-              <el-tag v-else-if="row.platformAlgorithmRawId" type="success">已收录</el-tag>
-              <el-tag v-else-if="row.status === 'approved'" type="info">仅留档</el-tag>
-              <span v-else class="empty-text">-</span>
-            </template>
-          </el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -330,11 +313,11 @@
         >
           <el-table-column prop="targetTypeLabel" label="举报类型" width="120" />
           <el-table-column prop="targetId" label="举报对象ID" min-width="180" />
-          <el-table-column prop="reporterId" label="举报人ID" width="140" />
+          <el-table-column prop="reporterId" label="举报人" width="140" :formatter="userLabelCell" />
           <el-table-column prop="reason" label="举报原因" min-width="220" show-overflow-tooltip />
           <el-table-column prop="statusLabel" label="状态" width="100" />
           <el-table-column prop="resolution" label="处理理由" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="resolvedBy" label="处理人" width="120" />
+          <el-table-column prop="resolvedBy" label="处理人" width="120" :formatter="userLabelCell" />
           <el-table-column prop="resolvedAt" label="处理时间" width="180" />
           <el-table-column prop="createdAt" label="举报时间" width="180" />
         </el-table>
@@ -346,7 +329,7 @@
         <div class="detail-summary">
           <div class="detail-name">{{ detailItem.name }}</div>
           <div class="detail-meta">
-            <span>上传者：{{ detailItem.uploaderId || "-" }}</span>
+            <span>上传者：{{ userLabelById(detailItem.uploaderId || "") }}</span>
             <span>下载量：{{ detailItem.downloadCount ?? 0 }}</span>
             <span>发布时间：{{ detailItem.createdAt || "-" }}</span>
           </div>
@@ -392,7 +375,7 @@
         <div class="process-meta">
           <div>举报类型：{{ activeReport.targetTypeLabel }}</div>
           <div>举报对象ID：{{ activeReport.targetId }}</div>
-          <div>举报人ID：{{ activeReport.reporterId }}</div>
+          <div>举报人：{{ userLabelById(activeReport.reporterId) }}</div>
         </div>
 
         <div v-if="reportTargetDetail" class="process-detail-card">
@@ -408,7 +391,7 @@
 
           <div class="process-detail-grid">
             <div>名称：{{ reportTargetDetail.name || "-" }}</div>
-            <div>上传者：{{ reportTargetDetail.uploaderId || "-" }}</div>
+            <div>上传者：{{ userLabelById(reportTargetDetail.uploaderId || "") }}</div>
             <div v-if="activeReport.targetType !== 'comment'">下载量：{{ reportTargetDetail.downloadCount ?? 0 }}</div>
             <div v-if="reportTargetDetail.createdAt">发布时间：{{ reportTargetDetail.createdAt }}</div>
             <div v-if="reportTargetDetail.task">任务：{{ reportTargetDetail.task }}</div>
@@ -459,7 +442,7 @@
         <div class="process-meta">
           <div>指标名称：{{ activeMetric.displayName }}</div>
           <div>指标标识：{{ activeMetric.metricKey }}</div>
-          <div>提交人：{{ activeMetric.uploaderId }}</div>
+          <div>提交人：{{ userLabelById(activeMetric.uploaderId) }}</div>
         </div>
         <div class="detail-block">
           <div class="block-title">指标说明</div>
@@ -526,7 +509,7 @@
         <div class="process-meta">
           <div>算法名称：{{ activeSubmission.name }}</div>
           <div>任务：{{ activeSubmission.taskLabel }}</div>
-          <div>提交人：{{ activeSubmission.uploaderId }}</div>
+          <div>提交人：{{ userLabelById(activeSubmission.uploaderId) }}</div>
         </div>
 
         <div class="detail-block">
@@ -678,6 +661,28 @@ function includesKeyword(parts, keyword) {
   return parts.join(" ").toLowerCase().includes(kw);
 }
 
+const userDisplayNameMap = computed(() => {
+  const map = new Map();
+  for (const row of registeredUsers.value || []) {
+    const username = String(row?.username || "").trim();
+    if (!username) continue;
+    const displayName = String(row?.displayName || "").trim();
+    map.set(username, displayName || username);
+  }
+  return map;
+});
+
+function userLabelById(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return "-";
+  if (id === "system") return "系统";
+  return userDisplayNameMap.value.get(id) || id;
+}
+
+function userLabelCell(_row, _column, cellValue) {
+  return userLabelById(cellValue);
+}
+
 const filteredRegisteredUsers = computed(() => {
   const kw = String(userKeyword.value || "").trim().toLowerCase();
   const rows = registeredUsers.value || [];
@@ -819,20 +824,20 @@ function getReportProcessTemplate(action) {
 
 const filteredAlgorithms = computed(() =>
   (algorithms.value || []).filter((item) =>
-    includesKeyword([item.name, item.task, item.uploaderId], algorithmKeyword.value)
+    includesKeyword([item.name, item.task, item.uploaderId, userLabelById(item.uploaderId)], algorithmKeyword.value)
   )
 );
 
 const filteredDatasets = computed(() =>
   (datasets.value || []).filter((item) =>
-    includesKeyword([item.name, item.type, item.uploaderId], datasetKeyword.value)
+    includesKeyword([item.name, item.type, item.uploaderId, userLabelById(item.uploaderId)], datasetKeyword.value)
   )
 );
 
 const filteredMetrics = computed(() =>
   (metrics.value || []).filter((item) =>
     String(item.status || "") === "pending" &&
-    includesKeyword([item.displayName, item.metricKey, item.uploaderId, item.description], metricKeyword.value)
+    includesKeyword([item.displayName, item.metricKey, item.uploaderId, userLabelById(item.uploaderId), item.description], metricKeyword.value)
   )
 );
 
@@ -840,7 +845,7 @@ const filteredAlgorithmSubmissions = computed(() =>
   (algorithmSubmissions.value || []).filter((item) =>
     String(item.status || "") === "pending" &&
     includesKeyword(
-      [item.name, item.taskLabel, item.uploaderId, item.archiveFilename, item.description, item.dependencyText, item.entryText],
+      [item.name, item.taskLabel, item.uploaderId, userLabelById(item.uploaderId), item.archiveFilename, item.description, item.dependencyText, item.entryText],
       algorithmSubmissionKeyword.value
     )
   )
@@ -850,7 +855,7 @@ const pendingReports = computed(() =>
   (reports.value || []).filter(
     (item) =>
       String(item.status || "") === "pending" &&
-      includesKeyword([item.targetTypeLabel, item.targetId, item.reporterId, item.reason], pendingReportKeyword.value)
+      includesKeyword([item.targetTypeLabel, item.targetId, item.reporterId, userLabelById(item.reporterId), item.reason], pendingReportKeyword.value)
   )
 );
 
@@ -859,7 +864,7 @@ const handledReports = computed(() =>
     (item) =>
       String(item.status || "") !== "pending" &&
       includesKeyword(
-        [item.targetTypeLabel, item.targetId, item.reporterId, item.reason, item.resolution, item.resolvedBy],
+        [item.targetTypeLabel, item.targetId, item.reporterId, userLabelById(item.reporterId), item.reason, item.resolution, item.resolvedBy, userLabelById(item.resolvedBy)],
         reportLogKeyword.value
       )
   )
@@ -870,7 +875,7 @@ const handledMetricLogs = computed(() =>
     (item) =>
       String(item.status || "") !== "pending" &&
       includesKeyword(
-        [item.displayName, item.metricKey, item.uploaderId, item.reviewNote, item.reviewedBy],
+        [item.displayName, item.metricKey, item.uploaderId, userLabelById(item.uploaderId), item.reviewNote, item.reviewedBy, userLabelById(item.reviewedBy)],
         metricLogKeyword.value
       )
   ).map((item) => ({
@@ -894,9 +899,11 @@ const handledAlgorithmSubmissionLogs = computed(() =>
           item.name,
           item.taskLabel,
           item.uploaderId,
+          userLabelById(item.uploaderId),
           item.archiveFilename,
           item.reviewNote,
           item.reviewedBy,
+          userLabelById(item.reviewedBy),
           item.platformAlgorithmId,
           item.runtimeReady ? "已接入" : "未接入",
         ],

@@ -1,7 +1,7 @@
 ﻿<template>
   <div class="page">
     <div class="header-section">
-      <h2 class="title">数据集管理</h2>
+      <h2 class="title">数据集</h2>
       <div class="subtitle">
         支持创建、上传与管理数据集，推荐通过 ZIP 导入并统一纳入平台管理。
       </div>
@@ -781,72 +781,55 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 
 <style scoped>
 .page {
-  --page-bg: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-  --card-bg: rgba(255, 255, 255, 0.96);
-  --card-border: #e2e8f0;
-  --card-shadow: 0 10px 25px rgba(148, 163, 184, 0.08);
-  --text-main: #1e293b;
-  --text-soft: #64748b;
-  --text-muted: #94a3b8;
-  --accent: #3b82f6;
-  --accent-deep: #2563eb;
-  --accent-soft: #dbeafe;
-  --success: #10b981;
-  --success-deep: #059669;
-  --warning: #f59e0b;
-  --danger: #ef4444;
   padding: 24px;
-  min-height: 100%;
-  background: var(--page-bg);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .header-section {
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
 .title {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   font-size: 28px;
-  font-weight: 800;
-  color: var(--text-main);
-  line-height: 1.1;
+  font-weight: 700;
+  color: #1f2f57;
+  line-height: 1.2;
 }
 
 .subtitle {
-  color: var(--text-soft);
-  line-height: 1.7;
-  font-size: 16px;
+  color: #6a7ca9;
+  font-size: 14px;
+  line-height: 1.6;
   max-width: 800px;
+  margin: 0;
 }
 
 .action-bar {
-  margin-bottom: 24px;
-  padding: 24px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  background: #f8faff;
+  padding: 28px;
   border-radius: 16px;
-  box-shadow: var(--card-shadow);
-  transition: all 0.3s ease;
-}
-
-.action-bar:hover {
-  box-shadow: 0 15px 30px rgba(148, 163, 184, 0.12);
-  transform: translateY(-2px);
+  border: 1px solid #e6eeff;
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .toolbar {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 20px;
   flex-wrap: wrap;
 }
 
 .toolbar-left {
   display: flex;
-  gap: 12px;
+  gap: 16px;
+  flex: 1;
   flex-wrap: wrap;
 }
 
@@ -856,18 +839,21 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  padding-top: 24px;
+  border-top: 1px dashed #dce7ff;
 }
 
 .selector-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex: 1;
   flex-wrap: wrap;
 }
 
 .label {
-  color: var(--text-main);
-  font-weight: 700;
+  color: #3f4f74;
+  font-weight: 600;
   font-size: 14px;
   white-space: nowrap;
 }
@@ -877,50 +863,39 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 }
 
 .section-block {
-  margin-bottom: 24px;
-}
-
-.section-title {
-  margin: 0 0 16px;
-  color: var(--text-main);
-  font-size: 22px;
-  font-weight: 800;
-  line-height: 1.15;
+  margin-bottom: 48px;
 }
 
 .data-table {
-  width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s ease;
 }
 
 .data-table:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 }
 
 .centered-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
 }
 
 .action-btn {
   min-width: 140px;
   height: 44px;
-  padding: 0 18px;
-  border-radius: 8px;
-  font-weight: 600;
-  transition: all 0.2s ease;
+  padding: 0 20px;
+  border-radius: 12px;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .action-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
 .guide-btn,
@@ -932,17 +907,6 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   min-width: 160px;
 }
 
-.compact-checkbox {
-  min-height: 44px;
-  padding: 0 4px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.checkbox {
-  margin-left: 4px;
-}
-
 .size-cell {
   display: inline-block;
   max-width: 100%;
@@ -952,16 +916,10 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 }
 
 .table-action-btn {
-  min-width: 90px;
+  min-width: 96px;
   justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  height: 36px;
-}
-
-.table-action-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .page :deep(.scan-result-box) {
@@ -990,151 +948,47 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   font-weight: 700;
 }
 
-.data-table :deep(.el-table__cell) {
-  height: 64px;
-  padding: 16px;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.data-table :deep(.cell) {
-  white-space: nowrap;
-  font-size: 14px;
-  color: var(--text-main);
+.data-table :deep(.el-table__body-wrapper) {
+  overflow-x: auto;
 }
 
 .data-table :deep(.el-table th.el-table__cell) {
-  color: var(--text-main);
-  font-weight: 700;
-  font-size: 14px;
-  padding: 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-:deep(.el-select__wrapper) {
-  min-height: 44px;
-  border-radius: 8px;
-  box-shadow: none;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  transition: all 0.2s ease;
-}
-
-:deep(.el-select__wrapper:hover) {
-  border-color: #cbd5e1;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-:deep(.el-select__wrapper.is-focus) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-:deep(.el-button) {
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  background-color: #f8faff;
   font-weight: 600;
+  color: #1f2f57;
+  padding: 12px 16px;
 }
 
-:deep(.el-button:hover) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+.data-table :deep(.el-table__row) {
+  transition: background-color 0.2s ease;
 }
 
-:deep(.el-dialog) {
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-}
-
-:deep(.el-dialog__header) {
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 20px 24px;
-}
-
-:deep(.el-dialog__title) {
-  color: var(--text-main);
-  font-weight: 800;
-  font-size: 18px;
-}
-
-:deep(.el-dialog__body) {
-  padding: 24px;
-}
-
-:deep(.el-dialog__footer) {
-  padding: 0 24px 24px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-}
-
-:deep(.el-form-item) {
-  margin-bottom: 20px;
-}
-
-:deep(.el-form-item__label) {
-  color: var(--text-main);
-  font-weight: 700;
-  font-size: 14px;
-  margin-bottom: 8px;
-}
-
-:deep(.el-input__wrapper) {
-  border-radius: 8px;
-  box-shadow: none;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  transition: all 0.2s ease;
-  min-height: 44px;
-}
-
-:deep(.el-input__wrapper:hover) {
-  border-color: #cbd5e1;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-:deep(.el-input__wrapper.is-focus) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-:deep(.el-select) {
-  width: 100%;
+.data-table :deep(.el-table__row:hover) {
+  background-color: #f8faff !important;
 }
 
 :deep(.el-tabs__header) {
-  margin-bottom: 0;
-  padding: 0 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 12px;
 }
 
 :deep(.el-tabs__item) {
-  font-weight: 600;
-  font-size: 14px;
-  padding: 16px 24px;
-  color: var(--text-soft);
-  transition: all 0.2s ease;
+  color: #5a6f9e;
 }
 
 :deep(.el-tabs__item:hover) {
-  color: var(--accent);
+  color: #2f4ea3;
 }
 
 :deep(.el-tabs__item.is-active) {
-  color: var(--accent);
+  color: #1f2f57;
   font-weight: 700;
 }
 
-:deep(.el-tabs__content) {
-  padding: 16px;
-}
-
-:deep(.el-empty__description) {
-  color: var(--text-muted);
-  font-size: 14px;
+.dialog-hint {
+  margin: 0 0 12px;
+  color: #6a7ca9;
+  line-height: 1.5;
+  font-size: 13px;
 }
 
 @media (max-width: 768px) {
@@ -1152,11 +1006,11 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 
   .action-bar {
     padding: 20px;
+    gap: 16px;
   }
 
   .select-box {
     width: 100%;
-    min-width: 220px;
   }
 
   .toolbar,
@@ -1168,10 +1022,6 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
 
   .action-btn {
     width: 100%;
-  }
-
-  :deep(.el-dialog) {
-    width: 90% !important;
   }
 }
 </style>

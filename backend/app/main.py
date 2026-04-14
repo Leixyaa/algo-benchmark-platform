@@ -184,7 +184,7 @@ def _default_ai_system_prompt() -> str:
     return (
         "你是图像与视频增强复原评测平台的 AI 客服。"
         "请用中文回答，内容简洁、可执行。"
-        "严格基于本平台真实功能回答：社区中心、数据集管理、算法库、指标库、发起评测、任务中心、结果对比、个人信息、我的通知、管理后台。"
+        "严格基于本平台真实功能回答：社区中心、数据集、算法库、指标库、发起评测、任务中心、结果对比、个人信息、我的通知、管理后台。"
         "本平台没有“任务优先级设置”“人工工单系统”等模块，不得虚构。"
         "当用户咨询操作步骤时，优先给出页面路径与按钮名称。"
         "不要输出 markdown 语法符号（如 **、`、#）。"
@@ -365,7 +365,7 @@ def _ai_local_faq_answer(message: str) -> str:
         )
     if ("验收" in q and ("演示" in q or "怎么讲" in q)) or ("答辩" in q and "讲解" in q):
         return (
-            "建议按“数据集管理 -> 算法库 -> 发起评测 -> 任务中心 -> 结果对比”顺序演示。"
+            "建议按“数据集 -> 算法库 -> 发起评测 -> 任务中心 -> 结果对比”顺序演示。"
             "每一步强调页面路径、按钮名称和结果闭环，避免泛化描述。"
         )
     return ""
@@ -1486,8 +1486,8 @@ def _list_all_algorithm_submissions(r) -> list[dict]:
     return list_algorithm_submissions(r, limit=5000) or []
 
 
-def _algorithm_submission_to_out(item: dict) -> dict:
-    data = dict(item or {})
+def _algorithm_submission_to_out(r, item: dict, cache: dict[str, str] | None = None) -> dict:
+    data = _with_owner_display_name(r, item, cache=cache)
     task_type = str(data.get("task_type") or "").strip().lower()
     data["task_label"] = TASK_LABEL_BY_TYPE.get(task_type, "")
     return AlgorithmSubmissionOut(**data).model_dump()
@@ -2287,6 +2287,26 @@ def _username_of(current_user: Optional[dict]) -> str:
     if not isinstance(current_user, dict):
         return ""
     return str(current_user.get("username") or "").strip()
+
+
+def _owner_display_name(r, owner_id: str | None, cache: dict[str, str] | None = None) -> str:
+    owner = str(owner_id or "").strip() or "system"
+    if cache is not None and owner in cache:
+        return cache[owner]
+    if owner == "system":
+        name = "系统"
+    else:
+        user = load_user(r, owner) or {}
+        name = str(user.get("display_name") or user.get("username") or owner).strip() or owner
+    if cache is not None:
+        cache[owner] = name
+    return name
+
+
+def _with_owner_display_name(r, item: dict | None, cache: dict[str, str] | None = None) -> dict:
+    data = dict(item or {})
+    data["owner_display_name"] = _owner_display_name(r, data.get("owner_id"), cache=cache)
+    return data
 
 
 def _sql_record_list(record_type: str, limit: int = 5000) -> Optional[list[dict]]:
@@ -3283,6 +3303,7 @@ def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: O
     # 绠＄悊椤靛彧杩斿洖褰撳墠鐢ㄦ埛鑷繁鐨勬暟鎹泦锛涚ぞ鍖洪〉鍗曠嫭杩斿洖鍏紑璧勬簮
     owner_id = _username_of(current_user) or None
     include_public = str(scope or "manage").lower() == "community"
+    owner_name_cache: dict[str, str] = {}
     if include_public:
         owner_id = None
         # 多取候选再按 load_dataset 校准，避免 SQL 列表与 Redis 不一致时出现「已下架仍展示」
@@ -3301,7 +3322,7 @@ def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: O
                 continue
             if not _dataset_is_publicly_available(cur):
                 continue
-            out.append(cur)
+            out.append(_with_owner_display_name(r, cur, cache=owner_name_cache))
             seen.add(did)
             if len(out) >= int(limit or 200):
                 break
@@ -3311,7 +3332,8 @@ def get_datasets(limit: int = 200, scope: str = Query("manage"), current_user: O
         return []
 
     items = list_datasets(r, limit=limit, owner_id=owner_id, include_public=False)
-    return [item for item in items if str(item.get("owner_id") or "") == owner_id][:limit]
+    filtered = [item for item in items if str(item.get("owner_id") or "") == owner_id][:limit]
+    return [_with_owner_display_name(r, item, cache=owner_name_cache) for item in filtered]
 
 
 @app.post("/datasets", response_model=DatasetOut)
@@ -4051,6 +4073,7 @@ def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user:
             _ensure_submission_owner_algorithm_synced(r, submission)
     items = list_algorithms(r, limit=limit, owner_id=owner_id, include_public=include_public) or []
     out = []
+    owner_name_cache: dict[str, str] = {}
     for raw_item in items:
         x = _normalize_algorithm_runtime_state(raw_item)
         alg_id = x.get("algorithm_id")
@@ -4069,7 +4092,7 @@ def get_algorithms(limit: int = 500, scope: str = Query("manage"), current_user:
                 save_algorithm(r, alg_id, x)
         if not is_admin and str(x.get("owner_id") or "") == "system" and not _is_algorithm_active(x):
             continue
-        out.append(AlgorithmOut(**x).model_dump())
+        out.append(AlgorithmOut(**_with_owner_display_name(r, x, cache=owner_name_cache)).model_dump())
     return out
 
 
@@ -4313,7 +4336,7 @@ def list_algorithm_submissions_for_current_user(current_user: dict = Depends(get
     r = make_redis()
     username = _username_of(current_user)
     items = [
-        _algorithm_submission_to_out(_ensure_submission_owner_algorithm_synced(r, item))
+        _algorithm_submission_to_out(r, _ensure_submission_owner_algorithm_synced(r, item))
         for item in _list_all_algorithm_submissions(r)
         if str(item.get("owner_id") or "") == username
     ]
@@ -4357,7 +4380,7 @@ def create_algorithm_submission(payload: AlgorithmSubmissionCreate, current_user
         "platform_algorithm_id": None,
     }
     save_algorithm_submission(r, submission_id, data)
-    return _algorithm_submission_to_out(data)
+    return _algorithm_submission_to_out(r, data)
 
 
 @app.get("/algorithm-submissions/{submission_id}/download")
@@ -4420,7 +4443,7 @@ def publish_algorithm_submission_to_community(
     cur["community_algorithm_id"] = community_algorithm_id
     cur["community_published_at"] = time.time()
     save_algorithm_submission(r, submission_id, cur)
-    return _algorithm_submission_to_out(cur)
+    return _algorithm_submission_to_out(r, cur)
 
 
 @app.post("/algorithm-submissions/{submission_id}/unpublish-community", response_model=AlgorithmSubmissionOut)
@@ -4451,7 +4474,7 @@ def unpublish_algorithm_submission_from_community(submission_id: str, current_us
     cur["community_algorithm_id"] = None
     cur["community_published_at"] = None
     save_algorithm_submission(r, submission_id, cur)
-    return _algorithm_submission_to_out(cur)
+    return _algorithm_submission_to_out(r, cur)
 
 
 @app.get("/admin/users", response_model=list[UserOut])
@@ -4509,7 +4532,7 @@ def admin_list_algorithm_submissions(
         item_status = str(item.get("status") or "").strip().lower()
         if status_value and item_status != status_value:
             continue
-        items.append(_algorithm_submission_to_out(_ensure_submission_owner_algorithm_synced(r, item)))
+        items.append(_algorithm_submission_to_out(r, _ensure_submission_owner_algorithm_synced(r, item)))
     return items
 
 
@@ -4555,7 +4578,7 @@ def admin_review_algorithm_submission(
             if cur.get("review_note"):
                 note = f"{note} 审核说明：{cur['review_note']}"
             _create_notice(r, owner_id, "算法代码接入申请未通过", note, kind="warning")
-    return _algorithm_submission_to_out(cur)
+    return _algorithm_submission_to_out(r, cur)
 
 
 @app.post("/admin/algorithm-submissions/{submission_id}/promote-platform", response_model=AlgorithmSubmissionOut)
@@ -4590,7 +4613,7 @@ def admin_promote_algorithm_submission_to_platform(
             f"你提交的算法代码包“{cur.get('name') or submission_id}”已由管理员收录为平台算法：{cur['platform_algorithm_id']}。",
             kind="success",
         )
-    return _algorithm_submission_to_out(cur)
+    return _algorithm_submission_to_out(r, cur)
 
 
 @app.get("/metrics", response_model=list[MetricOut])
@@ -4610,6 +4633,7 @@ def get_metrics(
     task_filter = str(task_type or "").strip().lower()
     items = _list_all_metric_records(r)
     out = []
+    owner_name_cache: dict[str, str] = {}
     for item in items:
         owner_id = str(item.get("owner_id") or "system").strip() or "system"
         item_status = str(item.get("status") or "").strip().lower()
@@ -4634,7 +4658,7 @@ def get_metrics(
         else:
             if owner_id != "system" and owner_id != username:
                 continue
-        out.append(MetricOut(**item))
+        out.append(MetricOut(**_with_owner_display_name(r, item, cache=owner_name_cache)))
     out.sort(key=lambda x: (x.owner_id != "system", x.status != "approved", x.display_name or x.name or x.metric_key))
     return out[:limit]
 
@@ -5334,6 +5358,14 @@ def admin_takedown_dataset(dataset_id: str, current_user: dict = Depends(get_cur
         notice_title="社区数据集已下架",
         notice_message=f"你下载的社区数据集“{source_name}”已被管理员下架，副本已从你的数据集库中移除。",
     )
+    if source_owner:
+        _create_notice(
+            r,
+            source_owner,
+            "社区数据集已被管理员下架",
+            f"你上传的社区数据集“{source_name}”已被管理员下架。如需恢复，请修改后重新发布。",
+            kind="warning",
+        )
     return DatasetOut(**cur)
 
 

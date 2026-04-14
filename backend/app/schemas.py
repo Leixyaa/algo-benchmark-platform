@@ -72,6 +72,7 @@ class DatasetOut(BaseModel):
     description: str = ""
     download_count: int = 0
     owner_id: Optional[str] = "system"
+    owner_display_name: str = ""
     source_owner_id: Optional[str] = None
     source_dataset_id: Optional[str] = None
     created_at: float
@@ -129,6 +130,7 @@ class AlgorithmOut(BaseModel):
     package_role: Optional[str] = None
     download_count: int = 0
     owner_id: Optional[str] = "system"
+    owner_display_name: str = ""
     source_owner_id: Optional[str] = None
     source_algorithm_id: Optional[str] = None
     created_at: float
@@ -279,6 +281,7 @@ class MetricOut(BaseModel):
     code_text: str = ""
     code_filename: str = ""
     owner_id: Optional[str] = "system"
+    owner_display_name: str = ""
     status: str = "approved"
     runtime_ready: bool = False
     review_note: str = ""
@@ -328,6 +331,7 @@ class AlgorithmSubmissionOut(BaseModel):
     archive_size: int = 0
     archive_sha256: str = ""
     owner_id: Optional[str] = "system"
+    owner_display_name: str = ""
     status: str = "pending"
     review_note: str = ""
     reviewed_by: Optional[str] = None

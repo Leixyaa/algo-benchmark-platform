@@ -65,7 +65,9 @@
         <el-table-column prop="task" label="任务" width="140" />
         <el-table-column prop="impl" label="实现方式" width="120" />
         <el-table-column prop="version" label="版本" width="100" />
-        <el-table-column prop="uploaderId" label="上传者" width="140" />
+        <el-table-column label="上传者" width="140">
+          <template #default="{ row }">{{ uploaderLabel(row) }}</template>
+        </el-table-column>
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -105,7 +107,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="size" label="规模" width="140" />
-        <el-table-column prop="uploaderId" label="上传者" width="140" />
+        <el-table-column label="上传者" width="140">
+          <template #default="{ row }">{{ uploaderLabel(row) }}</template>
+        </el-table-column>
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -149,7 +153,9 @@
             {{ formatMetricTaskTypes(row.taskTypes) }}
           </template>
         </el-table-column>
-        <el-table-column prop="uploaderId" label="上传者" width="140" />
+        <el-table-column label="上传者" width="140">
+          <template #default="{ row }">{{ uploaderLabel(row) }}</template>
+        </el-table-column>
         <el-table-column prop="downloadCount" label="下载量" width="100" />
         <el-table-column prop="createdAt" label="发布时间" width="180" />
         <el-table-column label="操作" width="190">
@@ -177,7 +183,7 @@
         <div class="detail-summary">
           <div class="detail-name">{{ detailItem.name }}</div>
           <div class="detail-meta">
-            <span>上传者：{{ detailItem.uploaderId || "-" }}</span>
+            <span>上传者：{{ uploaderLabel(detailItem) }}</span>
             <span>下载量：{{ detailItem.downloadCount ?? 0 }}</span>
             <span>发布时间：{{ detailItem.createdAt || "-" }}</span>
           </div>
@@ -402,6 +408,7 @@ function mapAlgorithm(x) {
     downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     uploaderId: String(x.owner_id || ""),
+    uploaderName: String(x.owner_display_name || x.owner_id || ""),
     createdAt: formatTs(x.created_at),
     raw: x,
   };
@@ -418,6 +425,7 @@ function mapDataset(x) {
     downloadCount: Number(x.download_count || 0),
     visibility: x.visibility || "private",
     uploaderId: String(x.owner_id || ""),
+    uploaderName: String(x.owner_display_name || x.owner_id || ""),
     taskTypes: Array.isArray(x.task_types) ? x.task_types : [],
     meta,
     createdAt: formatTs(x.created_at),
@@ -460,11 +468,20 @@ function mapMetric(x) {
     visibility: String(x.visibility || "private"),
     allowDownload: Boolean(x.allow_download),
     uploaderId: String(x.owner_id || ""),
+    uploaderName: String(x.owner_display_name || x.owner_id || ""),
     sourceOwnerId: String(x.source_owner_id || ""),
     sourceMetricId: String(x.source_metric_id || ""),
     createdAt: formatTs(x.created_at),
     raw: x,
   };
+}
+
+function uploaderLabel(row) {
+  const name = String(row?.uploaderName || "").trim();
+  if (name) return name;
+  const id = String(row?.uploaderId || "").trim();
+  if (!id) return "-";
+  return id === "system" ? "系统" : id;
 }
 
 async function loadCommunity() {
@@ -974,7 +991,7 @@ const filteredAlgorithms = computed(() => {
   const items = publicAlgorithms.value.filter((item) => {
     if (taskFilter.value && item.task !== taskFilter.value) return false;
     if (implFilter.value && item.impl !== implFilter.value) return false;
-    return byKeyword([item.name, item.id, item.task, item.impl, item.version, item.description, item.uploaderId, item.downloadCount]);
+    return byKeyword([item.name, item.id, item.task, item.impl, item.version, item.description, item.uploaderId, item.uploaderName, item.downloadCount]);
   });
   return sortItems(items);
 });
@@ -993,6 +1010,7 @@ const filteredDatasets = computed(() => {
       item.size,
       item.description,
       item.uploaderId,
+      item.uploaderName,
       item.downloadCount,
     ]);
   });
@@ -1011,6 +1029,7 @@ const filteredMetrics = computed(() => {
       formatMetricTaskTypes(item.taskTypes),
       item.description,
       item.uploaderId,
+      item.uploaderName,
       item.downloadCount,
     ]);
   });

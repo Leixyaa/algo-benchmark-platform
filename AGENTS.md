@@ -22,7 +22,7 @@
 - 目录：`web/`
 - 技术栈：Vue3 + Vite、Pinia、Element Plus、XLSX
 - 关键页面：
-  - `views/Datasets.vue`：数据集管理
+  - `views/Datasets.vue`：数据集
   - `views/Algorithms.vue`：算法管理
   - `views/NewRun.vue` / `views/Runs.vue`：运行创建与状态追踪
   - `views/Compare.vue`：指标对比、推荐、导出（含快速选型接入）
@@ -46,7 +46,7 @@
 
 ## 3. 毕设目标与验收口径
 - 目标：完成图像/视频增强复原评测平台，支持快速选型与可追溯导出。
-- 主线闭环：数据集管理 → 运行创建 → 异步执行 → 指标计算 → 对比推荐 → 导出归档。
+- 主线闭环：数据集 → 运行创建 → 异步执行 → 指标计算 → 对比推荐 → 导出归档。
 - 最低验收：
   - 图像 5 类任务 + 视频 2 类任务可运行
   - Run 生命周期与取消一致性完整
