@@ -2,25 +2,36 @@
   "name": "algo-benchmark-platform-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Minimal Electron shell for algo-benchmark-platform",
+  "description": "Desktop runtime for algo-benchmark-platform",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build:web": "npm --prefix ../web run build:desktop",
     "pack": "npm run build:web && electron-builder --dir",
+    "pack:strong": "npm run build:web && electron-builder --dir --config.directories.output=release-strong && node postpack.js release-strong/win-unpacked",
+    "pack:portable": "npm run build:web && node pack-portable.js",
     "dist": "npm run build:web && electron-builder"
   },
   "build": {
     "appId": "com.abp.desktop",
     "productName": "Algo Benchmark Platform Desktop",
+    "asar": true,
     "directories": {
       "output": "release"
     },
     "files": [
       "main.js",
+      "pack-portable.js",
+      "postpack.js",
       "splash.html",
       "package.json"
     ],
+    "win": {
+      "target": [
+        "dir"
+      ],
+      "executableName": "Algo Benchmark Platform Desktop"
+    },
     "extraMetadata": {
       "main": "main.js"
     }

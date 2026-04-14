@@ -6,7 +6,28 @@ const path = require("path");
 const API_URL = process.env.ABP_DESKTOP_API_URL || "http://127.0.0.1:8001/docs";
 const STARTUP_TIMEOUT_MS = 120000;
 const RETRY_INTERVAL_MS = 1500;
-const REPO_ROOT = path.resolve(__dirname, "..");
+const PRODUCT_NAME = "Algo Benchmark Platform Desktop";
+
+function detectRepoRoot() {
+  const candidates = [
+    process.env.ABP_DESKTOP_REPO_ROOT,
+    path.resolve(__dirname, ".."),
+    path.resolve(process.execPath, "..", "..", ".."),
+    path.resolve(process.execPath, "..", "..", "..", ".."),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const backendCandidate = path.join(candidate, "backend");
+    const webCandidate = path.join(candidate, "web");
+    if (fs.existsSync(backendCandidate) && fs.existsSync(webCandidate)) {
+      return candidate;
+    }
+  }
+
+  return path.resolve(__dirname, "..");
+}
+
+const REPO_ROOT = detectRepoRoot();
 const GUIDE_PATH = path.join(REPO_ROOT, "docs", "desktop-quickstart.md");
 const FRONTEND_INDEX = path.join(REPO_ROOT, "web", "dist-desktop", "index.html");
 const BACKEND_DIR = path.join(REPO_ROOT, "backend");
@@ -39,7 +60,7 @@ function createWindow() {
     minHeight: 760,
     autoHideMenuBar: true,
     backgroundColor: "#f4f6fb",
-    title: "Algo Benchmark Platform Desktop",
+    title: PRODUCT_NAME,
     webPreferences: {
       contextIsolation: true,
       sandbox: true,

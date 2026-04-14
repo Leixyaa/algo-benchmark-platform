@@ -27,6 +27,17 @@ Recommended command:
 powershell -ExecutionPolicy Bypass -File .\scripts\manual_up_desktop.ps1
 ```
 
+If you want the stronger Electron desktop executable, build the portable package with:
+
+```powershell
+cd desktop
+npm run pack:portable
+```
+
+After that, the Electron executable will be available at:
+
+`desktop/release-portable/win-portable/Algo Benchmark Platform Desktop.exe`
+
 If Redis is already running, you can skip it:
 
 ```powershell
@@ -61,6 +72,16 @@ Electron then starts:
 The desktop UI itself is loaded from the local file build:
 
 `web/dist-desktop/index.html`
+
+## Stronger Desktop Build
+
+The repository now also supports a stronger portable Electron build:
+
+- build command: `desktop/npm run pack:portable`
+- output directory: `desktop/release-portable/win-portable/`
+- executable: `Algo Benchmark Platform Desktop.exe`
+
+This portable Electron build is closer to a true desktop application than the browser-based fallback window.
 
 ## Current Scope
 

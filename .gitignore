@@ -44,6 +44,9 @@ backend/**/*.zip
 # ===== Desktop / 本地构建产物（可重新生成）=====
 web/dist-desktop/
 release/
+desktop/release/
+desktop/release-portable/
+desktop/release-strong/
 
 # ===== 环境变量与本地覆盖（勿提交密钥与机器相关路径）=====
 # 根目录已有 .env；以下为常见变体与桌面专用配置

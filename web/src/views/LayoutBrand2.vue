@@ -11,7 +11,7 @@
 
       <el-menu :default-active="active" router class="menu">
         <el-menu-item index="/community">社区中心</el-menu-item>
-        <el-menu-item index="/datasets">数据集管理</el-menu-item>
+        <el-menu-item index="/datasets">数据集</el-menu-item>
         <el-menu-item index="/algorithms">算法库</el-menu-item>
         <el-menu-item index="/metrics">指标库</el-menu-item>
         <el-menu-item index="/new-run">发起评测</el-menu-item>
@@ -112,7 +112,7 @@ const unreadCount = computed(() => (Array.isArray(store.notices) ? store.notices
 const title = computed(() => {
   const map = {
     "/community": "社区中心",
-    "/datasets": "数据集管理",
+    "/datasets": "数据集",
     "/algorithms": "算法库",
     "/metrics": "指标库",
     "/new-run": "发起评测",

@@ -53,6 +53,7 @@ $mysqlScript = Join-Path $repoRoot "scripts\start_docker_mysql.ps1"
 $electronExe = Join-Path $desktopDir "node_modules\electron\dist\electron.exe"
 $edgeExe = Get-EdgePath
 $desktopIndex = Join-Path $webDir "dist-desktop\index.html"
+$desktopWebPort = 4173
 $desktopDataDir = Join-Path $backendDir "data\desktop"
 $desktopDbPath = Join-Path $desktopDataDir "abp-desktop.db"
 $mySqlRootPassword = $env:ABP_MYSQL_ROOT_PASSWORD
@@ -139,7 +140,6 @@ if (Test-Path -LiteralPath $electronExe) {
     -CommandText "`$env:ABP_DESKTOP_WORKER_COUNT = '$WorkerCount'`r`n`$env:ABP_DESKTOP_DB_MODE = '$desktopDbMode'`r`nnpm start"
 } elseif ($edgeExe) {
   Write-Host "Electron runtime not found. Falling back to Edge app mode."
-  $desktopUri = Get-FileUri $desktopIndex
   $desktopSqlUrl = if ($UseMySQL) {
     $encodedMySqlRootPassword = [Uri]::EscapeDataString($mySqlRootPassword)
     "mysql+pymysql://root:${encodedMySqlRootPassword}@127.0.0.1:3306/algo_benchmark?charset=utf8mb4"
@@ -160,8 +160,11 @@ if (Test-Path -LiteralPath $electronExe) {
       Write-Host "  cd $backendDir"
       Write-Host "  .\.venv\Scripts\python.exe -m celery -A app.celery_app:celery_app worker -P solo -l info -n desktop_worker_$i"
     }
+    Write-Host "Starting ABP - Desktop Web"
+    Write-Host "  cd $(Join-Path $webDir 'dist-desktop')"
+    Write-Host "  $venvPy -m http.server $desktopWebPort --bind 127.0.0.1"
     Write-Host "Starting ABP - Desktop (Edge App Mode)"
-    Write-Host "  $edgeExe --app=$desktopUri --window-size=1440,920"
+    Write-Host "  $edgeExe --app=http://127.0.0.1:$desktopWebPort --window-size=1440,920"
   } else {
     Start-ServiceWindow `
       -Title "ABP - Backend API" `
@@ -173,7 +176,11 @@ if (Test-Path -LiteralPath $electronExe) {
         -WorkingDir $backendDir `
         -CommandText "$desktopEnv`r`n.\.venv\Scripts\python.exe -m celery -A app.celery_app:celery_app worker -P solo -l info -n desktop_worker_$i"
     }
-    Start-Process -FilePath $edgeExe -ArgumentList "--app=$desktopUri", "--window-size=1440,920" | Out-Null
+    Start-ServiceWindow `
+      -Title "ABP - Desktop Web" `
+      -WorkingDir (Join-Path $webDir "dist-desktop") `
+      -CommandText "$venvPy -m http.server $desktopWebPort --bind 127.0.0.1"
+    Start-Process -FilePath $edgeExe -ArgumentList "--app=http://127.0.0.1:$desktopWebPort", "--window-size=1440,920" | Out-Null
   }
 } else {
   Write-Host "Neither Electron nor Microsoft Edge is available."
