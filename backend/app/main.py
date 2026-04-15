@@ -139,6 +139,7 @@ from .tasks import execute_run
 from . import errors as err, sql_store
 from .metric_runtime import validate_python_metric_code
 from .vision.dataset_access import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos, resolve_dataset_dir
+from .vision.dataset_io import resolve_gt_dir_under
 
 import cv2
 
@@ -2213,7 +2214,7 @@ def _merge_tree(src_root: Path, dst_root: Path, overwrite: bool) -> None:
 def _normalize_dataset_import_layout(ds_dir: Path, overwrite: bool) -> None:
     if (ds_dir / "gt").exists():
         return
-    marker_dirs = ("gt", "hazy", "noisy", "blur", "lr", "dark")
+    marker_dirs = ("gt", "hazy", "noisy", "blur", "lr", "dark", "clear")
     candidates = []
     for p in ds_dir.rglob("*"):
         if not p.is_dir():
@@ -2330,19 +2331,10 @@ def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tu
     # 濡傛灉鐢ㄦ埛鐩綍涓嶅瓨鍦紝灏濊瘯浣跨敤鏃х殑鐩綍缁撴瀯锛堢洿鎺ュ湪data涓嬶級
     if not ds_dir.exists():
         ds_dir = data_root / dataset_id
-    
-    gt_dir = ds_dir / "gt"
-    if not gt_dir.exists():
-        # 妫€鏌ユ槸鍚﹀瓨鍦ㄥ叾浠栧彲鑳界殑GT鐩綍鍚嶇О
-        possible_gt_dirs = ["groundtruth", "reference", "target"]
-        for dir_name in possible_gt_dirs:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            # 娌℃湁鎵惧埌GT鐩綍
-            return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
+
+    gt_dir = resolve_gt_dir_under(ds_dir, "gt")
+    if gt_dir is None:
+        return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
     from .vision.dataset_io import IMG_EXTS, VIDEO_EXTS, count_paired_images, count_paired_videos
 
     input_dir_by_task = {
@@ -2357,8 +2349,17 @@ def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tu
     counts_by_dir = {}
     gt_img_count = 0
     gt_video_count = 0
+    for p in gt_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        suf = p.suffix.lower()
+        if suf in IMG_EXTS:
+            gt_img_count += 1
+        elif suf in VIDEO_EXTS:
+            gt_video_count += 1
+    counts_by_dir = {"gt": gt_img_count + gt_video_count}
 
-    for d in {"gt", *input_dir_by_task.values()}:
+    for d in input_dir_by_task.values():
         dd = ds_dir / d
         total = 0
         if dd.exists():
@@ -2366,14 +2367,8 @@ def _scan_dataset_on_disk(data_root: Path, owner_id: str, dataset_id: str) -> tu
                 if not p.is_file():
                     continue
                 suf = p.suffix.lower()
-                if suf in IMG_EXTS:
+                if suf in IMG_EXTS or suf in VIDEO_EXTS:
                     total += 1
-                    if d == "gt":
-                        gt_img_count += 1
-                elif suf in VIDEO_EXTS:
-                    total += 1
-                    if d == "gt":
-                        gt_video_count += 1
         counts_by_dir[d] = total
     pairs_by_task = {
         "dehaze": count_paired_images(data_root=data_root, owner_id=owner_id, dataset_id=dataset_id, input_dirname="hazy", gt_dirname="gt"),
@@ -4077,6 +4072,7 @@ def _increment_dataset_version(r, dataset_id: str) -> int:
 
 def _get_dataset_fs_hash(owner_id: str, dataset_id: str) -> str:
     """计算数据集文件系统哈希，用于检测文件变化。"""
+    data_root = _dataset_storage_root()
     # 优先使用用户独立目录结构
     user_dir = data_root / owner_id
     ds_dir = user_dir / dataset_id
@@ -4128,15 +4124,9 @@ def _get_dataset_fs_hash_by_dir(ds_dir: Path) -> str:
 
 
 def _scan_dataset_dir_on_disk(ds_dir: Path) -> tuple[str, str, dict]:
-    gt_dir = ds_dir / "gt"
-    if not gt_dir.exists():
-        for dir_name in ["groundtruth", "reference", "target"]:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
+    gt_dir = resolve_gt_dir_under(ds_dir, "gt")
+    if gt_dir is None:
+        return "图像", "0 张", {"supported_task_types": [], "pairs_by_task": {}, "counts_by_dir": {}}
 
     input_dir_by_task = {
         "dehaze": "hazy",
@@ -4147,11 +4137,19 @@ def _scan_dataset_dir_on_disk(ds_dir: Path) -> tuple[str, str, dict]:
         "video_denoise": "noisy",
         "video_sr": "lr",
     }
-    counts_by_dir = {}
     gt_img_count = 0
     gt_video_count = 0
+    for p in gt_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        suf = p.suffix.lower()
+        if suf in IMG_EXTS:
+            gt_img_count += 1
+        elif suf in VIDEO_EXTS:
+            gt_video_count += 1
+    counts_by_dir: dict[str, int] = {"gt": gt_img_count + gt_video_count}
 
-    for d in {"gt", *input_dir_by_task.values()}:
+    for d in input_dir_by_task.values():
         dd = ds_dir / d
         total = 0
         if dd.exists():
@@ -4159,14 +4157,8 @@ def _scan_dataset_dir_on_disk(ds_dir: Path) -> tuple[str, str, dict]:
                 if not p.is_file():
                     continue
                 suf = p.suffix.lower()
-                if suf in IMG_EXTS:
+                if suf in IMG_EXTS or suf in VIDEO_EXTS:
                     total += 1
-                    if d == "gt":
-                        gt_img_count += 1
-                elif suf in VIDEO_EXTS:
-                    total += 1
-                    if d == "gt":
-                        gt_video_count += 1
         counts_by_dir[d] = total
 
     pairs_by_task = {

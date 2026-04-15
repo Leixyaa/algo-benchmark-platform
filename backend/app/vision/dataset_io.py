@@ -10,6 +10,20 @@ import re
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
+# RESIDE 等常用 clear/ 作为无雾真值；与 gt/ 等价参与配对与扫描
+_FALLBACK_GT_DIR_NAMES = ("groundtruth", "reference", "target", "clear")
+
+
+def resolve_gt_dir_under(ds_dir: Path, primary: str = "gt") -> Path | None:
+    primary_path = ds_dir / primary
+    if primary_path.is_dir():
+        return primary_path
+    for name in _FALLBACK_GT_DIR_NAMES:
+        alt = ds_dir / name
+        if alt.is_dir():
+            return alt
+    return None
+
 
 @dataclass
 class PairedImage:
@@ -62,6 +76,9 @@ def _pair_token_full(name: str) -> str:
     stem = re.sub(r"^(input|src|img|image|frame)[_-]?", "", stem)
     stem = re.sub(r"[_-]?(hazy|noisy|blur|blurry|dark|lowlight|lr|lq|input|src)$", "", stem)
     stem = stem.strip("_- ")
+    # RESIDE SOTS indoor (nyuhaze500)：1400_1 / 1400_10 等同一场景，对应 GT 1400.png
+    if re.fullmatch(r"\d+_\d+", stem):
+        stem = stem.rsplit("_", 1)[0]
     return re.sub(r"[^a-z0-9]+", "", stem)
 
 
@@ -157,20 +174,10 @@ def find_paired_images(
         ds_dir = data_root / dataset_id
     
     input_dir = ds_dir / input_dirname
-    gt_dir = ds_dir / gt_dirname
-    
-    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
-    if not gt_dir.exists():
-        possible_gt_dirs = ["groundtruth", "reference", "target"]
-        for dir_name in possible_gt_dirs:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            # 没有找到GT目录
-            return []
-    
+    gt_dir = resolve_gt_dir_under(ds_dir, gt_dirname)
+    if gt_dir is None:
+        return []
+
     if not input_dir.exists():
         return []
 
@@ -190,14 +197,12 @@ def find_paired_images(
         return []
 
     pairs: List[PairedImage] = []
-    used_gt = set()
     scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
     for ip in sorted(input_files)[:scan_cap]:
-        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()) - used_gt)
+        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()))
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_img(gp):
             pairs.append(PairedImage(input_path=ip, gt_path=gp, name=ip.name))
-            used_gt.add(k)
             if limit is not None and len(pairs) >= limit:
                 break
 
@@ -224,20 +229,10 @@ def count_paired_images(
         ds_dir = data_root / dataset_id
     
     input_dir = ds_dir / input_dirname
-    gt_dir = ds_dir / gt_dirname
-    
-    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
-    if not gt_dir.exists():
-        possible_gt_dirs = ["groundtruth", "reference", "target"]
-        for dir_name in possible_gt_dirs:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            # 没有找到GT目录
-            return 0
-    
+    gt_dir = resolve_gt_dir_under(ds_dir, gt_dirname)
+    if gt_dir is None:
+        return 0
+
     if not input_dir.exists():
         return 0
 
@@ -247,14 +242,12 @@ def count_paired_images(
         return 0
 
     n = 0
-    used_gt = set()
     for ip in input_dir.rglob("*"):
         if not _is_img(ip):
             continue
-        k = _best_fuzzy_match(ip.name, gt_keys - used_gt)
+        k = _best_fuzzy_match(ip.name, gt_keys)
         if k:
             n += 1
-            used_gt.add(k)
     return n
 
 
@@ -275,20 +268,10 @@ def find_paired_videos(
         ds_dir = data_root / dataset_id
     
     input_dir = ds_dir / input_dirname
-    gt_dir = ds_dir / gt_dirname
-    
-    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
-    if not gt_dir.exists():
-        possible_gt_dirs = ["groundtruth", "reference", "target"]
-        for dir_name in possible_gt_dirs:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            # 没有找到GT目录
-            return []
-    
+    gt_dir = resolve_gt_dir_under(ds_dir, gt_dirname)
+    if gt_dir is None:
+        return []
+
     if not input_dir.exists():
         return []
 
@@ -308,14 +291,12 @@ def find_paired_videos(
         return []
 
     pairs: List[PairedVideo] = []
-    used_gt = set()
     scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
     for ip in sorted(input_files)[:scan_cap]:
-        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()) - used_gt)
+        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()))
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_video(gp):
             pairs.append(PairedVideo(input_path=ip, gt_path=gp, name=ip.name))
-            used_gt.add(k)
             if limit is not None and len(pairs) >= limit:
                 break
     return pairs
@@ -337,20 +318,10 @@ def count_paired_videos(
         ds_dir = data_root / dataset_id
     
     input_dir = ds_dir / input_dirname
-    gt_dir = ds_dir / gt_dirname
-    
-    # 检查GT目录是否存在，如果不存在，尝试其他可能的GT目录名称
-    if not gt_dir.exists():
-        possible_gt_dirs = ["groundtruth", "reference", "target"]
-        for dir_name in possible_gt_dirs:
-            alt_gt_dir = ds_dir / dir_name
-            if alt_gt_dir.exists():
-                gt_dir = alt_gt_dir
-                break
-        else:
-            # 没有找到GT目录
-            return 0
-    
+    gt_dir = resolve_gt_dir_under(ds_dir, gt_dirname)
+    if gt_dir is None:
+        return 0
+
     if not input_dir.exists():
         return 0
 
@@ -360,12 +331,10 @@ def count_paired_videos(
         return 0
 
     n = 0
-    used_gt = set()
     for ip in input_dir.rglob("*"):
         if not _is_video(ip):
             continue
-        k = _best_fuzzy_match(ip.name, gt_keys - used_gt)
+        k = _best_fuzzy_match(ip.name, gt_keys)
         if k:
             n += 1
-            used_gt.add(k)
     return n
