@@ -365,7 +365,7 @@
           <div v-for="comment in detailComments" :key="comment.commentId" class="comment-item">
             <div class="comment-head">
               <div class="comment-head-left">
-                <span class="comment-author">{{ comment.authorId }}</span>
+                <span class="comment-author">{{ comment.authorName || comment.authorId }}</span>
                 <span class="comment-time">{{ comment.createdAt }}</span>
               </div>
               <el-button
@@ -597,6 +597,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { adminApi } from "../api/admin";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
 import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
+import { markCommunityChanged } from "../utils/communityChange";
 
 const store = useAppStore();
 
@@ -655,6 +656,15 @@ const submissionReviewStatus = ref("approved");
 const submissionReviewRuntimeReady = ref(false);
 const submissionReviewNote = ref("");
 const submissionReviewSubmitting = ref(false);
+const loadedResources = ref({
+  users: false,
+  algorithms: false,
+  datasets: false,
+  metrics: false,
+  submissions: false,
+  comments: false,
+  reports: false,
+});
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -798,6 +808,7 @@ function mapComment(x) {
     resourceTypeLabel: resourceType === "algorithm" ? "算法" : "数据集",
     resourceId: x.resource_id,
     authorId: x.author_id,
+    authorName: String(x.author_display_name || x.author_id || ""),
     content: x.content,
     createdAt: formatTs(x.created_at),
   };
@@ -957,39 +968,79 @@ const detailComments = computed(() =>
   )
 );
 
-async function loadAll() {
+async function ensureRegisteredUsersLoaded(force = false) {
+  if (store.user.role !== "admin") return;
+  if (!force && loadedResources.value.users) return;
+  const userRes = await adminApi.listRegisteredUsers();
+  registeredUsers.value = (userRes || []).map((x) => ({
+    username: String(x.username || ""),
+    displayName: String(x.display_name || ""),
+    role: String(x.role || "user"),
+    createdAt: formatTs(x.created_at),
+  }));
+  loadedResources.value.users = true;
+}
+
+async function ensureCommentsLoaded(force = false) {
+  if (store.user.role !== "admin") return;
+  if (!force && loadedResources.value.comments) return;
+  const commentRes = await adminApi.listComments();
+  comments.value = (commentRes || []).map(mapComment);
+  loadedResources.value.comments = true;
+}
+
+async function ensureTabData(tabName, force = false) {
   if (store.user.role !== "admin") {
     adminDataLoading.value = false;
     return;
   }
   adminDataLoading.value = true;
   try {
-    const [userRes, algRes, dsRes, metricRes, submissionRes, commentRes, reportRes] = await Promise.all([
-      adminApi.listRegisteredUsers(),
-      adminApi.listCommunityAlgorithms(),
-      adminApi.listCommunityDatasets(),
-      adminApi.listMetrics(),
-      adminApi.listAlgorithmSubmissions(),
-      adminApi.listComments(),
-      adminApi.listReports(),
-    ]);
-    registeredUsers.value = (userRes || []).map((x) => ({
-      username: String(x.username || ""),
-      displayName: String(x.display_name || ""),
-      role: String(x.role || "user"),
-      createdAt: formatTs(x.created_at),
-    }));
-    algorithms.value = (algRes || []).map(mapAlgorithm);
-    datasets.value = (dsRes || []).map(mapDataset);
-    metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
-    algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
-    comments.value = (commentRes || []).map(mapComment);
-    reports.value = (reportRes || []).map(mapReport);
+    await ensureRegisteredUsersLoaded(force);
+    if (tabName === "users") return;
+    if (tabName === "algorithms") {
+      if (!force && loadedResources.value.algorithms) return;
+      const algRes = await adminApi.listCommunityAlgorithms();
+      algorithms.value = (algRes || []).map(mapAlgorithm);
+      loadedResources.value.algorithms = true;
+      return;
+    }
+    if (tabName === "datasets") {
+      if (!force && loadedResources.value.datasets) return;
+      const dsRes = await adminApi.listCommunityDatasets();
+      datasets.value = (dsRes || []).map(mapDataset);
+      loadedResources.value.datasets = true;
+      return;
+    }
+    if (tabName === "metrics" || tabName === "metric-logs") {
+      if (!force && loadedResources.value.metrics) return;
+      const metricRes = await adminApi.listMetrics();
+      metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
+      loadedResources.value.metrics = true;
+      return;
+    }
+    if (tabName === "algorithm-submissions" || tabName === "algorithm-submission-logs") {
+      if (!force && loadedResources.value.submissions) return;
+      const submissionRes = await adminApi.listAlgorithmSubmissions();
+      algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
+      loadedResources.value.submissions = true;
+      return;
+    }
+    if (tabName === "reports" || tabName === "report-logs") {
+      if (!force && loadedResources.value.reports) return;
+      const reportRes = await adminApi.listReports();
+      reports.value = (reportRes || []).map(mapReport);
+      loadedResources.value.reports = true;
+    }
   } catch (e) {
     ElMessage({ type: "error", message: `加载管理数据失败：${e?.message || e}` });
   } finally {
     adminDataLoading.value = false;
   }
+}
+
+async function loadAll(force = false) {
+  await ensureTabData(tab.value, force);
 }
 
 async function deleteRegisteredUserRow(row) {
@@ -1010,7 +1061,8 @@ async function deleteRegisteredUserRow(row) {
   try {
     await adminApi.deleteRegisteredUser(u);
     ElMessage.success("用户已删除");
-    await loadAll();
+    loadedResources.value.users = false;
+    await ensureRegisteredUsersLoaded(true);
   } catch (e) {
     ElMessage.error(e?.message || "删除用户失败");
   } finally {
@@ -1025,6 +1077,7 @@ function openResourceDetail(type, row) {
   detailType.value = type;
   detailItem.value = row;
   detailVisible.value = true;
+  void ensureCommentsLoaded();
 }
 
 async function takedownAlgorithm(row) {
@@ -1032,6 +1085,7 @@ async function takedownAlgorithm(row) {
     setLoading(loadingAlgorithmIds, row.id, true);
     await adminApi.takedownAlgorithm(row.id);
     algorithms.value = algorithms.value.filter((item) => item.id !== row.id);
+    markCommunityChanged("admin_takedown_algorithm");
     ElMessage.success("算法已下架");
   } catch (e) {
     ElMessage.error(e?.message || "算法下架失败");
@@ -1045,8 +1099,9 @@ async function promoteCommunityAlgorithm(row) {
   try {
     setLoading(promotingAlgorithmIds, row.id, true);
     await adminApi.promoteCommunityAlgorithm(row.id);
+    loadedResources.value.algorithms = false;
     await Promise.all([
-      loadAll(),
+      ensureTabData("algorithms", true),
       store.fetchAlgorithms(500, { force: true }),
     ]);
     ElMessage.success("已收录为平台算法");
@@ -1204,7 +1259,9 @@ async function takedownDataset(row) {
   try {
     setLoading(loadingDatasetIds, row.id, true);
     await adminApi.takedownDataset(row.id);
-    await loadAll();
+    loadedResources.value.datasets = false;
+    await ensureTabData("datasets", true);
+    markCommunityChanged("admin_takedown_dataset");
     ElMessage.success("数据集已下架");
   } catch (e) {
     ElMessage.error(e?.message || "数据集下架失败");
@@ -1243,6 +1300,7 @@ function openReportProcess(row) {
   reportTargetComment.value = null;
   reportProcessVisible.value = true;
   reportProcessNote.value = getReportProcessTemplate(reportProcessAction.value);
+  void ensureCommentsLoaded();
   loadReportTargetDetail(row);
 }
 
@@ -1320,15 +1378,18 @@ async function submitReportProcess() {
     if (action === "takedown_algorithm") {
       await adminApi.takedownAlgorithm(row.targetId);
       algorithms.value = algorithms.value.filter((item) => item.id !== row.targetId);
+      markCommunityChanged("admin_report_takedown_algorithm");
     } else if (action === "takedown_dataset") {
       await adminApi.takedownDataset(row.targetId);
       datasets.value = datasets.value.filter((item) => item.id !== row.targetId);
+      markCommunityChanged("admin_report_takedown_dataset");
     } else if (action === "delete_comment") {
       await adminApi.deleteComment(row.resourceType, row.resourceId, row.targetId);
       comments.value = comments.value.filter((item) => item.commentId !== row.targetId);
       if (reportTargetComment.value?.commentId === row.targetId) {
         reportTargetComment.value = null;
       }
+      markCommunityChanged("admin_report_delete_comment");
     }
 
     const status = action === "reject" ? "rejected" : "resolved";
@@ -1368,7 +1429,13 @@ async function clearHandledReports() {
   }
 }
 
-onMounted(loadAll);
+watch(tab, (next) => {
+  void ensureTabData(next);
+});
+
+onMounted(() => {
+  void loadAll();
+});
 </script>
 
 <style scoped>

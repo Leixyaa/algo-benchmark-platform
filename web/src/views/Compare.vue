@@ -217,10 +217,17 @@ const availableRankMetrics = computed(() => {
     { value: "niqe", label: "NIQE", direction: "lower_better" },
     { value: "time", label: "耗时", direction: "lower_better" },
   ];
+  const selectedTaskType = mapTaskLabelToType(task.value);
+  const taskSelected = Boolean(selectedTaskType);
   const seen = new Set(base.map((item) => item.value));
   for (const item of store.metricsCatalog || []) {
     const metricKey = String(item?.metricKey || "").trim();
     if (!metricKey || PLATFORM_DEFAULT_METRICS.includes(metricKey.toUpperCase()) || seen.has(metricKey)) continue;
+    if (!taskSelected) continue;
+    if (String(item?.status || "").toLowerCase() !== "approved") continue;
+    if (!item?.runtimeReady) continue;
+    const metricTaskTypes = Array.isArray(item?.taskTypes) ? item.taskTypes.map((x) => String(x || "").trim()) : [];
+    if (metricTaskTypes.length && !metricTaskTypes.includes(selectedTaskType)) continue;
     base.push({ value: metricKey, label: item.displayName || item.name || metricKey, direction: String(item.direction || "higher_better") });
     seen.add(metricKey);
   }

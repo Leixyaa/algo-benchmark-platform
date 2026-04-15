@@ -68,6 +68,14 @@ def _pair_token(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", stem)
 
 
+def _pair_number_token(name: str) -> str:
+    stem = Path(name).stem.strip().lower()
+    if not stem:
+        return ""
+    m = re.search(r"\d+", stem)
+    return m.group(0) if m else ""
+
+
 def _pair_token_full(name: str) -> str:
     stem = Path(name).stem.strip().lower()
     if not stem:
@@ -137,19 +145,29 @@ def _best_fuzzy_match(input_name: str, gt_candidates: set[str]) -> str | None:
             best_score = score
             best_name = g
             
-    # 如果初步匹配得分不够高（低于 70%），尝试反向匹配
-    if not best_name or best_score < 7000:
-        for g in gt_candidates:
-            score = _fuzzy_match_score(g, input_token)
-            if score > best_score:
-                best_score = score
-                best_name = g
-                
-    # 降低匹配阈值，提高匹配成功率
-    if best_score < 2000:
+    # 保持较高阈值，避免不同样本被错误配对导致指标失真
+    if best_score < 7000:
         return None
         
     return best_name
+
+
+def _pick_gt_token(
+    input_name: str,
+    gt_tokens: set[str],
+    gt_by_number_unique: dict[str, str],
+    *,
+    allow_fuzzy: bool,
+) -> str | None:
+    full = _pair_token_full(input_name)
+    if full and full in gt_tokens:
+        return full
+    number = _pair_number_token(input_name)
+    if number and number in gt_by_number_unique:
+        return gt_by_number_unique[number]
+    if not allow_fuzzy:
+        return None
+    return _best_fuzzy_match(input_name, gt_tokens)
 
 
 def find_paired_images(
@@ -195,11 +213,19 @@ def find_paired_images(
         gt_by_token[k] = gp
     if not gt_by_token:
         return []
+    gt_tokens = set(gt_by_token.keys())
+    gt_by_number: dict[str, list[str]] = {}
+    for token in gt_tokens:
+        m = re.search(r"\d+", token)
+        if not m:
+            continue
+        gt_by_number.setdefault(m.group(0), []).append(token)
+    gt_by_number_unique = {k: v[0] for k, v in gt_by_number.items() if len(v) == 1}
 
     pairs: List[PairedImage] = []
     scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
     for ip in sorted(input_files)[:scan_cap]:
-        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()))
+        k = _pick_gt_token(ip.name, gt_tokens, gt_by_number_unique, allow_fuzzy=True)
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_img(gp):
             pairs.append(PairedImage(input_path=ip, gt_path=gp, name=ip.name))
@@ -240,12 +266,20 @@ def count_paired_images(
     gt_keys.discard("")
     if not gt_keys:
         return 0
+    gt_by_number: dict[str, list[str]] = {}
+    for token in gt_keys:
+        m = re.search(r"\d+", token)
+        if not m:
+            continue
+        gt_by_number.setdefault(m.group(0), []).append(token)
+    gt_by_number_unique = {k: v[0] for k, v in gt_by_number.items() if len(v) == 1}
 
     n = 0
     for ip in input_dir.rglob("*"):
         if not _is_img(ip):
             continue
-        k = _best_fuzzy_match(ip.name, gt_keys)
+        # 计数阶段默认禁用模糊匹配，避免预览模式因全量模糊扫描导致耗时过长
+        k = _pick_gt_token(ip.name, gt_keys, gt_by_number_unique, allow_fuzzy=False)
         if k:
             n += 1
     return n
@@ -289,11 +323,19 @@ def find_paired_videos(
         gt_by_token[k] = gp
     if not gt_by_token:
         return []
+    gt_tokens = set(gt_by_token.keys())
+    gt_by_number: dict[str, list[str]] = {}
+    for token in gt_tokens:
+        m = re.search(r"\d+", token)
+        if not m:
+            continue
+        gt_by_number.setdefault(m.group(0), []).append(token)
+    gt_by_number_unique = {k: v[0] for k, v in gt_by_number.items() if len(v) == 1}
 
     pairs: List[PairedVideo] = []
     scan_cap = max(int(limit) * 5, 50) if limit is not None else len(input_files)
     for ip in sorted(input_files)[:scan_cap]:
-        k = _best_fuzzy_match(ip.name, set(gt_by_token.keys()))
+        k = _pick_gt_token(ip.name, gt_tokens, gt_by_number_unique, allow_fuzzy=True)
         gp = gt_by_token.get(k) if k else None
         if gp is not None and gp.exists() and _is_video(gp):
             pairs.append(PairedVideo(input_path=ip, gt_path=gp, name=ip.name))
@@ -329,12 +371,19 @@ def count_paired_videos(
     gt_keys.discard("")
     if not gt_keys:
         return 0
+    gt_by_number: dict[str, list[str]] = {}
+    for token in gt_keys:
+        m = re.search(r"\d+", token)
+        if not m:
+            continue
+        gt_by_number.setdefault(m.group(0), []).append(token)
+    gt_by_number_unique = {k: v[0] for k, v in gt_by_number.items() if len(v) == 1}
 
     n = 0
     for ip in input_dir.rglob("*"):
         if not _is_video(ip):
             continue
-        k = _best_fuzzy_match(ip.name, gt_keys)
+        k = _pick_gt_token(ip.name, gt_keys, gt_by_number_unique, allow_fuzzy=False)
         if k:
             n += 1
     return n

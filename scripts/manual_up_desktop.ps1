@@ -59,7 +59,7 @@ $desktopDbPath = Join-Path $desktopDataDir "abp-desktop.db"
 $mySqlRootPassword = $env:ABP_MYSQL_ROOT_PASSWORD
 
 if ([string]::IsNullOrWhiteSpace($mySqlRootPassword)) {
-  $mySqlRootPassword = "abp_mysql_123456"
+  $mySqlRootPassword = "123456"
 }
 
 if (-not (Test-Path -LiteralPath $desktopDir)) {

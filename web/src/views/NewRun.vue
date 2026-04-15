@@ -698,8 +698,15 @@ function applyPreset() {
   const presetAlgorithmIds = Array.isArray(p.algorithmIds) && p.algorithmIds.length
     ? p.algorithmIds
     : (p.algorithmId ? [p.algorithmId] : []);
-  form.algorithmIds = [...presetAlgorithmIds];
+  const validIdSet = new Set((filteredAlgorithms.value || []).map((item) => String(item?.id || "")));
+  const validPresetAlgorithmIds = presetAlgorithmIds.filter((id) => validIdSet.has(String(id || "")));
+  form.algorithmIds = [...validPresetAlgorithmIds];
   form.algorithmId = form.algorithmIds[0] || "";
+  if (presetAlgorithmIds.length && !validPresetAlgorithmIds.length) {
+    ElMessage({ type: "warning", message: "该预设中的算法已失效或不可用，请重新选择算法后再创建任务" });
+  } else if (validPresetAlgorithmIds.length !== presetAlgorithmIds.length) {
+    ElMessage({ type: "warning", message: "该预设包含部分失效算法，已自动剔除不可用项" });
+  }
   metrics.value = normalizeMetrics(p.metrics);
   const params = p.params && typeof p.params === "object" && !Array.isArray(p.params) ? p.params : {};
   form.paramSchemeKey = "__default__";
@@ -827,18 +834,40 @@ async function savePreset() {
 }
 
 async function removePreset() {
-  if (!form.presetId) return;
+  const presetId = String(form.presetId || "").trim();
+  if (!presetId) return;
   try {
     await ElMessageBox.confirm("确认删除当前预设吗？", "删除确认", {
       type: "warning",
       confirmButtonText: "删除",
       cancelButtonText: "取消",
     });
-    await store.removePreset(form.presetId);
+    await store.removePreset(presetId);
     form.presetId = "";
+    form.presetName = "";
+    await store.fetchPresets().catch(() => {});
     ElMessage({ type: "success", message: "预设已删除" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
+    const code = String(
+      e?.detail?.error_code ||
+      e?.data?.detail?.error_code ||
+      e?.error_code ||
+      ""
+    ).trim().toUpperCase();
+    const messageText = String(e?.message || e || "").toLowerCase();
+    const presetNotFound =
+      code === "E_PRESET_NOT_FOUND" ||
+      code === "PRESET_NOT_FOUND" ||
+      messageText.includes("preset_not_found") ||
+      messageText.includes("preset not found");
+    if (presetNotFound) {
+      form.presetId = "";
+      form.presetName = "";
+      await store.fetchPresets().catch(() => {});
+      ElMessage({ type: "info", message: "该预设已不存在，已自动同步列表" });
+      return;
+    }
     ElMessage({ type: "error", message: `删除预设失败：${e?.message || e}` });
   }
 }
@@ -850,6 +879,15 @@ function clearPreset() {
 }
 
 async function create() {
+  await store.fetchAlgorithms(500, { force: true }).catch(() => {});
+  const validIds = new Set((filteredAlgorithms.value || []).map((item) => String(item?.id || "")));
+  const nextAlgorithmIds = (form.algorithmIds || []).filter((id) => validIds.has(String(id || "")));
+  if (nextAlgorithmIds.length !== (form.algorithmIds || []).length) {
+    form.algorithmIds = nextAlgorithmIds;
+    form.algorithmId = nextAlgorithmIds[0] || "";
+    ElMessage({ type: "warning", message: "检测到部分算法已失效，已自动移除，请确认后重新创建" });
+    return;
+  }
   if (!form.algorithmIds.length) return ElMessage({ type: "warning", message: "请至少选择一个算法" });
   if (!form.datasetId) return ElMessage({ type: "warning", message: "请先选择数据集" });
   if (!metrics.value.length) return ElMessage({ type: "warning", message: "请至少选择一个指标" });
@@ -887,14 +925,9 @@ async function create() {
     const creationResults = [];
     const failures = [];
     const total = targetAlgorithmIds.length;
-    const concurrency = Math.min(4, Math.max(1, total));
-    let cursor = 0;
 
-    const progressTip = ElMessage({
-      type: "info",
-      message: `正在创建评测任务（0/${total}）...`,
-      duration: 0,
-    });
+    /** 顺序提交，避免多个 POST /runs 同时触发后端全量 reconcile+配对校验导致长时间无响应；进度文案按序更新 */
+    let progressTip = null;
 
     const createOne = async (algorithmId) => {
       const currentAlgorithm = store.algorithms.find((item) => item.id === algorithmId);
@@ -913,22 +946,24 @@ async function create() {
       creationResults.push(algorithmId);
     };
 
-    const workers = Array.from({ length: concurrency }, async () => {
-      while (true) {
-        const idx = cursor;
-        cursor += 1;
-        if (idx >= total) return;
-        const algorithmId = targetAlgorithmIds[idx];
+    try {
+      for (let i = 0; i < total; i++) {
+        const algorithmId = targetAlgorithmIds[i];
+        if (progressTip) progressTip.close();
+        progressTip = ElMessage({
+          type: "info",
+          message: `正在创建评测任务（第 ${i + 1}/${total} 个）...`,
+          duration: 0,
+        });
         try {
           await createOne(algorithmId);
         } catch (error) {
           failures.push({ algorithmId, error });
         }
       }
-    });
-
-    await Promise.all(workers);
-    progressTip.close();
+    } finally {
+      if (progressTip) progressTip.close();
+    }
 
     if (failures.length) {
       const first = failures[0] || {};

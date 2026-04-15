@@ -26,6 +26,18 @@ function browserDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function detectDownloadChannel() {
+  const ua = String(globalThis?.navigator?.userAgent || "").toLowerCase();
+  if (ua.includes("electron")) return "desktop";
+  return "browser";
+}
+
+export function buildDownloadSuccessMessage(result, assetLabel = "文件") {
+  if (result?.savedWithPicker) return `${assetLabel}已保存到你选择的位置`;
+  if (String(result?.channel || "") === "desktop") return `${assetLabel}下载完成，请在系统下载目录查看`;
+  return `${assetLabel}下载完成，浏览器已开始保存`;
+}
+
 async function readResponseBlob(res, onProgress) {
   const total = Number(res.headers.get("content-length") || 0);
   if (!res.body?.getReader) {
@@ -74,6 +86,7 @@ export async function downloadBinaryFile(path, fallbackName, options = {}) {
     throw new Error(`[${res.status}] GET ${path}${detail ? ` - ${detail}` : ""}`);
   }
   const filename = parseFilename(res.headers.get("content-disposition"), fallbackName);
+  const channel = detectDownloadChannel();
   const blobFallback = res.clone();
   let blob;
   try {
@@ -85,5 +98,5 @@ export async function downloadBinaryFile(path, fallbackName, options = {}) {
     }
   }
   browserDownload(blob, filename);
-  return { filename, savedWithPicker: false };
+  return { filename, savedWithPicker: false, channel };
 }

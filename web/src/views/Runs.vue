@@ -27,6 +27,16 @@
           </el-select>
           <el-input v-model="keyword" clearable placeholder="搜索算法、数据集、参数方案" class="filter-item search-input" />
           <el-button class="refresh-btn" @click="clearFilters">清除筛选</el-button>
+          <el-button
+            class="refresh-list-btn"
+            type="primary"
+            plain
+            :loading="refreshingRuns"
+            :disabled="!store.user.isLoggedIn"
+            @click="manualRefresh"
+          >
+            刷新列表
+          </el-button>
         </div>
 
         <div class="action-group">
@@ -45,6 +55,7 @@
       </div>
 
       <el-table
+        ref="runsTableRef"
         :data="filteredRows"
         class="custom-table"
         style="width: 100%"
@@ -92,6 +103,16 @@
             <div class="row-actions">
               <el-button size="small" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
               <el-button v-if="canCancel(row)" size="small" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
+              <el-button
+                v-if="canForceRemoveRun(row)"
+                size="small"
+                type="danger"
+                plain
+                @click="forceRemoveRun(row.id)"
+                :disabled="!store.user.isLoggedIn"
+              >
+                强制移除
+              </el-button>
               <el-button v-if="!isActiveStatus(row.status)" size="small" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">删除</el-button>
             </div>
           </template>
@@ -160,6 +181,10 @@
                 <div class="metric-box"><div class="metric-label">NIQE</div><div class="metric-value">{{ detail.niqe ?? '-' }}</div></div>
                 <div class="metric-box highlighted"><div class="metric-label">综合评分</div><div class="metric-value">{{ detailScoreText(detail) }}</div></div>
               </div>
+              <div class="score-note">
+                综合评分为相对分：仅在同任务、同数据集、真实数据评测的运行样本池内做归一化比较。
+                分值越高代表相对表现越好；显示为 0 通常表示当前样本池中的相对低位，不代表算法不可用。
+              </div>
               <div v-if="(detail.customMetrics || []).length" class="metric-grid custom-metric-grid">
                 <div v-for="item in detail.customMetrics || []" :key="`metric-${item.key}`" class="metric-box custom-metric-box">
                   <div class="metric-label">{{ item.label }}</div>
@@ -199,7 +224,7 @@
 export default { name: "Runs" };
 </script>
 <script setup>
-import { computed, onActivated, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, TASK_TYPE_BY_LABEL, useAppStore } from "../stores/app";
@@ -211,10 +236,13 @@ const store = useAppStore();
 /** 切回任务页时若距上次拉取较近则不再请求，避免「来回切页总在等接口」 */
 const lastRunsFetchedAt = ref(0);
 const RUNS_STALE_MS = 25000;
+/** 手动刷新列表按钮 loading */
+const refreshingRuns = ref(false);
 
 const HIDDEN_KEY = "hiddenRunIds_v1";
 const hiddenIds = ref(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]")));
 const selectedIds = ref([]);
+const runsTableRef = ref(null);
 const statusFilter = ref("");
 const taskFilter = ref("");
 const keyword = ref("");
@@ -361,7 +389,14 @@ function handleSelectionChange(selection) {
   selectedIds.value = (selection || []).map((row) => getRunId(row)).filter(Boolean);
 }
 
+function sanitizeSelectedIds() {
+  const validIds = new Set((filteredRows.value || []).map((row) => getRunId(row)).filter(Boolean));
+  selectedIds.value = Array.from(new Set((selectedIds.value || []).map((id) => String(id || "").trim()).filter(Boolean)))
+    .filter((id) => validIds.has(id));
+}
+
 async function clearSelected() {
+  sanitizeSelectedIds();
   if (!selectedIds.value.length) {
     ElMessage({ type: "warning", message: "请先勾选要清除的任务" });
     return;
@@ -529,7 +564,13 @@ function statusTagType(status) {
   return "info";
 }
 
-function canCancel(row) { const text = statusText(row?.status); return text === "排队中" || text === "运行中" || text === "取消中"; }
+function canCancel(row) {
+  const text = statusText(row?.status);
+  return text === "排队中" || text === "运行中";
+}
+function canForceRemoveRun(row) {
+  return statusText(row?.status) === "取消中";
+}
 function isActiveStatus(status) { const text = statusText(status); return text === "排队中" || text === "运行中" || text === "取消中"; }
 function getDataMode(row) { return String(row?.raw?.params?.data_mode || row?.raw?.record?.data_mode || "").trim(); }
 function isRealDatasetRun(row) { return getDataMode(row) === "real_dataset"; }
@@ -628,9 +669,47 @@ function scoreOne(run, ctx) {
 async function refresh() {
   try {
     await store.fetchRuns();
+    sanitizeSelectedIds();
     lastRunsFetchedAt.value = Date.now();
   } catch (e) {
     ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` });
+  }
+}
+
+async function manualRefresh() {
+  if (!store.user.isLoggedIn) return;
+  refreshingRuns.value = true;
+  try {
+    await refresh();
+  } finally {
+    refreshingRuns.value = false;
+  }
+}
+
+async function forceRemoveRun(id) {
+  const runId = String(id || "").trim();
+  if (!runId) return;
+  try {
+    await ElMessageBox.confirm(
+      "该任务可能卡在「取消中」。将从列表中强制移除（并尝试中断后端任务），是否继续？",
+      "强制移除确认",
+      { type: "warning", confirmButtonText: "强制移除", cancelButtonText: "返回" }
+    );
+    const res = await authFetch("/runs/batch-clear", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: [runId], force: true }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    hiddenIds.value.delete(runId);
+    persistHidden();
+    if (detail.value?.id === runId) detailVisible.value = false;
+    ElMessage({ type: "success", message: "已强制移除该任务" });
+    await refresh();
+  } catch (e) {
+    if (e === "cancel" || e === "close") return;
+    ElMessage({ type: "error", message: `强制移除失败：${e?.message || e}` });
   }
 }
 
@@ -684,6 +763,13 @@ onActivated(() => {
   if (!lastRunsFetchedAt.value) return;
   if (Date.now() - lastRunsFetchedAt.value < RUNS_STALE_MS) return;
   refresh();
+});
+
+watch(filteredRows, () => {
+  sanitizeSelectedIds();
+  if (!selectedIds.value.length) {
+    runsTableRef.value?.clearSelection?.();
+  }
 });
 </script>
 
@@ -800,14 +886,18 @@ onActivated(() => {
   box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
-.refresh-btn, .action-group .el-button {
+.refresh-btn,
+.refresh-list-btn,
+.action-group .el-button {
   border-radius: 8px;
   font-size: 13px;
   padding: 6px 16px;
   transition: all 0.3s ease;
 }
 
-.refresh-btn:hover, .action-group .el-button:hover {
+.refresh-btn:hover,
+.refresh-list-btn:hover,
+.action-group .el-button:hover {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
 }
@@ -1077,6 +1167,17 @@ onActivated(() => {
 
 .custom-metric-grid {
   margin-top: 16px;
+}
+
+.score-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dbe7ff;
+  background: #f5f9ff;
+  color: #4f6185;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .metric-box {

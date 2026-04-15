@@ -22,6 +22,13 @@
           <el-option label="最新发布" value="newest" />
           <el-option label="名称排序" value="name" />
         </el-select>
+        <el-button
+          class="refresh-btn"
+          :loading="refreshingCommunity"
+          @click="refreshCommunityNow"
+        >
+          主动刷新
+        </el-button>
       </div>
 
       <div class="toolbar-row" v-if="tab === 'algorithms'">
@@ -272,7 +279,7 @@
             <div v-for="comment in detailComments" :key="comment.comment_id" class="comment-item">
               <div class="comment-head">
                 <div class="comment-head-left">
-                  <span class="comment-author">{{ comment.author_id }}</span>
+                  <span class="comment-author">{{ commentAuthorLabel(comment) }}</span>
                   <span class="comment-time">{{ formatTs(comment.created_at) }}</span>
                 </div>
                 <div class="comment-head-actions">
@@ -340,7 +347,7 @@
 export default { name: "Community" };
 </script>
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { datasetsApi } from "../api/datasets";
 import { algorithmsApi } from "../api/algorithms";
@@ -348,6 +355,7 @@ import { metricsApi } from "../api/metrics";
 import { communityApi } from "../api/community";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 import { datasetSupportsTaskType } from "../utils/datasetTask";
+import { COMMUNITY_CHANGE_EVENT, COMMUNITY_CHANGE_STORAGE_KEY, markCommunityChanged } from "../utils/communityChange";
 
 const store = useAppStore();
 const communityAlgorithms = ref([]);
@@ -382,8 +390,9 @@ const reportVisible = ref(false);
 const reportSubmitting = ref(false);
 const reportReason = ref("");
 const reportTarget = ref({ mode: "resource", comment: null });
-/** keep-alive 缓存下，从其它页返回时需重新拉列表，否则会看到已下架/已删除前的旧数据 */
-const communityWasLeftOnce = ref(false);
+const refreshingCommunity = ref(false);
+let autoRefreshingByChange = false;
+let pendingCommunityRefresh = false;
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -617,6 +626,14 @@ function canReportComment(comment) {
   return String(comment?.author_id || "") !== String(store.user?.username || "");
 }
 
+function commentAuthorLabel(comment) {
+  const displayName = String(comment?.author_display_name || "").trim();
+  if (displayName) return displayName;
+  const authorId = String(comment?.author_id || "").trim();
+  if (!authorId) return "-";
+  return authorId === "system" ? "系统" : authorId;
+}
+
 const detailTitle = computed(() => {
   if (detailType.value === "algorithm") return "算法详情";
   if (detailType.value === "metric") return "指标详情";
@@ -681,10 +698,10 @@ async function loadComments() {
   }
 }
 
-async function syncCommunityState() {
+async function syncCommunityState(force = false) {
   await Promise.all([
     loadCommunity(),
-    store.warmSessionData({ includeNotices: false }),
+    store.warmSessionData({ force, includeNotices: false }),
   ]);
   if (!detailVisible.value || !detailItem.value?.id) return;
   const sourceList =
@@ -705,11 +722,47 @@ async function syncCommunityState() {
   await loadComments();
 }
 
-async function handleWindowFocus() {
-  await Promise.allSettled([
-    loadCommunity(),
-    store.warmSessionData({ includeNotices: false }),
-  ]);
+async function refreshCommunityNow() {
+  refreshingCommunity.value = true;
+  try {
+    await syncCommunityState(true);
+    ElMessage({ type: "success", message: "社区数据已刷新" });
+  } catch (e) {
+    ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` });
+  } finally {
+    refreshingCommunity.value = false;
+  }
+}
+
+async function refreshByCommunityChange() {
+  if (autoRefreshingByChange) return;
+  autoRefreshingByChange = true;
+  try {
+    await syncCommunityState(true);
+  } finally {
+    autoRefreshingByChange = false;
+    if (pendingCommunityRefresh) {
+      pendingCommunityRefresh = false;
+      void refreshByCommunityChange();
+    }
+  }
+}
+
+function handleCommunityChangedEvent() {
+  if (autoRefreshingByChange) {
+    pendingCommunityRefresh = true;
+    return;
+  }
+  void refreshByCommunityChange();
+}
+
+function handleCommunityStorageEvent(event) {
+  if (String(event?.key || "") !== COMMUNITY_CHANGE_STORAGE_KEY) return;
+  if (autoRefreshingByChange) {
+    pendingCommunityRefresh = true;
+    return;
+  }
+  void refreshByCommunityChange();
 }
 
 async function submitComment() {
@@ -731,6 +784,7 @@ async function submitComment() {
     }
     commentDraft.value = "";
     await loadComments();
+    markCommunityChanged("community_comment_created");
     ElMessage({ type: "success", message: "评论已发布" });
   } catch (e) {
     ElMessage({ type: "error", message: `评论失败：${e?.message || e}` });
@@ -750,6 +804,7 @@ async function deleteComment(comment) {
       await communityApi.deleteDatasetComment(detailItem.value.id, commentId);
     }
     detailComments.value = detailComments.value.filter((item) => String(item?.comment_id || "") !== commentId);
+    markCommunityChanged("community_comment_deleted");
     ElMessage({ type: "success", message: "评论已删除" });
   } catch (e) {
     ElMessage({ type: "error", message: `删除评论失败：${e?.message || e}` });
@@ -832,6 +887,7 @@ async function downloadAlgorithm(row) {
     await algorithmsApi.downloadCommunityAlgorithm(row.id);
     locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
     await store.fetchAlgorithms(500, { force: true });
+    markCommunityChanged("community_algorithm_downloaded");
     await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的算法库中" });
   } catch (e) {
@@ -867,6 +923,7 @@ async function downloadDataset(row) {
     await datasetsApi.downloadCommunityDataset(row.id);
     locallyDownloadedDatasetIds.value = new Set([...locallyDownloadedDatasetIds.value, String(row.id)]);
     await store.fetchDatasets();
+    markCommunityChanged("community_dataset_downloaded");
     await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的数据集库中" });
   } catch (e) {
@@ -899,6 +956,7 @@ async function downloadMetric(row) {
     await store.downloadCommunityMetric(row.id);
     locallyDownloadedMetricIds.value = new Set([...locallyDownloadedMetricIds.value, String(row.id)]);
     await store.fetchMetrics();
+    markCommunityChanged("community_metric_downloaded");
     await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的指标库中" });
   } catch (e) {
@@ -917,23 +975,14 @@ async function downloadMetric(row) {
 }
 
 onMounted(async () => {
+  window.addEventListener(COMMUNITY_CHANGE_EVENT, handleCommunityChangedEvent);
+  window.addEventListener("storage", handleCommunityStorageEvent);
   await syncCommunityState();
 });
 
-onActivated(() => {
-  window.addEventListener("focus", handleWindowFocus);
-  if (communityWasLeftOnce.value) {
-    loadCommunity().catch(() => {});
-  }
-});
-
-onDeactivated(() => {
-  window.removeEventListener("focus", handleWindowFocus);
-  communityWasLeftOnce.value = true;
-});
-
 onBeforeUnmount(() => {
-  window.removeEventListener("focus", handleWindowFocus);
+  window.removeEventListener(COMMUNITY_CHANGE_EVENT, handleCommunityChangedEvent);
+  window.removeEventListener("storage", handleCommunityStorageEvent);
 });
 
 function byKeyword(textParts) {
@@ -1084,6 +1133,10 @@ const filteredMetrics = computed(() => {
 .sort-select,
 .filter-select {
   width: 160px;
+}
+
+.refresh-btn {
+  min-width: 92px;
 }
 
 .resource-switch-tabs {

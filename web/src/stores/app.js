@@ -492,8 +492,12 @@ function isTerminal(statusCN) {
   return statusCN === "已完成" || statusCN === "失败" || statusCN === "已取消";
 }
 
-// runId -> timerId
-const _pollTimers = new Map();
+/** 全局仅一个定时器拉取任务列表，避免「多任务 × 每 400ms 各 GET 一次」拖垮界面 */
+let _globalRunsPollTimer = null;
+let _runsPollInFlight = false;
+
+/** Run 列表轮询间隔（毫秒）。合并为单次 listRuns 后略放宽，减轻后端与前端重算压力。 */
+const RUN_POLL_INTERVAL_MS = 600;
 
 // ====================== Store ======================
 
@@ -550,9 +554,9 @@ export const useAppStore = defineStore("app", {
 
       this._sessionWarmPromise = (async () => {
         const [datasetsResult, algorithmsResult, metricsResult] = await Promise.allSettled([
-          this.fetchDatasets(),
-          this.fetchAlgorithms(),
-          this.fetchMetrics(),
+          this.fetchDatasets(200, { force }),
+          this.fetchAlgorithms(500, { force }),
+          this.fetchMetrics(500, {}, { force }),
         ]);
 
         let notices = this.notices;
@@ -711,11 +715,12 @@ export const useAppStore = defineStore("app", {
       },
 
     // ====================== Catalog锛氭暟鎹泦/绠楁硶锛堝悗绔寔涔呭寲锛?======================
-    async fetchDatasets(limit = 200) {
+    async fetchDatasets(limit = 200, options = {}) {
       const now = Date.now();
       const cacheTtlMs = 5000;
-      if (this._datasetsFetchPromise) return this._datasetsFetchPromise;
-      if (this.datasets.length && this._datasetsFetchedAt && now - this._datasetsFetchedAt < cacheTtlMs) {
+      const force = Boolean(options?.force);
+      if (!force && this._datasetsFetchPromise) return this._datasetsFetchPromise;
+      if (!force && this.datasets.length && this._datasetsFetchedAt && now - this._datasetsFetchedAt < cacheTtlMs) {
         return this.datasets;
       }
       this._datasetsFetchPromise = (async () => {
@@ -762,12 +767,13 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async fetchMetrics(limit = 500, query = {}) {
+    async fetchMetrics(limit = 500, query = {}, options = {}) {
       const hasQuery = query && Object.keys(query).length > 0;
       const now = Date.now();
       const cacheTtlMs = 5000;
-      if (!hasQuery && this._metricsFetchPromise) return this._metricsFetchPromise;
-      if (!hasQuery && this.metricsCatalog.length && this._metricsFetchedAt && now - this._metricsFetchedAt < cacheTtlMs) {
+      const force = Boolean(options?.force);
+      if (!hasQuery && !force && this._metricsFetchPromise) return this._metricsFetchPromise;
+      if (!hasQuery && !force && this.metricsCatalog.length && this._metricsFetchedAt && now - this._metricsFetchedAt < cacheTtlMs) {
         return this.metricsCatalog;
       }
       const runFetch = async () => {
@@ -1110,8 +1116,7 @@ export const useAppStore = defineStore("app", {
       const run = this._mapRunOut(out);
       this._upsertRun(run);
 
-      // 鍒涘缓鍚庣珛鍗宠疆璇㈢洿鍒?done/failed
-      this.startPolling(run.id);
+      this._syncRunsListPolling();
 
       return run.id;
     },
@@ -1125,6 +1130,7 @@ export const useAppStore = defineStore("app", {
         // 未登录用户清空任务列表
         this.runs = [];
         saveState({ runs: this.runs });
+        this._clearGlobalRunsPollTimer();
         return;
       }
       try {
@@ -1134,15 +1140,13 @@ export const useAppStore = defineStore("app", {
         // 覆盖式同步：以服务端返回为准
         this.runs = mapped;
         saveState({ runs: this.runs });
-        // 对未结束的 run 自动继续轮询
-        for (const r of this.runs) {
-          if (!isTerminal(r.status)) this.startPolling(r.id);
-        }
+        this._syncRunsListPolling();
       } catch (error) {
         if (error?.response?.status === 401) {
           // 认证失效时清空任务列表
           this.runs = [];
           saveState({ runs: this.runs });
+          this._clearGlobalRunsPollTimer();
         }
         throw error;
       }
@@ -1169,7 +1173,7 @@ export const useAppStore = defineStore("app", {
         if (out?.status) {
           const statusCN = normalizeStatusCN(out.status);
           this._upsertRun({ id: runId, status: statusCN });
-          if (statusCN === "已取消") this.stopPolling(runId);
+          if (statusCN === "已取消") this._syncRunsListPolling();
         }
       } catch (e) {
         this._upsertRun({ id: runId, status: prev?.status ?? "运行中" });
@@ -1177,37 +1181,51 @@ export const useAppStore = defineStore("app", {
       }
     },
 
+    _clearGlobalRunsPollTimer() {
+      if (_globalRunsPollTimer != null) {
+        clearInterval(_globalRunsPollTimer);
+        _globalRunsPollTimer = null;
+      }
+    },
+
     /**
-     * 启动轮询（默认 800ms）
-     * - run 进入终态（已完成/失败）会自动 stop
-     * - 网络/后端短暂重启：不立即 stop，让下一轮继续尝试
+     * 存在未结束任务时，仅维护**一个**定时器周期性 fetchRuns，避免多 Run 并发轮询导致卡顿。
      */
-    startPolling(runId, intervalMs = 800) {
-      if (_pollTimers.has(runId)) return;
+    _syncRunsListPolling() {
+      if (!this.user.isLoggedIn) {
+        this._clearGlobalRunsPollTimer();
+        return;
+      }
+      const need = (this.runs || []).some((r) => !isTerminal(r.status));
+      if (!need) {
+        this._clearGlobalRunsPollTimer();
+        return;
+      }
+      if (_globalRunsPollTimer != null) return;
+      _globalRunsPollTimer = setInterval(() => {
+        if (_runsPollInFlight) return;
+        _runsPollInFlight = true;
+        this.fetchRuns(200)
+          .catch(() => {})
+          .finally(() => {
+            _runsPollInFlight = false;
+          });
+      }, RUN_POLL_INTERVAL_MS);
+    },
 
-      const timerId = setInterval(async () => {
-        try {
-          const run = await this.fetchRun(runId);
-          if (isTerminal(run.status)) this.stopPolling(runId);
-        } catch (e) {
-          // ignore
-        }
-      }, intervalMs);
-
-      _pollTimers.set(runId, timerId);
+    /** @deprecated 兼容旧调用；内部改为全局列表轮询 */
+    startPolling(runId) {
+      void runId;
+      this._syncRunsListPolling();
     },
 
     stopPolling(runId) {
-      const t = _pollTimers.get(runId);
-      if (t) clearInterval(t);
-      _pollTimers.delete(runId);
+      void runId;
+      this._syncRunsListPolling();
     },
 
     stopPollingAll() {
-      for (const [rid, t] of _pollTimers.entries()) {
-        clearInterval(t);
-        _pollTimers.delete(rid);
-      }
+      this._clearGlobalRunsPollTimer();
     },
 
     // ====================== 鍐呴儴锛歊un 鏄犲皠 & upsert ======================

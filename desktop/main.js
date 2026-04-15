@@ -39,7 +39,7 @@ const WORKER_COUNT = Math.max(1, Number.parseInt(process.env.ABP_DESKTOP_WORKER_
 const DB_MODE = (process.env.ABP_DESKTOP_DB_MODE || "sqlite").toLowerCase();
 const MYSQL_PORT = process.env.ABP_DESKTOP_MYSQL_PORT || "3306";
 const MYSQL_DATABASE = process.env.ABP_DESKTOP_MYSQL_DATABASE || "algo_benchmark";
-const MYSQL_ROOT_PASSWORD = process.env.ABP_MYSQL_ROOT_PASSWORD || "abp_mysql_123456";
+const MYSQL_ROOT_PASSWORD = process.env.ABP_MYSQL_ROOT_PASSWORD || "123456";
 const managedProcesses = [];
 
 let mainWindow;

@@ -152,6 +152,7 @@ class ResourceCommentOut(BaseModel):
     resource_type: str
     resource_id: str
     author_id: str
+    author_display_name: str = ""
     content: str
     created_at: float
 

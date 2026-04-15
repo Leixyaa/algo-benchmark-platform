@@ -430,7 +430,9 @@ import { ArrowDown } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import { algorithmsApi } from "../api/algorithms";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
+import { buildDownloadSuccessMessage } from "../api/download";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { markCommunityChanged } from "../utils/communityChange";
 
 const store = useAppStore();
 const router = useRouter();
@@ -851,7 +853,8 @@ async function downloadSubmissionArchive(row) {
   const historyId = String(row?.historyId || "").trim();
   if (historyId) {
     try {
-      await algorithmSubmissionsApi.downloadHistoryArchive(historyId, row.archiveFilename || "algorithm_package.zip");
+      const result = await algorithmSubmissionsApi.downloadHistoryArchive(historyId, row.archiveFilename || "algorithm_package.zip");
+      ElMessage.success(buildDownloadSuccessMessage(result, "代码包"));
     } catch (e) {
       ElMessage.error(e?.message || "下载代码包失败");
     }
@@ -862,7 +865,8 @@ async function downloadSubmissionArchive(row) {
     return;
   }
   try {
-    await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
+    const result = await algorithmSubmissionsApi.downloadArchive(row.id, row.archiveFilename || "algorithm_package.zip");
+    ElMessage.success(buildDownloadSuccessMessage(result, "代码包"));
   } catch (e) {
     ElMessage.error(e?.message || "下载代码包失败");
   }
@@ -893,6 +897,7 @@ async function publishSubmissionToCommunity(row) {
       community_description: String(value || "").trim(),
     });
     submissionRows.value = submissionRows.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
+    markCommunityChanged("submission_algorithm_published");
     await store.fetchAlgorithms();
     ElMessage.success(alreadyPublished ? "社区说明已更新" : "已发布到社区");
   } catch (e) {
@@ -914,6 +919,7 @@ async function unpublishSubmissionFromCommunity(row) {
     );
     const out = await algorithmSubmissionsApi.unpublishFromCommunity(row.id);
     submissionRows.value = submissionRows.value.map((item) => (item.id === row.id ? mapSubmission(out) : item));
+    markCommunityChanged("submission_algorithm_unpublished");
     await store.fetchAlgorithms();
     ElMessage.success("算法已从社区下架，本地接入记录已保留");
   } catch (e) {
@@ -1916,6 +1922,7 @@ async function unpublishAlgorithmFromCommunity(row) {
         allowDownload: false,
       });
     }
+    markCommunityChanged("algorithm_unpublished");
     await store.fetchAlgorithms();
     ElMessage({ type: "success", message: "算法已从社区下架，本地记录已保留" });
   } catch (e) {
@@ -1943,7 +1950,7 @@ async function exportAlgorithmToLocal(row) {
     progressNotice?.close?.();
     ElMessage({
       type: "success",
-      message: result?.savedWithPicker ? "算法已保存到你选择的位置" : "算法下载完成，浏览器已开始保存",
+      message: buildDownloadSuccessMessage(result, "算法"),
     });
   } catch (e) {
     progressNotice?.close?.();
@@ -1984,6 +1991,7 @@ async function uploadAlgorithmToCommunity(row) {
         allowDownload: true,
       });
     }
+    markCommunityChanged("algorithm_published");
     await store.fetchAlgorithms();
     ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "算法已上传到社区" });
   } catch (e) {

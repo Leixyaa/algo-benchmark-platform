@@ -154,6 +154,8 @@ RUN_EVAL_MODES = {"preview", "full"}
 AI_MAX_HISTORY_ITEMS = 12
 AI_DOC_TOPK = 3
 _AI_DOC_CACHE: list[dict[str, str]] | None = None
+_AI_DOC_CACHE_AT: float = 0.0
+AI_DOC_CACHE_TTL_S = 30.0
 
 
 def _ai_bool_env(name: str, default: bool = False) -> bool:
@@ -199,6 +201,7 @@ def _default_ai_system_prompt() -> str:
 def _iter_ai_doc_files() -> list[Path]:
     root = Path(__file__).resolve().parents[2]
     patterns = [
+        "docs/AI_PLATFORM_KNOWLEDGE_BASE.md",
         "docs/**/*.md",
         "docs/**/*.txt",
         "release/desktop-runtime/docs/**/*.md",
@@ -235,8 +238,9 @@ def _split_doc_chunks(text: str) -> list[str]:
 
 
 def _load_ai_doc_corpus() -> list[dict[str, str]]:
-    global _AI_DOC_CACHE
-    if _AI_DOC_CACHE is not None:
+    global _AI_DOC_CACHE, _AI_DOC_CACHE_AT
+    now = time.time()
+    if _AI_DOC_CACHE is not None and now - float(_AI_DOC_CACHE_AT or 0.0) < AI_DOC_CACHE_TTL_S:
         return _AI_DOC_CACHE
     corpus: list[dict[str, str]] = []
     for path in _iter_ai_doc_files():
@@ -248,6 +252,7 @@ def _load_ai_doc_corpus() -> list[dict[str, str]]:
         for chunk in _split_doc_chunks(text):
             corpus.append({"source": rel, "text": chunk})
     _AI_DOC_CACHE = corpus
+    _AI_DOC_CACHE_AT = now
     return corpus
 
 
@@ -277,12 +282,16 @@ def _retrieve_ai_doc_context(query: str, topk: int = AI_DOC_TOPK) -> tuple[str, 
     for item in corpus:
         text = item.get("text") or ""
         lower = text.lower()
+        source = str(item.get("source") or "").lower()
         score = 0
         for tk in q_tokens:
             if tk in lower:
                 score += 2 if len(tk) >= 4 else 1
         if q in text:
             score += 4
+        # 专门提高 AI 知识库文档的召回优先级
+        if "docs/ai_platform_knowledge_base.md" in source.replace("\\", "/"):
+            score += 5
         if score <= 0:
             continue
         scored.append((score, item))
@@ -307,6 +316,13 @@ def _ai_local_faq_answer(message: str) -> str:
     q = str(message or "").strip().lower()
     if not q:
         return ""
+    if ("评论" in q and "算法" in q) or ("算法评论" in q):
+        return (
+            "算法评论入口在“社区中心”，不在“算法库”。"
+            "请先进入“社区中心”并切到“公开算法”标签，点击目标算法的“详情”，"
+            "在详情弹窗底部的评论区输入内容并提交即可。"
+            "如果你在当前列表看不到目标算法，通常是该算法未发布到社区或已下架。"
+        )
     if ("排队" in q and "运行" in q) or ("一直排队" in q):
         return (
             "任务长时间排队通常与 worker 并发数或当前任务量有关。"
@@ -393,6 +409,29 @@ def _ai_local_offline_reply(message: str) -> str:
     )
 
 
+def _ai_local_doc_fallback_reply(doc_context: str) -> str:
+    text = str(doc_context or "").strip()
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    snippets: list[str] = []
+    for line in lines:
+        # line format: [source] content
+        if "] " in line:
+            snippets.append(line.split("] ", 1)[1].strip())
+        else:
+            snippets.append(line)
+        if len(snippets) >= 2:
+            break
+    if not snippets:
+        return ""
+    return (
+        "我已按平台知识文档检索到相关说明。"
+        + " ".join(snippets)
+        + " 若你愿意，我可以继续按“页面路径 + 按钮步骤”展开到可直接操作的细粒度流程。"
+    )
+
+
 def _sanitize_ai_reply_text(text: str) -> str:
     out = str(text or "").strip()
     if not out:
@@ -450,17 +489,6 @@ def _call_ai_chat_completion(
     include_sources: bool = False,
 ) -> dict[str, Any]:
     faq = _ai_local_faq_answer(message)
-    if faq:
-        faq_sources: list[str] = []
-        if include_sources:
-            _, faq_sources = _retrieve_ai_doc_context(message, topk=AI_DOC_TOPK)
-        return {
-            "reply": faq,
-            "provider": "local_faq",
-            "model": "rule-based",
-            "usage": {},
-            "sources": faq_sources,
-        }
 
     enabled = _ai_bool_env("ABP_AI_ENABLED", default=True)
     if not enabled:
@@ -474,8 +502,26 @@ def _call_ai_chat_completion(
     max_tokens = max(128, min(4096, _ai_int_env("ABP_AI_MAX_OUTPUT_TOKENS", 800)))
     provider_name = str(os.getenv("ABP_AI_PROVIDER_NAME", "")).strip() or "openai_compatible"
     system_prompt = str(os.getenv("ABP_AI_SYSTEM_PROMPT", "")).strip() or _default_ai_system_prompt()
+    doc_context, doc_sources = _retrieve_ai_doc_context(message, topk=AI_DOC_TOPK)
 
     if (not api_key) or (not base_url) or (not model):
+        if faq:
+            return {
+                "reply": faq,
+                "provider": "local_faq",
+                "model": "rule-based",
+                "usage": {},
+                "sources": doc_sources if include_sources else [],
+            }
+        doc_fallback = _ai_local_doc_fallback_reply(doc_context)
+        if doc_fallback:
+            return {
+                "reply": doc_fallback,
+                "provider": "local_doc_fallback",
+                "model": "rule-based",
+                "usage": {},
+                "sources": doc_sources if include_sources else [],
+            }
         return {
             "reply": _ai_local_offline_reply(message),
             "provider": "local_offline",
@@ -491,12 +537,12 @@ def _call_ai_chat_completion(
         page_title = str(context.get("page_title") or "").strip()
     username = _username_of(current_user) or "guest"
     role = _normalize_user_role(current_user)
-    doc_context, doc_sources = _retrieve_ai_doc_context(message, topk=AI_DOC_TOPK)
     runtime_context = (
         f"当前登录用户：{username}（{role}）\n"
         f"当前页面路径：{route_path or '-'}\n"
         f"当前页面标题：{page_title or '-'}\n"
         + ("平台文档检索片段：\n" + doc_context + "\n" if doc_context else "")
+        + (f"本地 FAQ 可参考：{faq}\n" if faq else "")
         + "请优先基于平台文档检索片段回答。若检索片段未覆盖该问题，再给出谨慎建议并明确不确定。"
     )
     messages = [{"role": "system", "content": f"{system_prompt}\n\n{runtime_context}"}]
@@ -2459,6 +2505,12 @@ def _with_owner_display_name(r, item: dict | None, cache: dict[str, str] | None 
     return data
 
 
+def _with_comment_author_display_name(r, item: dict | None, cache: dict[str, str] | None = None) -> dict:
+    data = dict(item or {})
+    data["author_display_name"] = _owner_display_name(r, data.get("author_id"), cache=cache)
+    return data
+
+
 def _sql_record_list(record_type: str, limit: int = 5000) -> Optional[list[dict]]:
     if not sql_store.is_enabled():
         return None
@@ -4017,7 +4069,11 @@ def list_dataset_comments(dataset_id: str, current_user: Optional[dict] = Depend
     if not ds:
         err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=dataset_id)
     _assert_community_resource_visible(ds, "dataset", dataset_id)
-    return [ResourceCommentOut(**item) for item in _list_resource_comments(r, "dataset", dataset_id)]
+    owner_name_cache: dict[str, str] = {}
+    return [
+        ResourceCommentOut(**_with_comment_author_display_name(r, item, cache=owner_name_cache))
+        for item in _list_resource_comments(r, "dataset", dataset_id)
+    ]
 
 
 @app.post("/community/datasets/{dataset_id}/comments", response_model=ResourceCommentOut)
@@ -4040,7 +4096,7 @@ def create_dataset_comment(dataset_id: str, payload: ResourceCommentCreate, curr
         "created_at": time.time(),
     }
     _save_resource_comment(r, "dataset", dataset_id, data)
-    return ResourceCommentOut(**data)
+    return ResourceCommentOut(**_with_comment_author_display_name(r, data))
 
 
 @app.delete("/community/datasets/{dataset_id}/comments/{comment_id}")
@@ -5472,7 +5528,11 @@ def list_algorithm_comments(algorithm_id: str, current_user: Optional[dict] = De
     if not alg:
         err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=algorithm_id)
     _assert_community_resource_visible(alg, "algorithm", algorithm_id)
-    return [ResourceCommentOut(**item) for item in _list_resource_comments(r, "algorithm", algorithm_id)]
+    owner_name_cache: dict[str, str] = {}
+    return [
+        ResourceCommentOut(**_with_comment_author_display_name(r, item, cache=owner_name_cache))
+        for item in _list_resource_comments(r, "algorithm", algorithm_id)
+    ]
 
 
 @app.post("/community/algorithms/{algorithm_id}/comments", response_model=ResourceCommentOut)
@@ -5495,7 +5555,7 @@ def create_algorithm_comment(algorithm_id: str, payload: ResourceCommentCreate, 
         "created_at": time.time(),
     }
     _save_resource_comment(r, "algorithm", algorithm_id, data)
-    return ResourceCommentOut(**data)
+    return ResourceCommentOut(**_with_comment_author_display_name(r, data))
 
 
 @app.delete("/community/algorithms/{algorithm_id}/comments/{comment_id}")
@@ -5531,16 +5591,20 @@ def create_report(payload: ReportCreate, current_user: dict = Depends(get_curren
     if not reason:
         err.api_error(400, err.E_HTTP, "report_reason_required")
 
+    target_owner_id = ""
+    resource_owner_id = ""
     if target_type == "algorithm":
         alg = load_algorithm(r, target_id)
         if not alg:
             err.api_error(404, err.E_ALGORITHM_NOT_FOUND, "algorithm_not_found", algorithm_id=target_id)
         _assert_community_resource_visible(alg, "algorithm", target_id)
+        target_owner_id = str(alg.get("owner_id") or "").strip()
     elif target_type == "dataset":
         ds = load_dataset(r, target_id)
         if not ds:
             err.api_error(404, err.E_DATASET_NOT_FOUND, "dataset_not_found", dataset_id=target_id)
         _assert_community_resource_visible(ds, "dataset", target_id)
+        target_owner_id = str(ds.get("owner_id") or "").strip()
     else:
         if resource_type not in {"algorithm", "dataset"} or not resource_id:
             err.api_error(400, err.E_HTTP, "comment_resource_required")
@@ -5554,6 +5618,8 @@ def create_report(payload: ReportCreate, current_user: dict = Depends(get_curren
         reporter_id = _username_of(current_user)
         if str(comment.get("author_id") or "") == reporter_id:
             err.api_error(400, err.E_HTTP, "cannot_report_own_comment")
+        target_owner_id = str(comment.get("author_id") or "").strip()
+        resource_owner_id = str(resource.get("owner_id") or "").strip()
 
     reporter_id = _username_of(current_user)
     for item in _list_reports(r):
@@ -5578,6 +5644,8 @@ def create_report(payload: ReportCreate, current_user: dict = Depends(get_curren
         "resource_type": resource_type,
         "resource_id": resource_id,
         "reporter_id": reporter_id,
+        "target_owner_id": target_owner_id,
+        "resource_owner_id": resource_owner_id,
         "reason": reason,
         "status": "pending",
         "resolution": "",
@@ -5661,7 +5729,11 @@ def admin_get_community_dataset_detail(dataset_id: str, current_user: dict = Dep
 def admin_list_comments(current_user: dict = Depends(get_current_user)):
     _require_admin(current_user)
     r = make_redis()
-    return [ResourceCommentOut(**item) for item in _list_all_comments(r)]
+    owner_name_cache: dict[str, str] = {}
+    return [
+        ResourceCommentOut(**_with_comment_author_display_name(r, item, cache=owner_name_cache))
+        for item in _list_all_comments(r)
+    ]
 
 
 @app.post("/admin/community/algorithms/{algorithm_id}/takedown", response_model=AlgorithmOut)
@@ -5895,6 +5967,32 @@ def admin_resolve_report(report_id: str, payload: ReportResolve, current_user: d
         if cur["resolution"]:
             content = f"{content} 处理结果：{cur['resolution']}"
         _create_notice(r, reporter_id, "举报已处理", content, kind="info")
+    target_owner_id = str(cur.get("target_owner_id") or "").strip()
+    if not target_owner_id and str(cur.get("target_type") or "") == "comment":
+        rt = str(cur.get("resource_type") or "").strip().lower()
+        rid = str(cur.get("resource_id") or "").strip()
+        tid = str(cur.get("target_id") or "").strip()
+        if rt in {"algorithm", "dataset"} and rid and tid:
+            target_comment = _load_resource_comment(r, rt, rid, tid)
+            if target_comment:
+                target_owner_id = str(target_comment.get("author_id") or "").strip()
+    if target_owner_id and target_owner_id != reporter_id:
+        target_type = str(cur.get("target_type") or "").strip().lower()
+        if target_type == "comment":
+            content = "你发布的评论被举报，管理员已处理。"
+            if status == "rejected":
+                content = "针对你评论的举报已被管理员驳回。"
+        elif target_type == "algorithm":
+            content = "你发布的社区算法被举报，管理员已处理。"
+            if status == "rejected":
+                content = "针对你社区算法的举报已被管理员驳回。"
+        else:
+            content = "你发布的社区数据集被举报，管理员已处理。"
+            if status == "rejected":
+                content = "针对你社区数据集的举报已被管理员驳回。"
+        if cur["resolution"]:
+            content = f"{content} 处理结果：{cur['resolution']}"
+        _create_notice(r, target_owner_id, "举报处理通知", content, kind="warning" if status == "resolved" else "info")
     return ReportOut(**cur)
 
 
@@ -6456,6 +6554,10 @@ def batch_clear_runs(
     if not wanted:
         err.api_error(400, err.E_HTTP, "run_ids_required")
 
+    force = False
+    if isinstance(payload, dict):
+        force = bool(payload.get("force") or payload.get("force_delete"))
+
     r = make_redis()
     username = current_user["username"]
     deleted = 0
@@ -6469,13 +6571,23 @@ def batch_clear_runs(
         if str(run.get("owner_id") or "") != username:
             skipped += 1
             continue
-        if str(run.get("status") or "") in {"queued", "running", "canceling"}:
+        st = str(run.get("status") or "").lower()
+        if not force and st in {"queued", "running", "canceling"}:
             skipped += 1
             continue
+        if force and st in {"queued", "running", "canceling"}:
+            try:
+                celery_app.control.revoke(run_id, terminate=True)
+            except Exception:
+                pass
+            try:
+                r.delete(f"run_cancel:{run_id}")
+            except Exception:
+                pass
         delete_run(r, run_id)
         deleted += 1
 
-    return {"ok": True, "deleted": deleted, "skipped": skipped}
+    return {"ok": True, "deleted": deleted, "skipped": skipped, "forced": bool(force)}
 
 
 

@@ -349,6 +349,7 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, react
 import { ElMessage, ElMessageBox } from "element-plus";
 import { metricsApi } from "../api/metrics";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
+import { markCommunityChanged } from "../utils/communityChange";
 
 const store = useAppStore();
 const submitting = ref(false);
@@ -659,6 +660,7 @@ async function removeMetric(row) {
       cancelButtonText: "取消",
     });
     await store.removeMetric(row.id);
+    markCommunityChanged("metric_removed");
     ElMessage.success("指标已删除");
     if (selectedMetricSubmission.value?.id === row.id) {
       showMetricDetailDialog.value = false;
@@ -780,6 +782,7 @@ async function publishMetric(row) {
     await store.publishMetricToCommunity(row.id, {
       community_description: String(value || "").trim(),
     });
+    markCommunityChanged("metric_published");
     await store.fetchMetrics();
     ElMessage.success(alreadyPublished ? "社区说明已更新" : "指标已发布到社区");
     syncSelectedMetricAfterMutation(row.id);
@@ -801,6 +804,7 @@ async function unpublishMetric(row) {
       { type: "warning", confirmButtonText: "下架", cancelButtonText: "取消" }
     );
     await store.unpublishMetricFromCommunity(row.id);
+    markCommunityChanged("metric_unpublished");
     await store.fetchMetrics();
     ElMessage.success("指标已从社区下架，本地记录已保留");
     syncSelectedMetricAfterMutation(row.id);

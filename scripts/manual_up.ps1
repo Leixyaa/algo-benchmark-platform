@@ -81,7 +81,7 @@ if (-not $SkipMySQL) {
     $MySqlRootPassword = $env:ABP_MYSQL_ROOT_PASSWORD
   }
   if ([string]::IsNullOrWhiteSpace($MySqlRootPassword)) {
-    $MySqlRootPassword = "abp_mysql_123456"
+    $MySqlRootPassword = "123456"
   }
   if ($DryRun) {
     & $mysqlScript -DryRun -ContainerName $MySqlContainerName -Port $MySqlPort -Database $MySqlDatabase -RootPassword $MySqlRootPassword

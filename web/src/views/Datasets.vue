@@ -188,9 +188,11 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, ElNotification } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
 import { authFetch } from "../api/http";
+import { buildDownloadSuccessMessage } from "../api/download";
 import { datasetsApi } from "../api/datasets";
 import { TASK_LABEL_BY_TYPE, useAppStore } from "../stores/app";
 import { datasetHasRecognizedTasks } from "../utils/datasetTask";
+import { markCommunityChanged } from "../utils/communityChange";
 
 const store = useAppStore();
 
@@ -472,6 +474,7 @@ async function unpublishDatasetFromCommunity(id) {
       allowUse: false,
       allowDownload: false,
     });
+    markCommunityChanged("dataset_unpublished");
     ElMessage({ type: "success", message: "数据集已从社区下架，本地记录已保留" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
@@ -501,7 +504,7 @@ async function exportDatasetToLocal(id) {
     progressMessage?.close?.();
     ElMessage({
       type: "success",
-      message: result?.savedWithPicker ? "数据集已保存到你选择的位置" : "数据集下载完成，浏览器已开始保存",
+      message: buildDownloadSuccessMessage(result, "数据集"),
     });
   } catch (e) {
     progressMessage?.close?.();
@@ -555,6 +558,7 @@ async function uploadDatasetToCommunity(id) {
       allowUse: true,
       allowDownload: true,
     });
+    markCommunityChanged("dataset_published");
     ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "数据集已上传到社区" });
   } catch (action) {
     if (action !== "cancel" && action !== "close") {

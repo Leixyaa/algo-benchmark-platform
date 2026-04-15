@@ -27,6 +27,13 @@
   - `views/NewRun.vue` / `views/Runs.vue`：运行创建与状态追踪
   - `views/Compare.vue`：指标对比、推荐、导出（含快速选型接入）
 
+#### 构建与桌面端同步（重要）
+- **约定**：凡是修改 `web/` 前端，完成后需**同时**产出标准 Web 与桌面模式包，避免桌面（Electron）仍在使用旧 `dist`。
+- 在 `web/` 目录执行：
+  - `npm run build` — 标准站点（默认 `dist/`）
+  - `npm run build:desktop` — `--mode desktop`，供 `desktop/` 壳加载
+- 桌面壳侧：`desktop/package.json` 中 `build:web` 会调用 `../web` 的 `build:desktop`；打包前请至少跑过上述两条或等价的 `npm run build:web`。
+
 ## 2. 毕设文档同步（Graduation Docs Sync）
 - 主目录：`docs/graduation/`
 - 提交总入口：`docs/UPLOAD_GUIDE.md`

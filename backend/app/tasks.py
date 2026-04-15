@@ -836,7 +836,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     attempt_count = prev_attempt + 1
     retry_count = max(0, attempt_count - 1)
 
-    if status0 in {"canceled"} or run.get("cancel_requested"):
+    # 含 canceling：避免用户已点取消后，worker 重入又把状态写回 running 导致长期卡在「取消中」
+    if status0 in {"canceled", "canceling"} or run.get("cancel_requested"):
         finished = time.time()
         run["status"] = "canceled"
         run["finished_at"] = finished
@@ -844,6 +845,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         run["error"] = "任务已取消"
         run["error_code"] = err.E_CANCELED
         run["error_detail"] = None
+        r.delete(cancel_key)
         _attach_runtime_to_run(run, wall_start, cpu_start, attempt_count, retry_max_attempts, retry_count)
         save_run(r, run_id, run)
         return {"ok": False, "run_id": run_id, "error": run["error"]}

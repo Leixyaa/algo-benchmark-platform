@@ -12,7 +12,7 @@ if ([string]::IsNullOrWhiteSpace($RootPassword)) {
   $RootPassword = $env:ABP_MYSQL_ROOT_PASSWORD
 }
 if ([string]::IsNullOrWhiteSpace($RootPassword)) {
-  $RootPassword = "abp_mysql_123456"
+  $RootPassword = "123456"
 }
 
 function Test-Command([string]$Name) {
