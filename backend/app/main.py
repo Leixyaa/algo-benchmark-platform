@@ -116,6 +116,7 @@ from .store import (
     save_user,
     load_user,
     list_users,
+    delete_user,
     save_metric,
     load_metric,
     delete_metric,
@@ -3022,6 +3023,60 @@ def _purge_user_algorithm_library(r, target_username: str) -> dict[str, int]:
     return {"removed_submissions": removed_submissions, "removed_algorithms": removed_algorithms}
 
 
+def _admin_delete_registered_user_account(r, target_username: str) -> dict[str, int]:
+    """管理员：删除注册用户及其名下资源，并移除账号记录。"""
+    target_username = str(target_username or "").strip()
+    out: dict[str, int] = {}
+    out.update(_purge_user_algorithm_library(r, target_username))
+
+    deleted_datasets = 0
+    for ds in list_all_datasets(r, limit=50000) or []:
+        if not isinstance(ds, dict):
+            continue
+        if str(ds.get("owner_id") or "").strip() != target_username:
+            continue
+        _delete_dataset_record_with_related_state(r, ds, delete_disk=True)
+        deleted_datasets += 1
+    out["datasets_deleted"] = int(deleted_datasets)
+
+    deleted_presets = 0
+    for preset in list_presets(r, limit=50000, owner_id=target_username) or []:
+        if not isinstance(preset, dict):
+            continue
+        pid = str(preset.get("preset_id") or "").strip()
+        if pid:
+            delete_preset(r, pid)
+            deleted_presets += 1
+    out["presets_deleted"] = int(deleted_presets)
+
+    deleted_metrics = 0
+    for m in list_metrics(r, limit=50000) or []:
+        if not isinstance(m, dict):
+            continue
+        owner = str(m.get("owner_id") or m.get("uploader_id") or "").strip()
+        if owner != target_username:
+            continue
+        _delete_metric_record_with_related_state(r, m)
+        deleted_metrics += 1
+    out["metrics_deleted"] = int(deleted_metrics)
+
+    deleted_runs = 0
+    for run in list_runs(r, limit=50000, owner_id=target_username) or []:
+        if not isinstance(run, dict):
+            continue
+        rid = str(run.get("run_id") or "").strip()
+        if rid:
+            delete_run(r, rid)
+            deleted_runs += 1
+    out["runs_deleted"] = int(deleted_runs)
+
+    out["algorithm_history_removed"] = int(_clear_algorithm_history_items(r, target_username))
+    out["metric_history_removed"] = int(_clear_metric_history_items(r, target_username))
+
+    delete_user(r, target_username)
+    return out
+
+
 def _delete_metric_record_with_related_state(r, metric: dict) -> None:
     metric_id = str((metric or {}).get("metric_id") or "").strip()
     if not metric_id:
@@ -4881,6 +4936,22 @@ def admin_list_registered_users(
         )
     out.sort(key=lambda x: (str(x.username or "").lower(), str(x.username or "")))
     return out
+
+
+@app.delete("/admin/users/{username}")
+def admin_delete_registered_user(username: str, current_user: dict = Depends(get_current_user)):
+    """管理员：删除指定注册用户及其名下资源（不含 system / 保留管理员账号）。"""
+    _require_admin(current_user)
+    target = str(username or "").strip()
+    if not target or target == "system":
+        err.api_error(400, err.E_HTTP, "invalid_username", username=target)
+    if target == _ADMIN_USERNAME:
+        err.api_error(403, err.E_HTTP, "admin_delete_forbidden", detail="reserved account")
+    r = make_redis()
+    if not load_user(r, target):
+        err.api_error(404, err.E_HTTP, "user_not_found", username=target)
+    counts = _admin_delete_registered_user_account(r, target)
+    return {"ok": True, "username": target, **counts}
 
 
 @app.post("/admin/users/{username}/purge-algorithms")

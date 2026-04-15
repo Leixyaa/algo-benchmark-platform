@@ -738,3 +738,18 @@ def list_users(r: redis.Redis, limit: int = 1000) -> list[Dict[str, Any]]:
             continue
     items = _merge_records_prefer_newer(items, sql_items, "username")
     return items[:limit]
+
+
+def delete_user(r: redis.Redis, username: str) -> None:
+    """删除用户账号记录（Redis + SQL 统一表）。"""
+    username = str(username or "").strip()
+    if not username:
+        return
+    if sql_store.is_enabled():
+        try:
+            sql_store.delete_record("user", username)
+        except Exception as exc:
+            if not _should_fallback_to_redis():
+                raise
+            _warn_sql_fallback("delete_user", exc)
+    r.delete(user_key(username))

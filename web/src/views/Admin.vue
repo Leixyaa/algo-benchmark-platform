@@ -35,6 +35,20 @@
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="注册时间" width="180" />
+          <el-table-column label="操作" width="120" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :loading="deletingRegisteredUsernames.has(row.username)"
+                :disabled="row.role === 'admin'"
+                @click="deleteRegisteredUserRow(row)"
+              >
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -579,7 +593,7 @@ export default { name: "Admin" };
 </script>
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { adminApi } from "../api/admin";
 import { algorithmSubmissionsApi } from "../api/algorithmSubmissions";
 import { TASK_LABEL_BY_TYPE, toTaskType, useAppStore } from "../stores/app";
@@ -596,6 +610,7 @@ const comments = ref([]);
 const reports = ref([]);
 /** 首屏与各 tab 表格共用数据源，请求未完成前避免误显示空表 / No Data */
 const adminDataLoading = ref(true);
+const deletingRegisteredUsernames = ref(new Set());
 
 const userKeyword = ref("");
 const algorithmKeyword = ref("");
@@ -977,6 +992,33 @@ async function loadAll() {
   }
 }
 
+async function deleteRegisteredUserRow(row) {
+  const u = String(row?.username || "").trim();
+  if (!u || row?.role === "admin") return;
+  try {
+    await ElMessageBox.confirm(
+      `确定删除用户「${u}」吗？将一并清理其名下算法接入、数据集、指标与运行记录，且不可恢复。`,
+      "删除用户确认",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  const next = new Set(deletingRegisteredUsernames.value);
+  next.add(u);
+  deletingRegisteredUsernames.value = next;
+  try {
+    await adminApi.deleteRegisteredUser(u);
+    ElMessage.success("用户已删除");
+    await loadAll();
+  } catch (e) {
+    ElMessage.error(e?.message || "删除用户失败");
+  } finally {
+    const fin = new Set(deletingRegisteredUsernames.value);
+    fin.delete(u);
+    deletingRegisteredUsernames.value = fin;
+  }
+}
 
 
 function openResourceDetail(type, row) {

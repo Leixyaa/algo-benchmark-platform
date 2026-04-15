@@ -4,6 +4,10 @@ export const adminApi = {
   listRegisteredUsers() {
     return request("/admin/users", { method: "GET" });
   },
+  deleteRegisteredUser(username) {
+    const u = encodeURIComponent(String(username || "").trim());
+    return request(`/admin/users/${u}`, { method: "DELETE" });
+  },
   promoteCommunityAlgorithm(algorithmId) {
     return request(`/admin/community/algorithms/${algorithmId}/promote`, { method: "POST" });
   },
