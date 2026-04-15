@@ -1967,6 +1967,30 @@ async function uploadAlgorithmToCommunity(row) {
   if (!row?.id) return;
   const submissionId = getSubmissionId(row);
   const alreadyPublished = isSelfPublishedAlgorithm(row);
+  if (submissionId) {
+    try {
+      await loadSubmissionRows();
+    } catch {
+      // ignore; keep fallback handling below
+    }
+    const matched = submissionRows.value.find((item) => String(item?.id || "") === submissionId);
+    if (!matched) {
+      ElMessage({ type: "warning", message: "未找到对应的算法接入记录，请先在“接入申请记录”确认该条目状态" });
+      return;
+    }
+    const status = String(matched?.status || "").toLowerCase();
+    if (status !== "approved") {
+      const statusText = status === "rejected" ? "已驳回" : "待审核";
+      const note = String(matched?.reviewNote || "").trim();
+      ElMessage({
+        type: "warning",
+        message: note
+          ? `该算法接入状态为${statusText}，暂不可上传社区。审核说明：${note}`
+          : `该算法接入状态为${statusText}，暂不可上传社区`,
+      });
+      return;
+    }
+  }
   try {
     const { value } = await ElMessageBox.prompt(
       "请输入算法在社区中心展示的描述，便于区分同名算法。",
@@ -1996,6 +2020,17 @@ async function uploadAlgorithmToCommunity(row) {
     ElMessage({ type: "success", message: alreadyPublished ? "社区信息已更新" : "算法已上传到社区" });
   } catch (e) {
     if (e === "cancel" || e === "close") return;
+    const detail = e?.detail || e?.data?.detail || {};
+    const code = String(detail?.error_code || "").trim().toLowerCase();
+    const message = String(detail?.message || "").trim().toLowerCase();
+    if (code === "e_http" && message === "algorithm_submission_not_approved") {
+      ElMessage({ type: "warning", message: "该算法接入尚未审核通过，暂不可上传社区" });
+      return;
+    }
+    if (code === "e_http" && message === "algorithm_submission_not_found") {
+      ElMessage({ type: "warning", message: "算法接入记录不存在，请先在“接入申请记录”确认或重新提交" });
+      return;
+    }
     ElMessage({ type: "error", message: "上传社区失败：" + String((e && e.message) || e) });
   }
 }

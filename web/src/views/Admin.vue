@@ -665,6 +665,22 @@ const loadedResources = ref({
   comments: false,
   reports: false,
 });
+const adminTabFetchPromises = new Map();
+
+function normalizeAdminTabKey(tabName) {
+  const key = String(tabName || "").trim();
+  if (key === "metric-logs") return "metrics";
+  if (key === "algorithm-submission-logs") return "submissions";
+  if (key === "report-logs") return "reports";
+  return key || "users";
+}
+
+function shouldFetchAdminTab(tabKey, force = false) {
+  if (force) return true;
+  if (!loadedResources.value.users) return true;
+  if (tabKey === "users") return false;
+  return !Boolean(loadedResources.value[tabKey]);
+}
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -994,48 +1010,63 @@ async function ensureTabData(tabName, force = false) {
     adminDataLoading.value = false;
     return;
   }
-  adminDataLoading.value = true;
+  const tabKey = normalizeAdminTabKey(tabName);
+  if (!shouldFetchAdminTab(tabKey, force)) return;
+  const requestKey = `${tabKey}:${force ? "force" : "normal"}`;
+  if (adminTabFetchPromises.has(requestKey)) {
+    await adminTabFetchPromises.get(requestKey);
+    return;
+  }
+  const task = (async () => {
+    adminDataLoading.value = true;
+    try {
+      await ensureRegisteredUsersLoaded(force);
+      if (tabKey === "users") return;
+      if (tabKey === "algorithms") {
+        if (!force && loadedResources.value.algorithms) return;
+        const algRes = await adminApi.listCommunityAlgorithms();
+        algorithms.value = (algRes || []).map(mapAlgorithm);
+        loadedResources.value.algorithms = true;
+        return;
+      }
+      if (tabKey === "datasets") {
+        if (!force && loadedResources.value.datasets) return;
+        const dsRes = await adminApi.listCommunityDatasets();
+        datasets.value = (dsRes || []).map(mapDataset);
+        loadedResources.value.datasets = true;
+        return;
+      }
+      if (tabKey === "metrics") {
+        if (!force && loadedResources.value.metrics) return;
+        const metricRes = await adminApi.listMetrics();
+        metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
+        loadedResources.value.metrics = true;
+        return;
+      }
+      if (tabKey === "submissions") {
+        if (!force && loadedResources.value.submissions) return;
+        const submissionRes = await adminApi.listAlgorithmSubmissions();
+        algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
+        loadedResources.value.submissions = true;
+        return;
+      }
+      if (tabKey === "reports") {
+        if (!force && loadedResources.value.reports) return;
+        const reportRes = await adminApi.listReports();
+        reports.value = (reportRes || []).map(mapReport);
+        loadedResources.value.reports = true;
+      }
+    } catch (e) {
+      ElMessage({ type: "error", message: `加载管理数据失败：${e?.message || e}` });
+    } finally {
+      adminDataLoading.value = false;
+    }
+  })();
+  adminTabFetchPromises.set(requestKey, task);
   try {
-    await ensureRegisteredUsersLoaded(force);
-    if (tabName === "users") return;
-    if (tabName === "algorithms") {
-      if (!force && loadedResources.value.algorithms) return;
-      const algRes = await adminApi.listCommunityAlgorithms();
-      algorithms.value = (algRes || []).map(mapAlgorithm);
-      loadedResources.value.algorithms = true;
-      return;
-    }
-    if (tabName === "datasets") {
-      if (!force && loadedResources.value.datasets) return;
-      const dsRes = await adminApi.listCommunityDatasets();
-      datasets.value = (dsRes || []).map(mapDataset);
-      loadedResources.value.datasets = true;
-      return;
-    }
-    if (tabName === "metrics" || tabName === "metric-logs") {
-      if (!force && loadedResources.value.metrics) return;
-      const metricRes = await adminApi.listMetrics();
-      metrics.value = (metricRes || []).map(mapMetric).filter((item) => item.uploaderId !== "system");
-      loadedResources.value.metrics = true;
-      return;
-    }
-    if (tabName === "algorithm-submissions" || tabName === "algorithm-submission-logs") {
-      if (!force && loadedResources.value.submissions) return;
-      const submissionRes = await adminApi.listAlgorithmSubmissions();
-      algorithmSubmissions.value = (submissionRes || []).map(mapAlgorithmSubmission);
-      loadedResources.value.submissions = true;
-      return;
-    }
-    if (tabName === "reports" || tabName === "report-logs") {
-      if (!force && loadedResources.value.reports) return;
-      const reportRes = await adminApi.listReports();
-      reports.value = (reportRes || []).map(mapReport);
-      loadedResources.value.reports = true;
-    }
-  } catch (e) {
-    ElMessage({ type: "error", message: `加载管理数据失败：${e?.message || e}` });
+    await task;
   } finally {
-    adminDataLoading.value = false;
+    adminTabFetchPromises.delete(requestKey);
   }
 }
 

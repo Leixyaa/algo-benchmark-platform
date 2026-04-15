@@ -393,6 +393,7 @@ const reportTarget = ref({ mode: "resource", comment: null });
 const refreshingCommunity = ref(false);
 let autoRefreshingByChange = false;
 let pendingCommunityRefresh = false;
+let communityRefreshTimer = null;
 
 function formatTs(unixSeconds) {
   if (!unixSeconds) return "-";
@@ -493,8 +494,10 @@ function uploaderLabel(row) {
   return id === "system" ? "系统" : id;
 }
 
-async function loadCommunity() {
-  communityListLoading.value = true;
+async function loadCommunity({ silent = false } = {}) {
+  if (!silent) {
+    communityListLoading.value = true;
+  }
   try {
     const [algorithms, datasets, metrics] = await Promise.all([
       algorithmsApi.listAlgorithms({ limit: 500, scope: "community" }),
@@ -510,7 +513,9 @@ async function loadCommunity() {
     communityDatasets.value = [];
     communityMetrics.value = [];
   } finally {
-    communityListLoading.value = false;
+    if (!silent) {
+      communityListLoading.value = false;
+    }
   }
 }
 
@@ -698,11 +703,9 @@ async function loadComments() {
   }
 }
 
-async function syncCommunityState(force = false) {
-  await Promise.all([
-    loadCommunity(),
-    store.warmSessionData({ force, includeNotices: false }),
-  ]);
+async function syncCommunityState(force = false, options = {}) {
+  const silent = Boolean(options?.silent);
+  await loadCommunity({ silent });
   if (!detailVisible.value || !detailItem.value?.id) return;
   const sourceList =
     detailType.value === "algorithm"
@@ -725,7 +728,7 @@ async function syncCommunityState(force = false) {
 async function refreshCommunityNow() {
   refreshingCommunity.value = true;
   try {
-    await syncCommunityState(true);
+    await syncCommunityState(true, { silent: false });
     ElMessage({ type: "success", message: "社区数据已刷新" });
   } catch (e) {
     ElMessage({ type: "error", message: `刷新失败：${e?.message || e}` });
@@ -738,7 +741,7 @@ async function refreshByCommunityChange() {
   if (autoRefreshingByChange) return;
   autoRefreshingByChange = true;
   try {
-    await syncCommunityState(true);
+    await syncCommunityState(true, { silent: true });
   } finally {
     autoRefreshingByChange = false;
     if (pendingCommunityRefresh) {
@@ -749,20 +752,22 @@ async function refreshByCommunityChange() {
 }
 
 function handleCommunityChangedEvent() {
-  if (autoRefreshingByChange) {
-    pendingCommunityRefresh = true;
-    return;
+  if (communityRefreshTimer) {
+    window.clearTimeout(communityRefreshTimer);
   }
-  void refreshByCommunityChange();
+  communityRefreshTimer = window.setTimeout(() => {
+    communityRefreshTimer = null;
+    if (autoRefreshingByChange) {
+      pendingCommunityRefresh = true;
+      return;
+    }
+    void refreshByCommunityChange();
+  }, 300);
 }
 
 function handleCommunityStorageEvent(event) {
   if (String(event?.key || "") !== COMMUNITY_CHANGE_STORAGE_KEY) return;
-  if (autoRefreshingByChange) {
-    pendingCommunityRefresh = true;
-    return;
-  }
-  void refreshByCommunityChange();
+  handleCommunityChangedEvent();
 }
 
 async function submitComment() {
@@ -888,7 +893,6 @@ async function downloadAlgorithm(row) {
     locallyDownloadedAlgorithmIds.value = new Set([...locallyDownloadedAlgorithmIds.value, String(row.id)]);
     await store.fetchAlgorithms(500, { force: true });
     markCommunityChanged("community_algorithm_downloaded");
-    await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的算法库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("algorithm_already_downloaded")) {
@@ -924,7 +928,6 @@ async function downloadDataset(row) {
     locallyDownloadedDatasetIds.value = new Set([...locallyDownloadedDatasetIds.value, String(row.id)]);
     await store.fetchDatasets();
     markCommunityChanged("community_dataset_downloaded");
-    await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的数据集库中" });
   } catch (e) {
     if (getErrorCode(e) === "E_HTTP" && String(e?.message || "").includes("dataset_already_downloaded")) {
@@ -957,7 +960,6 @@ async function downloadMetric(row) {
     locallyDownloadedMetricIds.value = new Set([...locallyDownloadedMetricIds.value, String(row.id)]);
     await store.fetchMetrics();
     markCommunityChanged("community_metric_downloaded");
-    await loadCommunity();
     ElMessage({ type: "success", message: "已下载到你的指标库中" });
   } catch (e) {
     const text = String(e?.message || e || "");
@@ -981,6 +983,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (communityRefreshTimer) {
+    window.clearTimeout(communityRefreshTimer);
+    communityRefreshTimer = null;
+  }
   window.removeEventListener(COMMUNITY_CHANGE_EVENT, handleCommunityChangedEvent);
   window.removeEventListener("storage", handleCommunityStorageEvent);
 });
