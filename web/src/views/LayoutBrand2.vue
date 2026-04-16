@@ -39,6 +39,8 @@
             <el-badge v-if="unreadCount > 0" :value="unreadCount" :max="99" class="header-badge" />
           </el-button>
 
+          <ProblemFeedback v-if="store.user.isLoggedIn" />
+
           <el-dropdown v-if="store.user.isLoggedIn">
             <span class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
@@ -86,6 +88,7 @@ import { ElMessage, ElNotification } from "element-plus";
 
 import { useAppStore } from "../stores/app";
 import AiAssistant from "../components/AiAssistant.vue";
+import ProblemFeedback from "../components/ProblemFeedback.vue";
 
 const route = useRoute();
 const router = useRouter();

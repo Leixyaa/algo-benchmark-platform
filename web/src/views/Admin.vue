@@ -245,6 +245,48 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="问题反馈" name="feedback">
+        <div class="toolbar">
+          <el-input
+            v-model="feedbackKeyword"
+            placeholder="搜索反馈内容 / 页面 / 提交人 / 联系方式"
+            clearable
+            class="search-input"
+          />
+        </div>
+        <el-table
+          v-loading="adminDataLoading"
+          element-loading-text="加载中..."
+          :data="filteredFeedback"
+          border
+          stripe
+          class="data-table"
+        >
+          <el-table-column prop="createdAt" label="提交时间" width="180" />
+          <el-table-column prop="categoryLabel" label="类型" width="130" />
+          <el-table-column prop="displayName" label="提交人" width="150" />
+          <el-table-column prop="roleLabel" label="角色" width="90" />
+          <el-table-column prop="statusLabel" label="状态" width="100" />
+          <el-table-column prop="resolvedByLabel" label="处理人" width="120" />
+          <el-table-column prop="resolvedAt" label="处理时间" width="180" />
+          <el-table-column prop="message" label="反馈内容" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="contact" label="联系方式" min-width="160" show-overflow-tooltip />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="row.status !== 'pending'"
+                :loading="resolvingFeedbackIds.has(row.id)"
+                @click="resolveFeedback(row)"
+              >
+                {{ row.status === "pending" ? "处理" : "已处理" }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <el-tab-pane label="指标处理日志" name="metric-logs">
         <div class="toolbar">
           <el-input v-model="metricLogKeyword" placeholder="搜索指标名称 / 标识 / 提交人 / 处理人" clearable class="search-input" />
@@ -609,6 +651,7 @@ const metrics = ref([]);
 const algorithmSubmissions = ref([]);
 const comments = ref([]);
 const reports = ref([]);
+const feedbackItems = ref([]);
 /** 首屏与各 tab 表格共用数据源，请求未完成前避免误显示空表 / No Data */
 const adminDataLoading = ref(true);
 const deletingRegisteredUsernames = ref(new Set());
@@ -622,6 +665,7 @@ const algorithmSubmissionLogKeyword = ref("");
 const metricLogKeyword = ref("");
 const pendingReportKeyword = ref("");
 const reportLogKeyword = ref("");
+const feedbackKeyword = ref("");
 
 const loadingAlgorithmIds = ref(new Set());
 const loadingDatasetIds = ref(new Set());
@@ -632,6 +676,7 @@ const promotingSubmissionIds = ref(new Set());
 const clearingReports = ref(false);
 const reviewingMetricIds = ref(new Set());
 const reviewingSubmissionIds = ref(new Set());
+const resolvingFeedbackIds = ref(new Set());
 
 const detailVisible = ref(false);
 const detailType = ref("algorithm");
@@ -664,6 +709,7 @@ const loadedResources = ref({
   submissions: false,
   comments: false,
   reports: false,
+  feedback: false,
 });
 const adminTabFetchPromises = new Map();
 
@@ -672,6 +718,7 @@ function normalizeAdminTabKey(tabName) {
   if (key === "metric-logs") return "metrics";
   if (key === "algorithm-submission-logs") return "submissions";
   if (key === "report-logs") return "reports";
+  if (key === "feedback") return "feedback";
   return key || "users";
 }
 
@@ -855,6 +902,39 @@ function mapReport(x) {
   };
 }
 
+function feedbackCategoryLabel(category) {
+  const key = String(category || "").trim().toLowerCase();
+  if (key === "bug") return "功能异常";
+  if (key === "suggestion") return "功能建议";
+  if (key === "ux") return "界面体验";
+  return "其他";
+}
+
+function mapFeedback(x) {
+  const role = String(x.role || "user").trim().toLowerCase();
+  const status = String(x.status || "pending").trim().toLowerCase();
+  const resolvedBy = String(x.resolved_by || "");
+  return {
+    id: String(x.id || ""),
+    createdAt: formatTs(x.created_at),
+    username: String(x.username || ""),
+    displayName: String(x.display_name || x.username || ""),
+    role,
+    roleLabel: role === "admin" ? "管理员" : "用户",
+    category: String(x.category || "other"),
+    categoryLabel: feedbackCategoryLabel(x.category),
+    message: String(x.message || ""),
+    contact: String(x.contact || ""),
+    status,
+    statusLabel: status === "resolved" ? "已处理" : "待处理",
+    resolvedBy,
+    resolvedByLabel: resolvedBy ? userLabelById(resolvedBy) : "-",
+    resolvedAt: x.resolved_at ? formatTs(x.resolved_at) : "-",
+    pagePath: String(x.page_path || ""),
+    pageTitle: String(x.page_title || ""),
+  };
+}
+
 function getReportProcessTemplate(action) {
   const key = String(action || "resolve");
   if (key === "reject") return "经核实，当前举报内容不成立，已驳回。";
@@ -909,6 +989,24 @@ const handledReports = computed(() =>
         [item.targetTypeLabel, item.targetId, item.reporterId, userLabelById(item.reporterId), item.reason, item.resolution, item.resolvedBy, userLabelById(item.resolvedBy)],
         reportLogKeyword.value
       )
+  )
+);
+
+const filteredFeedback = computed(() =>
+  (feedbackItems.value || []).filter((item) =>
+    includesKeyword(
+      [
+        item.categoryLabel,
+        item.displayName,
+        item.username,
+        item.roleLabel,
+        item.statusLabel,
+        item.resolvedByLabel,
+        item.message,
+        item.contact,
+      ],
+      feedbackKeyword.value
+    )
   )
 );
 
@@ -1055,6 +1153,13 @@ async function ensureTabData(tabName, force = false) {
         const reportRes = await adminApi.listReports();
         reports.value = (reportRes || []).map(mapReport);
         loadedResources.value.reports = true;
+        return;
+      }
+      if (tabKey === "feedback") {
+        if (!force && loadedResources.value.feedback) return;
+        const feedbackRes = await adminApi.listFeedback(500);
+        feedbackItems.value = (feedbackRes || []).map(mapFeedback);
+        loadedResources.value.feedback = true;
       }
     } catch (e) {
       ElMessage({ type: "error", message: `加载管理数据失败：${e?.message || e}` });
@@ -1457,6 +1562,23 @@ async function clearHandledReports() {
     ElMessage.error(e?.message || "清除记录失败");
   } finally {
     clearingReports.value = false;
+  }
+}
+
+async function resolveFeedback(row) {
+  const fid = String(row?.id || "").trim();
+  if (!fid || String(row?.status || "") !== "pending") return;
+  try {
+    setLoading(resolvingFeedbackIds, fid, true);
+    const out = await adminApi.resolveFeedback(fid);
+    feedbackItems.value = (feedbackItems.value || []).map((item) =>
+      item.id === fid ? mapFeedback(out) : item
+    );
+    ElMessage.success("反馈已标记为已处理，已通知提交用户");
+  } catch (e) {
+    ElMessage.error(e?.message || "处理反馈失败");
+  } finally {
+    setLoading(resolvingFeedbackIds, fid, false);
   }
 }
 

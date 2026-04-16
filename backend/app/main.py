@@ -13,6 +13,7 @@ import zipfile
 import shutil
 import os
 import tempfile
+import threading
 
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,9 @@ from .schemas import (
     ReportCreate,
     ReportOut,
     ReportResolve,
+    FeedbackCreate,
+    FeedbackOut,
+    FeedbackAdminOut,
     PresetCreate,
     PresetOut,
     PresetPatch,
@@ -156,6 +160,92 @@ AI_DOC_TOPK = 3
 _AI_DOC_CACHE: list[dict[str, str]] | None = None
 _AI_DOC_CACHE_AT: float = 0.0
 AI_DOC_CACHE_TTL_S = 30.0
+
+_FEEDBACK_FILE_LOCK = threading.RLock()
+_FEEDBACK_CATEGORIES = frozenset({"bug", "suggestion", "ux", "other"})
+
+
+def _feedback_storage_path() -> Path:
+    base = Path(__file__).resolve().parents[1] / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "abp_feedback.jsonl"
+
+
+def _append_feedback_record(record: dict) -> None:
+    path = _feedback_storage_path()
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with _FEEDBACK_FILE_LOCK:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
+
+
+def _load_feedback_rows_for_update() -> list[dict[str, Any]]:
+    path = _feedback_storage_path()
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            text = str(line or "").strip()
+            if not text:
+                continue
+            try:
+                row = json.loads(text)
+            except Exception:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+def _rewrite_feedback_rows(rows: list[dict[str, Any]]) -> None:
+    path = _feedback_storage_path()
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _read_feedback_records(limit: int = 500) -> list[dict[str, Any]]:
+    path = _feedback_storage_path()
+    if not path.is_file():
+        return []
+    raw_rows: list[dict[str, Any]] = []
+    with _FEEDBACK_FILE_LOCK:
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                text = str(line or "").strip()
+                if not text:
+                    continue
+                try:
+                    row = json.loads(text)
+                except Exception:
+                    continue
+                if isinstance(row, dict):
+                    raw_rows.append(row)
+    raw_rows.sort(key=lambda x: float(x.get("created_at") or 0.0), reverse=True)
+    return raw_rows[: max(1, min(int(limit or 500), 2000))]
+
+
+def _mark_feedback_resolved(feedback_id: str, resolved_by: str) -> dict[str, Any] | None:
+    fid = str(feedback_id or "").strip()
+    if not fid:
+        return None
+    now = time.time()
+    with _FEEDBACK_FILE_LOCK:
+        rows = _load_feedback_rows_for_update()
+        changed: dict[str, Any] | None = None
+        for row in rows:
+            if str(row.get("id") or "").strip() != fid:
+                continue
+            row["status"] = "resolved"
+            row["resolved_at"] = now
+            row["resolved_by"] = str(resolved_by or "").strip()
+            changed = row
+            break
+        if changed is None:
+            return None
+        _rewrite_feedback_rows(rows)
+        return changed
 
 
 def _ai_bool_env(name: str, default: bool = False) -> bool:
@@ -743,6 +833,46 @@ def ai_chat(
         "usage": result.get("usage", {}),
         "sources": result.get("sources", []),
     }
+
+
+@app.post("/feedback", response_model=FeedbackOut)
+def submit_feedback(payload: FeedbackCreate, current_user: dict = Depends(get_current_user)):
+    msg = str(payload.message or "").strip()
+    if len(msg) < 3:
+        err.api_error(400, err.E_HTTP, "feedback_message_too_short")
+    if len(msg) > 4000:
+        err.api_error(400, err.E_HTTP, "feedback_message_too_long")
+    cat = str(payload.category or "other").strip().lower()
+    if cat not in _FEEDBACK_CATEGORIES:
+        cat = "other"
+    contact = str(payload.contact or "").strip()
+    if len(contact) > 200:
+        err.api_error(400, err.E_HTTP, "feedback_contact_too_long")
+    page_path = str(payload.page_path or "").strip()[:512]
+    page_title = str(payload.page_title or "").strip()[:200]
+    uid = str(uuid.uuid4())
+    ts = time.time()
+    uname = _username_of(current_user)
+    rec = {
+        "id": uid,
+        "created_at": ts,
+        "username": uname,
+        "display_name": str((current_user or {}).get("display_name") or uname or ""),
+        "role": _normalize_user_role(current_user),
+        "category": cat,
+        "message": msg,
+        "contact": contact or None,
+        "page_path": page_path or None,
+        "page_title": page_title or None,
+        "status": "pending",
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+    try:
+        _append_feedback_record(rec)
+    except OSError:
+        err.api_error(500, err.E_INTERNAL, "feedback_write_failed")
+    return FeedbackOut(id=uid, created_at=ts)
 
 
 @app.get("/me", response_model=UserOut)
@@ -5935,6 +6065,66 @@ def admin_delete_comment(resource_type: str, resource_id: str, comment_id: str, 
         err.api_error(404, err.E_HTTP, "comment_not_found", resource_type=resource_type, resource_id=resource_id, comment_id=comment_id)
     _delete_resource_comment(r, resource_type, resource_id, comment_id)
     return {"ok": True}
+
+
+@app.get("/admin/feedback", response_model=list[FeedbackAdminOut])
+def admin_list_feedback(
+    limit: int = Query(500, ge=1, le=2000),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    rows = _read_feedback_records(limit=limit)
+    out: list[FeedbackAdminOut] = []
+    for row in rows:
+        out.append(FeedbackAdminOut(
+            id=str(row.get("id") or ""),
+            created_at=float(row.get("created_at") or 0.0),
+            username=str(row.get("username") or ""),
+            display_name=str(row.get("display_name") or ""),
+            role=str(row.get("role") or "user"),
+            category=str(row.get("category") or "other"),
+            message=str(row.get("message") or ""),
+            contact=str(row.get("contact") or ""),
+            page_path=str(row.get("page_path") or ""),
+            page_title=str(row.get("page_title") or ""),
+            status=str(row.get("status") or "pending"),
+            resolved_at=float(row["resolved_at"]) if row.get("resolved_at") else None,
+            resolved_by=str(row.get("resolved_by") or ""),
+        ))
+    return out
+
+
+@app.post("/admin/feedback/{feedback_id}/resolve", response_model=FeedbackAdminOut)
+def admin_resolve_feedback(feedback_id: str, current_user: dict = Depends(get_current_user)):
+    _require_admin(current_user)
+    admin_name = _username_of(current_user)
+    changed = _mark_feedback_resolved(feedback_id, admin_name)
+    if not changed:
+        err.api_error(404, err.E_HTTP, "feedback_not_found", feedback_id=feedback_id)
+    reporter_id = str(changed.get("username") or "").strip()
+    if reporter_id:
+        _create_notice(
+            make_redis(),
+            reporter_id,
+            "问题反馈已处理",
+            "你提交的问题反馈已由管理员处理，感谢你的建议。",
+            kind="success",
+        )
+    return FeedbackAdminOut(
+        id=str(changed.get("id") or ""),
+        created_at=float(changed.get("created_at") or 0.0),
+        username=str(changed.get("username") or ""),
+        display_name=str(changed.get("display_name") or ""),
+        role=str(changed.get("role") or "user"),
+        category=str(changed.get("category") or "other"),
+        message=str(changed.get("message") or ""),
+        contact=str(changed.get("contact") or ""),
+        page_path=str(changed.get("page_path") or ""),
+        page_title=str(changed.get("page_title") or ""),
+        status=str(changed.get("status") or "pending"),
+        resolved_at=float(changed["resolved_at"]) if changed.get("resolved_at") else None,
+        resolved_by=str(changed.get("resolved_by") or ""),
+    )
 
 
 @app.get("/admin/reports", response_model=list[ReportOut])

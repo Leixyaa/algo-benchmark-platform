@@ -38,6 +38,14 @@ export const adminApi = {
   listReports() {
     return request("/admin/reports", { method: "GET" });
   },
+  listFeedback(limit = 500) {
+    return request("/admin/feedback", { method: "GET", query: { limit } });
+  },
+  resolveFeedback(feedbackId) {
+    return request(`/admin/feedback/${encodeURIComponent(String(feedbackId || "").trim())}/resolve`, {
+      method: "POST",
+    });
+  },
   resolveReport(reportId, payload) {
     return request(`/admin/reports/${reportId}/resolve`, {
       method: "POST",

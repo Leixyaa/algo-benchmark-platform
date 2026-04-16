@@ -195,6 +195,35 @@ class ReportResolve(BaseModel):
     resolution: str = ""
 
 
+class FeedbackCreate(BaseModel):
+    message: str
+    category: str = "other"
+    contact: str = ""
+    page_path: str = ""
+    page_title: str = ""
+
+
+class FeedbackOut(BaseModel):
+    id: str
+    created_at: float
+
+
+class FeedbackAdminOut(BaseModel):
+    id: str
+    created_at: float
+    username: str = ""
+    display_name: str = ""
+    role: str = "user"
+    category: str = "other"
+    message: str
+    contact: str = ""
+    page_path: str = ""
+    page_title: str = ""
+    status: str = "pending"
+    resolved_at: Optional[float] = None
+    resolved_by: str = ""
+
+
 class PresetCreate(BaseModel):
     preset_id: Optional[str] = None
     name: str
