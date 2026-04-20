@@ -573,6 +573,24 @@ def load_metric(r: redis.Redis, metric_id: str) -> Optional[Dict[str, Any]]:
     return _pick_newer_record(sql_item, redis_item)
 
 
+def load_metric_for_admin(r: redis.Redis, metric_id: str) -> Optional[Dict[str, Any]]:
+    """按 ID 加载指标；与列表接口使用同一套合并逻辑，避免偶发「列表可见但按 ID 加载为 404」。"""
+    mid = str(metric_id or "").strip()
+    if not mid:
+        return None
+    cur = load_metric(r, mid)
+    if cur:
+        return cur
+    for item in list_metrics(r, limit=5000) or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("metric_id") or "").strip() != mid:
+            continue
+        retry = load_metric(r, mid)
+        return retry if retry else item
+    return None
+
+
 def delete_metric(r: redis.Redis, metric_id: str) -> None:
     if sql_store.is_enabled():
         try:

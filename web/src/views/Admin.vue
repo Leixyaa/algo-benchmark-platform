@@ -1351,6 +1351,7 @@ function closeMetricReview() {
 async function submitMetricReview() {
   const row = activeMetric.value;
   if (!row?.id) return;
+  if (metricReviewSubmitting.value) return;
   try {
     metricReviewSubmitting.value = true;
     setLoading(reviewingMetricIds, row.id, true);

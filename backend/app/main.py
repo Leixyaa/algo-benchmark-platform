@@ -123,6 +123,7 @@ from .store import (
     delete_user,
     save_metric,
     load_metric,
+    load_metric_for_admin,
     delete_metric,
     list_metrics,
     save_algorithm_submission,
@@ -730,6 +731,24 @@ def _ensure_admin_account(r) -> dict:
     }
     save_user(r, _ADMIN_USERNAME, admin_user)
     return admin_user
+
+
+def _list_admin_usernames(r, *, limit: int = 10000) -> list[str]:
+    usernames: set[str] = set()
+    ensured = _ensure_admin_account(r)
+    ensured_username = str((ensured or {}).get("username") or _ADMIN_USERNAME).strip()
+    if ensured_username:
+        usernames.add(ensured_username)
+    for item in list_users(r, limit=limit) or []:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("username") or "").strip()
+        if not username:
+            continue
+        if _normalize_user_role(item) != "admin":
+            continue
+        usernames.add(username)
+    return sorted(usernames)
 
 
 @app.post("/register", response_model=UserOut)
@@ -3016,7 +3035,7 @@ def _create_notice(r, username: str, title: str, content: str, *, kind: str = "i
         "notice_id": f"notice_{uuid.uuid4().hex[:12]}",
         "username": owner,
         "kind": str(kind or "info").strip() or "info",
-        "title": str(title or "").strip() or "绯荤粺閫氱煡",
+        "title": str(title or "").strip() or "系统通知",
         "content": str(content or "").strip(),
         "created_at": time.time(),
         "read": False,
@@ -4932,6 +4951,13 @@ def create_algorithm_submission(payload: AlgorithmSubmissionCreate, current_user
     }
     save_algorithm_submission(r, submission_id, data)
     _append_algorithm_submission_history(r, data, archive_bytes=archive_bytes)
+    notice_title = "新的算法接入申请待审核"
+    notice_content = (
+        f"用户“{owner_id}”提交了算法代码包“{name}”（申请ID：{submission_id}），"
+        "请前往管理后台的“算法接入审核”处理。"
+    )
+    for admin_username in _list_admin_usernames(r):
+        _create_notice(r, admin_username, notice_title, notice_content, kind="warning")
     return _algorithm_submission_to_out(r, data)
 
 
@@ -5581,9 +5607,10 @@ def admin_review_metric(metric_id: str, payload: MetricReview, current_user: dic
         err.api_error(403, err.E_HTTP, "forbidden_access")
     r = make_redis()
     _ensure_catalog_defaults(r)
-    cur = load_metric(r, metric_id)
+    mid = str(metric_id or "").strip()
+    cur = load_metric_for_admin(r, mid)
     if not cur:
-        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=metric_id)
+        err.api_error(404, err.E_HTTP, "metric_not_found", metric_id=mid)
     cur["status"] = _normalize_metric_status(payload.status)
     cur["review_note"] = _validate_text_encoding(payload.review_note or "", "metric.review_note")
     implementation_type = str(cur.get("implementation_type") or "").lower()
@@ -5596,7 +5623,23 @@ def admin_review_metric(metric_id: str, payload: MetricReview, current_user: dic
     cur["runtime_ready"] = runtime_ready and implementation_type in {"builtin", "python"}
     cur["reviewed_by"] = _username_of(current_user)
     cur["reviewed_at"] = time.time()
-    save_metric(r, metric_id, cur)
+    save_mid = str(cur.get("metric_id") or mid).strip() or mid
+    save_metric(r, save_mid, cur)
+    owner_id = str(cur.get("owner_id") or "").strip()
+    if owner_id and owner_id != "system":
+        metric_name = str(cur.get("display_name") or cur.get("name") or save_mid).strip() or save_mid
+        if cur["status"] == "approved":
+            note = f"你提交的指标“{metric_name}”已审核通过。"
+            if cur.get("runtime_ready"):
+                note = f"{note} 已接入运行链路。"
+            if cur.get("review_note"):
+                note = f"{note} 审核说明：{cur['review_note']}"
+            _create_notice(r, owner_id, "指标审核已通过", note, kind="success")
+        elif cur["status"] == "rejected":
+            note = f"你提交的指标“{metric_name}”未通过审核。"
+            if cur.get("review_note"):
+                note = f"{note} 审核说明：{cur['review_note']}"
+            _create_notice(r, owner_id, "指标审核未通过", note, kind="warning")
     return MetricOut(**cur)
 
 
