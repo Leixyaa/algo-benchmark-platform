@@ -41,7 +41,7 @@
 
         <div class="action-group">
           <el-dropdown trigger="click" :disabled="!store.user.isLoggedIn">
-            <el-button size="small" :disabled="!store.user.isLoggedIn">导出数据</el-button>
+            <el-button size="small" class="bulk-action-btn" :disabled="!store.user.isLoggedIn">导出数据</el-button>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="exportDoneCsv">导出已完成 CSV</el-dropdown-item>
@@ -49,8 +49,8 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button size="small" type="danger" plain @click="clearSelected" :disabled="!store.user.isLoggedIn || selectedIds.length === 0">批量清除</el-button>
-          <el-button size="small" type="danger" plain @click="clearDone" :disabled="!store.user.isLoggedIn">清理已完成</el-button>
+          <el-button size="small" class="bulk-action-btn" type="danger" plain @click="clearSelected" :disabled="!store.user.isLoggedIn || selectedIds.length === 0">批量清除</el-button>
+          <el-button size="small" class="bulk-action-btn" type="danger" plain @click="clearDone" :disabled="!store.user.isLoggedIn">清理已完成</el-button>
         </div>
       </div>
 
@@ -89,6 +89,29 @@
             <span class="status-pill" :class="`status-pill--${statusTagType(row.status)}`">{{ statusText(row.status) }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="运行进度" min-width="170">
+          <template #default="{ row }">
+            <div v-if="isQueuedStatus(row.status)" class="queue-progress-cell">
+              <span class="queue-dot"></span>
+              <div>
+                <strong>等待调度</strong>
+                <span>任务已创建，正在排队</span>
+              </div>
+            </div>
+            <div v-else class="run-progress-cell" :class="{ 'run-progress-cell--active': isActiveStatus(row.status) }">
+              <el-progress
+                :percentage="safeProgress(row)"
+                :status="progressStatus(row)"
+                :stroke-width="8"
+                :show-text="false"
+              />
+              <div class="run-progress-meta">
+                <span>{{ safeProgress(row) }}%</span>
+                <span>{{ progressLabel(row) }}</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="综合评分" width="100" align="center">
           <template #default="{ row }">
             <div class="score-wrap">
@@ -101,19 +124,19 @@
         <el-table-column label="操作" width="180" align="center">
           <template #default="{ row }">
             <div class="row-actions">
-              <el-button size="small" type="primary" plain @click="openDetail(row)" :disabled="!store.user.isLoggedIn">详情</el-button>
-              <el-button v-if="canCancel(row)" size="small" type="warning" plain @click="cancel(row.id)" :disabled="!store.user.isLoggedIn">取消</el-button>
-              <el-button
-                v-if="canForceRemoveRun(row)"
-                size="small"
-                type="danger"
-                plain
-                @click="forceRemoveRun(row.id)"
-                :disabled="!store.user.isLoggedIn"
-              >
-                强制移除
-              </el-button>
-              <el-button v-if="!isActiveStatus(row.status)" size="small" type="danger" plain @click="remove(row.id)" :disabled="!store.user.isLoggedIn">删除</el-button>
+              <el-dropdown trigger="click" :disabled="!store.user.isLoggedIn">
+                <el-button size="small" class="run-manage-btn" :disabled="!store.user.isLoggedIn">
+                  管理
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="openDetail(row)">详情</el-dropdown-item>
+                    <el-dropdown-item v-if="canCancel(row)" @click="cancel(row.id)">取消任务</el-dropdown-item>
+                    <el-dropdown-item v-if="canForceRemoveRun(row)" divided @click="forceRemoveRun(row.id)">强制移除</el-dropdown-item>
+                    <el-dropdown-item v-if="!isActiveStatus(row.status)" divided @click="remove(row.id)">删除记录</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -150,6 +173,26 @@
               <span class="info-value">{{ detail.finishedAt || "-" }}</span>
             </div>
           </div>
+        </div>
+
+        <div v-if="isQueuedStatus(detail.status)" class="detail-progress-panel detail-progress-panel--queued">
+          <div class="detail-progress-head">
+            <span>运行进度</span>
+            <strong>等待调度</strong>
+          </div>
+          <p>任务已创建，正在等待 Worker 调度执行。</p>
+        </div>
+        <div v-else class="detail-progress-panel" :class="{ 'run-progress-cell--active': isActiveStatus(detail.status) }">
+          <div class="detail-progress-head">
+            <span>运行进度</span>
+            <strong>{{ safeProgress(detail) }}%</strong>
+          </div>
+          <el-progress
+            :percentage="safeProgress(detail)"
+            :status="progressStatus(detail)"
+            :stroke-width="12"
+          />
+          <p>{{ progressLabel(detail) }}</p>
         </div>
 
         <div class="detail-section-grid">
@@ -224,7 +267,7 @@
 export default { name: "Runs" };
 </script>
 <script setup>
-import { computed, onActivated, onMounted, ref, watch } from "vue";
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { TASK_LABEL_BY_TYPE, TASK_TYPE_BY_LABEL, useAppStore } from "../stores/app";
@@ -248,6 +291,9 @@ const taskFilter = ref("");
 const keyword = ref("");
 const detailVisible = ref(false);
 const detail = ref(null);
+const progressClock = ref(Date.now());
+const displayedProgressById = new Map();
+let progressClockTimer = null;
 
 const statusOptions = [
   { value: "queued", label: "排队中" },
@@ -564,10 +610,66 @@ function statusTagType(status) {
   return "info";
 }
 
+function safeProgress(row) {
+  const value = Number(row?.progress);
+  const text = statusText(row?.status);
+  const base = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : null;
+  const runId = getRunId(row);
+  const remember = (candidate) => {
+    const next = Math.max(0, Math.min(100, Math.round(Number(candidate) || 0)));
+    if (!runId) return next;
+    if (text === "已完成" || text === "失败" || text === "已取消") {
+      displayedProgressById.set(runId, next);
+      return next;
+    }
+    const prev = Number(displayedProgressById.get(runId));
+    const stable = Number.isFinite(prev) ? Math.max(prev, next) : next;
+    displayedProgressById.set(runId, stable);
+    return stable;
+  };
+  if (text === "已完成" || text === "失败" || text === "已取消") return remember(base ?? 100);
+  if (base != null) {
+    const updatedAt = Number(row?.progressUpdatedAt || 0);
+    const elapsedMs = Math.max(0, progressClock.value - (Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : progressClock.value));
+    const drift = Math.floor(elapsedMs / 1800);
+    let cap = Math.min(94, base + 3);
+    if (text === "排队中") cap = 24;
+    if (text === "取消中") cap = 98;
+    return remember(Math.max(base, Math.min(cap, base + drift)));
+  }
+  if (text === "已完成" || text === "失败" || text === "已取消") return remember(100);
+  if (text === "取消中") return remember(95);
+  if (text === "运行中") return remember(50);
+  if (text === "排队中") return remember(5);
+  return remember(0);
+}
+
+function progressStatus(row) {
+  const text = statusText(row?.status);
+  if (text === "已完成") return "success";
+  if (text === "失败") return "exception";
+  if (text === "取消中") return "warning";
+  return undefined;
+}
+
+function progressLabel(row) {
+  const text = statusText(row?.status);
+  if (text === "已完成") return "评测完成，指标已回写";
+  if (text === "失败") return "评测失败，请查看异常报告";
+  if (text === "已取消") return "任务已取消";
+  if (text === "取消中") return "正在取消任务";
+  const msg = String(row?.progressMessage || row?.raw?.progress_message || "").trim();
+  if (msg) return msg;
+  if (text === "排队中") return "等待调度";
+  if (text === "运行中") return "正在执行评测";
+  return "等待状态刷新";
+}
+
 function canCancel(row) {
   const text = statusText(row?.status);
   return text === "排队中" || text === "运行中";
 }
+function isQueuedStatus(status) { return statusText(status) === "排队中"; }
 function canForceRemoveRun(row) {
   return statusText(row?.status) === "取消中";
 }
@@ -756,7 +858,17 @@ function openDetail(row) {
 }
 
 onMounted(() => {
+  progressClockTimer = window.setInterval(() => {
+    progressClock.value = Date.now();
+  }, 500);
   refresh();
+});
+
+onBeforeUnmount(() => {
+  if (progressClockTimer != null) {
+    window.clearInterval(progressClockTimer);
+    progressClockTimer = null;
+  }
 });
 
 onActivated(() => {
@@ -859,9 +971,10 @@ watch(filteredRows, () => {
 
 .action-group {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .filter-item {
@@ -887,17 +1000,38 @@ watch(filteredRows, () => {
 }
 
 .refresh-btn,
-.refresh-list-btn,
-.action-group .el-button {
-  border-radius: 8px;
+.refresh-list-btn {
+  border-radius: 999px;
   font-size: 13px;
-  padding: 6px 16px;
+  padding: 6px 15px;
   transition: all 0.3s ease;
+}
+
+.bulk-action-btn {
+  width: 104px;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  transition: all 0.2s ease;
+}
+
+.bulk-action-btn :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  line-height: 1;
 }
 
 .refresh-btn:hover,
 .refresh-list-btn:hover,
-.action-group .el-button:hover {
+.bulk-action-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
 }
@@ -1001,6 +1135,92 @@ watch(filteredRows, () => {
   color: #0369a1;
 }
 
+.run-progress-cell {
+  min-width: 140px;
+}
+
+.queue-progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  color: #45627f;
+}
+
+.queue-progress-cell strong {
+  display: block;
+  color: #24415f;
+  font-size: 13px;
+}
+
+.queue-progress-cell span:not(.queue-dot) {
+  display: block;
+  margin-top: 2px;
+  color: #7b8aa5;
+  font-size: 12px;
+}
+
+.queue-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #38bdf8;
+  box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.14);
+  animation: queue-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes queue-pulse {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+
+.run-progress-cell--active :deep(.el-progress-bar__inner) {
+  background-size: 18px 18px;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.28) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.28) 50%,
+    rgba(255, 255, 255, 0.28) 75%,
+    transparent 75%,
+    transparent
+  );
+  animation: progress-stripe 0.85s linear infinite;
+}
+
+@keyframes progress-stripe {
+  from {
+    background-position: 18px 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+.run-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.run-progress-meta span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .score-wrap {
   display: flex;
   align-items: center;
@@ -1021,21 +1241,42 @@ watch(filteredRows, () => {
 
 .row-actions {
   display: flex;
-  gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
   justify-content: center;
+  width: 100%;
 }
 
-.row-actions .el-button {
-  border-radius: 6px;
-  font-size: 12px;
-  padding: 4px 12px;
-  transition: all 0.3s ease;
-  min-width: 60px;
+.run-manage-btn {
+  width: 96px;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border-color: #d7e3f6;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 4px 12px rgba(43, 89, 158, 0.08);
+  color: #253b5c;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  transition: all 0.2s ease;
 }
 
-.row-actions .el-button:hover {
+.run-manage-btn :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  line-height: 1;
+  text-align: center;
+}
+
+.run-manage-btn:hover {
+  border-color: #8fb4ff;
+  color: #2f6bff;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
 }
@@ -1105,6 +1346,33 @@ watch(filteredRows, () => {
 
 .info-item .el-tag {
   margin-top: 4px;
+}
+
+.detail-progress-panel {
+  padding: 18px 20px;
+  border: 1px solid #dbe7ff;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f7fbff 0%, #eef6ff 100%);
+}
+
+.detail-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: #1f2f57;
+  font-weight: 700;
+}
+
+.detail-progress-panel p {
+  margin: 10px 0 0;
+  color: #5d6f91;
+  font-size: 13px;
+}
+
+.detail-progress-panel--queued {
+  border-color: #c7e8ff;
+  background: linear-gradient(135deg, #f7fcff 0%, #edf8ff 100%);
 }
 
 .detail-section-grid {
@@ -1328,30 +1596,30 @@ watch(filteredRows, () => {
   .detail-section-grid, .detail-main-info, .params-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .toolbar-section {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .filter-group {
     order: 2;
   }
-  
+
   .action-group {
     order: 1;
     justify-content: flex-end;
   }
-  
+
   .filter-item, .search-input {
     min-width: 100%;
   }
-  
+
   .row-actions {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .row-actions .el-button {
     width: 100%;
   }
@@ -1365,16 +1633,16 @@ watch(filteredRows, () => {
   .runs-page-head .title {
     font-size: 24px;
   }
-  
+
   .main-card {
     padding: 16px;
   }
-  
+
   .detail-dialog :deep(.el-dialog) {
     width: 95% !important;
     margin: 20px auto !important;
   }
-  
+
   .detail-dialog :deep(.el-dialog__header),
   .detail-dialog :deep(.el-dialog__body) {
     padding: 16px;

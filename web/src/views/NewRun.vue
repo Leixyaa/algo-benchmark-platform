@@ -218,13 +218,34 @@
           </el-form>
         </div>
 
+        <div v-if="activeStep === 1" class="launch-panel">
+          <div class="launch-panel-text">
+            <div class="launch-panel-kicker">准备创建评测任务</div>
+            <div class="launch-panel-title">
+              将创建 {{ form.algorithmIds.length || 0 }} 条 Run，评测 {{ selectedPairCount }} 对有效样本
+            </div>
+            <div class="launch-panel-desc">
+              提交后可在任务中心实时查看状态、进度条、指标结果和异常信息。
+            </div>
+          </div>
+          <el-button
+            type="primary"
+            size="large"
+            class="launch-btn launch-btn-strong centered-btn"
+            :loading="creatingRun"
+            :disabled="creatingRun || !form.algorithmIds.length || !form.datasetId"
+            @click="create"
+          >
+            立即启动评测任务
+          </el-button>
+        </div>
+
         <div class="form-footer">
           <div class="footer-left">
             <el-button v-if="activeStep > 0" size="large" class="centered-btn" @click="activeStep--">上一步</el-button>
           </div>
           <div class="footer-center">
             <el-button v-if="activeStep < 1" type="primary" size="large" class="centered-btn" :disabled="!isNextEnabled" @click="activeStep++">下一步</el-button>
-            <el-button v-if="activeStep === 1" type="primary" size="large" class="launch-btn centered-btn" @click="create">启动评测任务</el-button>
           </div>
           <div class="footer-right">
             <!-- Space for balance -->
@@ -237,6 +258,29 @@
       <el-icon><InfoFilled /></el-icon>
       <span>温馨提示：系统会自动校验数据集的输入与 GT 配对情况，若配对数为 0 则无法启动任务。</span>
     </div>
+
+    <Transition name="create-overlay-fade">
+      <div v-if="creatingRun" class="create-overlay">
+        <div class="create-overlay-card">
+          <div class="create-orbit">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="create-overlay-kicker">正在提交评测任务</div>
+          <div class="create-overlay-title">{{ creatingRunText }}</div>
+          <el-progress
+            :percentage="creatingRunPercent"
+            :stroke-width="12"
+            striped
+            striped-flow
+          />
+          <div class="create-overlay-desc">
+            系统正在校验数据集、算法和指标配置，请稍等；任务创建完成后会自动关闭该提示。
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 
 </template>
@@ -254,6 +298,10 @@ import { datasetSupportsTaskType } from "../utils/datasetTask";
 const NEWRUN_CACHE_KEY = "newrun_form_v3";
 const router = useRouter();
 const store = useAppStore();
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 /** 数据集目录扫描仅管理员可用，不对普通用户暴露 */
 const isNewRunAdmin = computed(() => String(store.user?.role || "") === "admin");
@@ -373,6 +421,22 @@ function isVisiblePlatformAlgorithm(alg) {
 }
 const applyingPreset = ref(false);
 const activeStep = ref(0);
+const creatingRun = ref(false);
+const creatingRunIndex = ref(0);
+const creatingRunTotal = ref(0);
+const creatingRunDone = ref(0);
+
+const creatingRunPercent = computed(() => {
+  const total = Math.max(1, Number(creatingRunTotal.value || 1));
+  const done = Math.max(0, Math.min(total, Number(creatingRunDone.value || 0)));
+  return Math.max(5, Math.min(100, Math.round((done / total) * 100)));
+});
+
+const creatingRunText = computed(() => {
+  const total = Math.max(1, Number(creatingRunTotal.value || 1));
+  const current = Math.max(1, Math.min(total, Number(creatingRunIndex.value || 1)));
+  return `正在创建第 ${current}/${total} 个任务，已提交 ${creatingRunDone.value}/${total} 个`;
+});
 
 const BUILTIN_METRIC_KEYS = ["PSNR", "SSIM", "NIQE"];
 const metrics = ref([...BUILTIN_METRIC_KEYS]);
@@ -879,6 +943,7 @@ function clearPreset() {
 }
 
 async function create() {
+  if (creatingRun.value) return;
   await store.fetchAlgorithms(500, { force: true }).catch(() => {});
   const validIds = new Set((filteredAlgorithms.value || []).map((item) => String(item?.id || "")));
   const nextAlgorithmIds = (form.algorithmIds || []).filter((id) => validIds.has(String(id || "")));
@@ -921,6 +986,10 @@ async function create() {
   }
   if (!Object.prototype.hasOwnProperty.call(params, "param_scheme")) params.param_scheme = "default";
 
+  creatingRun.value = true;
+  creatingRunTotal.value = targetAlgorithmIds.length;
+  creatingRunIndex.value = 1;
+  creatingRunDone.value = 0;
   try {
     const creationResults = [];
     const failures = [];
@@ -949,6 +1018,7 @@ async function create() {
     try {
       for (let i = 0; i < total; i++) {
         const algorithmId = targetAlgorithmIds[i];
+        creatingRunIndex.value = i + 1;
         if (progressTip) progressTip.close();
         progressTip = ElMessage({
           type: "info",
@@ -957,6 +1027,7 @@ async function create() {
         });
         try {
           await createOne(algorithmId);
+          creatingRunDone.value = creationResults.length;
         } catch (error) {
           failures.push({ algorithmId, error });
         }
@@ -974,6 +1045,10 @@ async function create() {
       err.failedAlgorithmId = first.algorithmId || "";
       throw err;
     }
+    creatingRunDone.value = total;
+    await wait(360);
+    creatingRun.value = false;
+    await wait(180);
     // 让用户选择是否留在当前页面或转到任务中心
     try {
       await ElMessageBox.confirm(
@@ -1039,6 +1114,11 @@ async function create() {
       if (d.message) return ElMessage({ type: "error", message: `创建失败：${d.message}` });
     }
     ElMessage({ type: "error", message: `创建 Run 失败：${e?.message || e}` });
+  } finally {
+    creatingRun.value = false;
+    creatingRunIndex.value = 0;
+    creatingRunTotal.value = 0;
+    creatingRunDone.value = 0;
   }
 }
 
@@ -1607,6 +1687,60 @@ function goRuns() {
   box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
+.launch-panel {
+  position: sticky;
+  bottom: 18px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 36px 0 12px;
+  padding: 22px 24px;
+  border: 1px solid rgba(47, 107, 255, 0.22);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(47, 107, 255, 0.16), transparent 30%),
+    linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%);
+  box-shadow: 0 18px 42px rgba(37, 99, 235, 0.16);
+}
+
+.launch-panel-kicker {
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.launch-panel-title {
+  margin-top: 6px;
+  color: #10213f;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.launch-panel-desc {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.launch-btn-strong {
+  min-width: 220px;
+  height: 56px;
+  border: none;
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 900;
+  background: linear-gradient(135deg, #2563eb 0%, #0f46c8 100%);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.32);
+}
+
+.launch-btn-strong:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.38);
+}
+
 /* Footer & Tips */
 .form-footer {
   margin-top: 48px;
@@ -1684,6 +1818,124 @@ function goRuns() {
   font-size: 16px;
 }
 
+.create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.create-overlay-fade-enter-active,
+.create-overlay-fade-leave-active {
+  transition: opacity 0.34s ease, backdrop-filter 0.34s ease;
+}
+
+.create-overlay-fade-enter-from,
+.create-overlay-fade-leave-to {
+  opacity: 0;
+  backdrop-filter: blur(0);
+}
+
+.create-overlay-fade-enter-active .create-overlay-card,
+.create-overlay-fade-leave-active .create-overlay-card {
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.34s ease;
+}
+
+.create-overlay-fade-enter-from .create-overlay-card {
+  opacity: 0;
+  transform: translateY(18px) scale(0.96);
+}
+
+.create-overlay-fade-leave-to .create-overlay-card {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.98);
+}
+
+.create-overlay-card {
+  width: min(520px, 100%);
+  padding: 34px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(47, 107, 255, 0.18), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #f4f8ff 100%);
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.26);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  text-align: center;
+}
+
+.create-orbit {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  margin: 0 auto 18px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #13c2c2);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.32);
+}
+
+.create-orbit span {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ffffff;
+  animation: orbit-dot 1.2s ease-in-out infinite;
+}
+
+.create-orbit span:nth-child(1) {
+  top: 15px;
+  left: 31px;
+}
+
+.create-orbit span:nth-child(2) {
+  top: 45px;
+  left: 18px;
+  animation-delay: 0.16s;
+}
+
+.create-orbit span:nth-child(3) {
+  top: 45px;
+  right: 18px;
+  animation-delay: 0.32s;
+}
+
+@keyframes orbit-dot {
+  0%, 100% {
+    transform: scale(0.72);
+    opacity: 0.58;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+.create-overlay-kicker {
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.create-overlay-title {
+  margin: 8px 0 22px;
+  color: #10213f;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.create-overlay-desc {
+  margin-top: 16px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
   border-radius: 8px;
@@ -1744,6 +1996,21 @@ function goRuns() {
     flex-direction: column;
     gap: 12px;
     align-items: stretch;
+  }
+
+  .launch-panel {
+    position: static;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 18px;
+  }
+
+  .launch-panel-title {
+    font-size: 17px;
+  }
+
+  .launch-btn-strong {
+    width: 100%;
   }
   
   .footer-center {

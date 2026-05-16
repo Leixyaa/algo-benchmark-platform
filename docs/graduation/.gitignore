@@ -1,4 +1,15 @@
 *
 !.gitignore
 !README.md
-!REQUIREMENTS_EXTRACTED_TEMPLATE.md
+!BULK_COMPARE_GUIDE.md
+!ERROR_CODES.md
+!EXPERIMENT_RECORD_FIELDS.md
+!全功能测试用例_稳定性回归版.md
+!导师演示_全流程操作手册.md
+!演示数据固化清单.md
+!答辩交付_演示脚本_验收清单_论文章节映射.md
+!系统总测试表_验收版.md
+!系统架构_流程_ER_实现说明.md
+!系统验收准备文档_完整答辩版.md
+!计算环境_条件一_满足说明.md
+!计算环境_条件一_验收清单.md

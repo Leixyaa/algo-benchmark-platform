@@ -102,7 +102,7 @@ if (-not $SkipMySQL) {
 Start-ServiceWindow `
   -Title "ABP - Backend API" `
   -WorkingDir $backendDir `
-  -CommandText '.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001'
+  -CommandText '.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 8001'
 
 for ($i = 1; $i -le $WorkerCount; $i++) {
   Start-ServiceWindow `

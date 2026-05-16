@@ -654,6 +654,7 @@ def _compute_run_for_task_from_pairs(
     selected_metrics: list[str],
     metric_defs: dict[str, dict[str, Any]],
     task_type: str,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, float], dict[str, Any], list[dict[str, Any]]]:
     psnr_list: list[float] = []
     ssim_list: list[float] = []
@@ -705,6 +706,11 @@ def _compute_run_for_task_from_pairs(
         metric_niqe_elapsed_list.append(float(timings["niqe_elapsed"]))
         metric_custom_elapsed_list.append(float(timings["custom_elapsed"]))
         samples.append(_filter_sample_metrics(sample, selected_metrics))
+        if progress_callback is not None:
+            total = max(1, len(pairs))
+            step = max(1, total // 50)
+            if processed_count == 1 or processed_count == total or processed_count % step == 0:
+                progress_callback(processed_count, total)
 
     if processed_count <= 0:
         if strict_validate:
@@ -815,6 +821,16 @@ def _make_synthetic_pair_for_task(task_type: str, seed: int) -> tuple[np.ndarray
 
 
 
+def _set_run_progress(run: Dict[str, Any], progress: int, stage: str, message: str) -> None:
+    try:
+        value = int(progress)
+    except Exception:
+        value = 0
+    run["progress"] = max(0, min(100, value))
+    run["stage"] = str(stage or "")
+    run["progress_message"] = str(message or "")
+
+
 @celery_app.task(name="runs.execute")
 def execute_run(run_id: str) -> Dict[str, Any]:
     r = make_redis()
@@ -840,6 +856,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     if status0 in {"canceled", "canceling"} or run.get("cancel_requested"):
         finished = time.time()
         run["status"] = "canceled"
+        _set_run_progress(run, 100, "canceled", "\u4efb\u52a1\u5df2\u53d6\u6d88")
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
         run["error"] = "任务已取消"
@@ -852,6 +869,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
 
     now = time.time()
     run["status"] = "running"
+    _set_run_progress(run, 12, "starting", "\u6b63\u5728\u542f\u52a8\u8bc4\u6d4b\u4efb\u52a1")
     run["started_at"] = now
     run["error"] = None
     run["error_code"] = None
@@ -913,6 +931,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             "allow_use": bool(alg.get("allow_use")),
             "is_active": alg.get("is_active", True),
         }
+    _set_run_progress(run, 24, "loading_resources", "\u5df2\u8f7d\u5165\u6570\u636e\u96c6\u548c\u7b97\u6cd5\u914d\u7f6e")
     run["record"] = record
     save_run(r, run_id, run)
 
@@ -993,6 +1012,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 }
             )
             run["record"] = record
+            _set_run_progress(run, 38, "pairing_data", "\u5df2\u5b8c\u6210\u8f93\u5165\u4e0e\u771f\u503c\u6570\u636e\u914d\u5bf9")
             _ensure_run_diag_params(
                 run,
                 eval_mode=eval_mode,
@@ -1056,6 +1076,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 return "Baseline"
 
             _ensure_run_diag_params(run, real_algo=pick_impl_name(), input_dir=input_dirname)
+            _set_run_progress(run, 48, "preparing_algorithm", "\u5df2\u786e\u5b9a\u5b9e\u9645\u6267\u884c\u7b97\u6cd5")
             save_run(r, run_id, run)
 
             def compute_pred(inp_u8: np.ndarray, gt_u8: np.ndarray, pair: Any) -> np.ndarray:
@@ -1212,7 +1233,16 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 return inp_u8
 
             if pairs:
+                _set_run_progress(run, 20, "running_algorithm", "\u6b63\u5728\u6267\u884c\u7b97\u6cd5\u5e76\u8ba1\u7b97\u6307\u6807")
+                save_run(r, run_id, run)
                 if is_video_task:
+                    def update_video_progress(done: int, total: int) -> None:
+                        total_safe = max(1, int(total or 1))
+                        done_safe = max(0, min(total_safe, int(done or 0)))
+                        percent = 20 + int((done_safe / total_safe) * 70)
+                        _set_run_progress(run, percent, "running_algorithm", f"\u6b63\u5728\u5904\u7406\u89c6\u9891\u6837\u672c {done_safe}/{total_safe}\uff0c\u5e76\u8ba1\u7b97\u6307\u6807")
+                        save_run(r, run_id, run)
+
                     vm_max = _video_metric_max_frames(algo_params)
                     psnr_list: list[float] = []
                     ssim_list: list[float] = []
@@ -1276,6 +1306,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                                 metric_niqe_elapsed_list.extend(p_nel)
                                 metric_custom_elapsed_list.extend(p_cel)
                                 samples.append(_filter_sample_metrics(mean_row, selected_metrics))
+                                update_video_progress(read_ok, len(pairs))
                             else:
                                 (
                                     p_psnr,
@@ -1314,6 +1345,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                                 metric_niqe_elapsed_list.extend(p_nel)
                                 metric_custom_elapsed_list.extend(p_cel)
                                 samples.append(_filter_sample_metrics(mean_row, selected_metrics))
+                                update_video_progress(read_ok, len(pairs))
                         except RunFailed:
                             raise
                     if read_ok <= 0:
@@ -1361,9 +1393,19 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                         selected_metrics=selected_metrics,
                         metric_defs=metric_defs,
                         task_type=task_type,
+                        progress_callback=lambda done, total: (
+                            _set_run_progress(
+                                run,
+                                20 + int((max(0, min(max(1, int(total or 1)), int(done or 0))) / max(1, int(total or 1))) * 70),
+                                "running_algorithm",
+                                f"\u6b63\u5728\u5904\u7406\u56fe\u50cf\u6837\u672c {max(0, min(max(1, int(total or 1)), int(done or 0)))}/{max(1, int(total or 1))}\uff0c\u5e76\u8ba1\u7b97\u6307\u6807",
+                            ),
+                            save_run(r, run_id, run),
+                        ),
                     )
                 finished = time.time()
                 run["status"] = "done"
+                _set_run_progress(run, 100, "completed", "\u8bc4\u6d4b\u5b8c\u6210\uff0c\u6307\u6807\u5df2\u56de\u5199")
                 run["finished_at"] = finished
                 run["elapsed"] = round(finished - run["started_at"], 3)
                 run["metrics"] = metrics
@@ -1419,6 +1461,8 @@ def execute_run(run_id: str) -> Dict[str, Any]:
                 )
 
             check_cancel()
+            _set_run_progress(run, 62, "running_algorithm", "\u6b63\u5728\u6267\u884c\u6f14\u793a\u6570\u636e\u8bc4\u6d4b")
+            save_run(r, run_id, run)
             gt_u8, inp_u8 = _make_synthetic_pair_for_task(task_type=task_type, seed=seed)
             t0 = time.time()
             pred_u8 = compute_pred(inp_u8, gt_u8, None)
@@ -1450,6 +1494,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             check_cancel()
             finished = time.time()
             run["status"] = "done"
+            _set_run_progress(run, 100, "completed", "\u8bc4\u6d4b\u5b8c\u6210\uff0c\u6307\u6807\u5df2\u56de\u5199")
             run["finished_at"] = finished
             run["elapsed"] = round(finished - run["started_at"], 3)
             run["metrics"] = metrics
@@ -1510,6 +1555,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
         metrics = _filter_metrics(_simulate_metrics(seed), selected_metrics)
         finished = time.time()
         run["status"] = "done"
+        _set_run_progress(run, 100, "completed", "\u8bc4\u6d4b\u5b8c\u6210\uff0c\u6307\u6807\u5df2\u56de\u5199")
         run["finished_at"] = finished
         run["elapsed"] = round(finished - run["started_at"], 3)
         run["metrics"] = metrics
@@ -1525,6 +1571,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     except RunCanceled:
         finished = time.time()
         run["status"] = "canceled"
+        _set_run_progress(run, 100, "canceled", "\u4efb\u52a1\u5df2\u53d6\u6d88")
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or finished), 3)
         run["error"] = "任务已取消"
@@ -1538,6 +1585,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
     except RunFailed as e:
         finished = time.time()
         run["status"] = "failed"
+        _set_run_progress(run, 100, "failed", "\u8bc4\u6d4b\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u5f02\u5e38\u62a5\u544a")
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or finished), 3)
         run["error"] = e.message
@@ -1590,6 +1638,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             record["retry"] = retry_info
             run["record"] = record
             run["status"] = "queued"
+            _set_run_progress(run, 8, "retry_waiting", "\u4efb\u52a1\u5c06\u91cd\u8bd5\uff0c\u6b63\u5728\u7b49\u5f85\u91cd\u65b0\u8c03\u5ea6")
             run["started_at"] = None
             run["finished_at"] = None
             run["elapsed"] = None
@@ -1602,6 +1651,7 @@ def execute_run(run_id: str) -> Dict[str, Any]:
             return {"ok": False, "run_id": run_id, "retrying": True, "next_attempt": attempt_count + 1}
         finished = time.time()
         run["status"] = "failed"
+        _set_run_progress(run, 100, "failed", "\u8bc4\u6d4b\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u5f02\u5e38\u62a5\u544a")
         run["finished_at"] = finished
         run["elapsed"] = round(finished - run["started_at"], 3)
         run["error"] = f"{type(e).__name__}: {e}"

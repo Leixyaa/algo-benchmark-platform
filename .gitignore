@@ -1,66 +1,73 @@
-# ===== Node / Frontend =====
+# Node / frontend
 node_modules/
+web/node_modules/
 dist/
+web/dist/
+web/dist-desktop/
 .vite/
-*.log
 
-# ===== Python / Backend =====
+# Python / backend
 backend/.venv/
-backend/data/
-/data/
+.venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
-.env
 
-# ===== OS / IDE =====
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-.tmp-edge/
-
-# ===== Reports / Outputs =====
-outputs/
-reports/
-*.csv
-*.xlsx
-
+# Runtime data and local services
+backend/data/
+/data/
 logs/
-
-# ===== Celery =====
+*.log
 celerybeat-schedule
 
-# ===== Local Datasets / Exports (Generated) =====
-数据集/
-docs/导出文件/
-
-# ===== Large archives / bundles (GitHub 单文件 100MB 限制) =====
-# 后端依赖包、整包备份等请勿入库；需要时请用网盘或 Release 附件
-backend/**/*.zip
-*.7z
-
-# ===== Desktop / 本地构建产物（可重新生成）=====
-web/dist-desktop/
-release/
-desktop/release/
-desktop/release-portable/
-desktop/release-strong/
-
-# ===== 环境变量与本地覆盖（勿提交密钥与机器相关路径）=====
-# 根目录已有 .env；以下为常见变体与桌面专用配置
+# Local environment files
+.env
 .env.local
 .env.*.local
 web/.env.desktop
 web/.env.development.local
 web/.env.production.local
 
-# ===== 测试与覆盖率 =====
-coverage/
-.nyc_output/
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
-# ===== 临时与缓存 =====
+# Temporary files
+.tmp*/
+.codex-tmp/
+.tmp-edge/
 *.tmp
 *.temp
 .cache/
+
+# Generated reports and exports
+outputs/
+reports/
+*.csv
+*.xlsx
+
+# Local datasets and generated docs exports
+数据集/
+docs/导出文件/
+
+# Large archives and local delivery bundles
+release/
+desktop/release/
+desktop/release-portable/
+desktop/release-strong/
+backend/**/*.zip
+*.7z
+
+# Thesis process materials kept outside the engineering repo
+docs/论文资料/
+docs/论文写作资料/
+docs/参考文献库/
+docs/图/
+
+# Test / coverage
+coverage/
+.nyc_output/

@@ -2997,9 +2997,17 @@ def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
     owner = str(username or "").strip()
     if not owner:
         return []
+    all_sql_items: list[dict] = []
+    sql_item_map: dict[str, dict] = {}
     sql_items = _sql_record_list("notice", limit=5000)
     if sql_items is not None:
-        sql_items = [item for item in sql_items if str(item.get("username") or "") == owner]
+        all_sql_items = [item for item in sql_items if str(item.get("username") or "") == owner]
+        sql_item_map = {
+            str(item.get("notice_id") or "").strip(): item
+            for item in all_sql_items
+            if str(item.get("notice_id") or "").strip()
+        }
+        sql_items = list(all_sql_items)
         if unread_only:
             sql_items = [item for item in sql_items if not bool(item.get("read"))]
         if not sql_store.allow_redis_fallback():
@@ -3013,6 +3021,16 @@ def _list_notices(r, username: str, unread_only: bool = False) -> list[dict]:
                 continue
             data = json.loads(raw)
             if not isinstance(data, dict):
+                continue
+            notice_id = str(data.get("notice_id") or "").strip()
+            sql_item = sql_item_map.get(notice_id)
+            if sql_item is not None:
+                # SQL 已经成为通知状态的权威来源，若 Redis 里仍保留旧副本，
+                # 在列表读取时直接用 SQL 数据回写，避免角标与通知页口径不一致。
+                try:
+                    r.set(_notice_key(owner, notice_id), json.dumps(sql_item, ensure_ascii=False))
+                except Exception:
+                    pass
                 continue
             if unread_only and bool(data.get("read")):
                 continue
@@ -6505,6 +6523,9 @@ def create_run(payload: RunCreate, current_user: dict = Depends(get_current_user
         "cancel_requested": False,
 
         "status": "queued",
+        "progress": 5,
+        "stage": "queued",
+        "progress_message": "\u4efb\u52a1\u5df2\u521b\u5efa\uff0c\u7b49\u5f85\u8c03\u5ea6",
         "created_at": created,
         "started_at": None,
         "finished_at": None,
@@ -6850,7 +6871,19 @@ def cancel_run(run_id: str, current_user: dict = Depends(get_current_user)):
 
     status = (run.get("status") or "").lower()
     if status in {"done", "failed", "canceled"}:
-        return {"ok": True, "run_id": run_id, "status": status}
+        message_by_status = {
+            "done": "\u8bc4\u6d4b\u5b8c\u6210\uff0c\u6307\u6807\u5df2\u56de\u5199",
+            "failed": "\u8bc4\u6d4b\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u5f02\u5e38\u62a5\u544a",
+            "canceled": "\u4efb\u52a1\u5df2\u53d6\u6d88",
+        }
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "status": status,
+            "progress": 100,
+            "stage": status,
+            "progress_message": message_by_status.get(status, ""),
+        }
 
     cancel_key = f"run_cancel:{run_id}"
     r.set(cancel_key, "1", ex=24 * 3600)
@@ -6859,15 +6892,21 @@ def cancel_run(run_id: str, current_user: dict = Depends(get_current_user)):
         celery_app.control.revoke(run_id)
         finished = time.time()
         run["status"] = "canceled"
+        run["progress"] = 100
+        run["stage"] = "canceled"
+        run["progress_message"] = "\u4efb\u52a1\u5df2\u53d6\u6d88"
         run["finished_at"] = finished
         run["elapsed"] = round(finished - (run.get("started_at") or run.get("created_at") or finished), 3)
         run["error"] = "\u5df2\u53d6\u6d88"
         run["error_code"] = "E_CANCELED"
         run["error_detail"] = {"run_id": run_id, "phase": "queued"}
         save_run(r, run_id, run)
-        return {"ok": True, "run_id": run_id, "status": "canceled"}
+        return {"ok": True, "run_id": run_id, "status": "canceled", "progress": 100, "stage": "canceled", "progress_message": "\u4efb\u52a1\u5df2\u53d6\u6d88"}
 
     run["status"] = "canceling"
+    run["progress"] = max(int(run.get("progress") or 0), 95)
+    run["stage"] = "canceling"
+    run["progress_message"] = "\u6b63\u5728\u53d6\u6d88\u4efb\u52a1"
     save_run(r, run_id, run)
     celery_app.control.revoke(run_id, terminate=False)
-    return {"ok": True, "run_id": run_id, "status": "canceling"}
+    return {"ok": True, "run_id": run_id, "status": "canceling", "progress": run["progress"], "stage": "canceling", "progress_message": run["progress_message"]}

@@ -62,7 +62,7 @@
 export default { name: "Notices" };
 </script>
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import http from "../api/http";
@@ -115,6 +115,7 @@ function formatTime(ts) {
 async function loadNotices() {
   if (!store.user.isLoggedIn) {
     notices.value = [];
+    store.notices = [];
     return;
   }
   loading.value = true;
@@ -178,7 +179,15 @@ async function clearRead() {
   }
 }
 
+watch(
+  () => store.user.isLoggedIn,
+  () => {
+    loadNotices();
+  }
+);
+
 onMounted(loadNotices);
+onActivated(loadNotices);
 </script>
 
 <style scoped>

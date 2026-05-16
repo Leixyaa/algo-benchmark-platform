@@ -3,7 +3,7 @@
     <div class="header-section">
       <h2 class="title">&#31639;&#27861;&#24211;</h2>
       <div class="subtitle">
-        &#36825;&#37324;&#20027;&#35201;&#29992;&#20110;&#26597;&#30475;&#24179;&#21488;&#31639;&#27861;&#12289;&#24050;&#19979;&#36733;&#31038;&#53306;&#31639;&#27861;&#19982;&#21382;&#21490;&#29992;&#25143;&#31639;&#27861;&#35760;&#24405;&#65307;&#26032;&#30340;&#33258;&#23450;&#20041;&#31639;&#27861;&#35831;&#36208;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#27969;&#31243;&#25552;&#20132;&#20195;&#30721;&#21253;&#12290;
+        &#36825;&#37324;&#20027;&#35201;&#29992;&#20110;&#26597;&#30475;&#24179;&#21488;&#31639;&#27861;&#12289;&#24050;&#19979;&#36733;&#31038;&#21306;&#31639;&#27861;&#19982;&#21382;&#21490;&#29992;&#25143;&#31639;&#27861;&#35760;&#24405;&#65307;&#26032;&#30340;&#33258;&#23450;&#20041;&#31639;&#27861;&#35831;&#36208;&#8220;&#31639;&#27861;&#25509;&#20837;&#8221;&#27969;&#31243;&#25552;&#20132;&#20195;&#30721;&#21253;&#12290;
       </div>
     </div>
 
@@ -116,9 +116,9 @@
             <el-table-column prop="impl" label="&#23454;&#29616;&#26041;&#24335;" width="120" />
             <el-table-column prop="version" label="&#29256;&#26412;" width="100" />
             <el-table-column prop="createdAt" label="&#21019;&#24314;&#26102;&#38388;" width="180" />
-            <el-table-column label="&#25805;&#20316;" width="180">
+            <el-table-column v-if="store.user.role === 'admin'" label="&#25805;&#20316;" width="140" align="center">
               <template #default="{ row }">
-                <el-dropdown v-if="canManagePlatformAlgorithm(row)" trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
+                <el-dropdown trigger="click" @command="(cmd) => handlePlatformAlgorithmAction(row, cmd)">
                   <el-button size="small" class="table-action-btn" :loading="exportingAlgorithms.has(row.id)" :disabled="!store.user.isLoggedIn">
                     {{ exportingAlgorithms.has(row.id) ? "下载中" : TEXT.manage }}<el-icon v-if="!exportingAlgorithms.has(row.id)" class="el-icon--right"><arrow-down /></el-icon>
                   </el-button>
@@ -130,10 +130,6 @@
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-                <template v-else>
-                  <el-button size="small" icon="Setting" class="table-action-btn readonly-action-btn" @click="viewBuiltinParams(row)">&#26597;&#30475;&#21442;&#25968;</el-button>
-                  <el-tag size="small" type="info" class="readonly-tag">&#21482;&#35835;</el-tag>
-                </template>
               </template>
             </el-table-column>
           </el-table>
@@ -214,7 +210,7 @@
           </el-form-item>
 
           <el-form-item label="代码包文件">
-            <div class="file-upload-row">
+            <div class="file-upload-card">
               <input
                 ref="archiveInput"
                 type="file"
@@ -222,11 +218,17 @@
                 accept=".zip,.py"
                 @change="handleArchiveChange"
               />
-              <el-button plain @click="triggerArchiveSelect">选择文件</el-button>
-              <span class="file-name">{{ accessForm.archiveFilename || "未选择文件" }}</span>
-              <el-button v-if="accessForm.archiveFilename" text type="danger" @click="clearArchive">清除</el-button>
+              <div class="file-upload-main">
+                <el-button class="file-select-btn" plain @click="triggerArchiveSelect">选择文件</el-button>
+                <div class="file-meta">
+                  <div class="file-name" :class="{ empty: !accessForm.archiveFilename }">
+                    {{ accessForm.archiveFilename || "暂未选择代码包" }}
+                  </div>
+                  <div class="file-tip">支持上传 <code>.py</code> 或 <code>.zip</code>，审核通过后自动关联到用户算法。</div>
+                </div>
+              </div>
+              <el-button v-if="accessForm.archiveFilename" class="file-clear-btn" plain type="danger" @click="clearArchive">清除</el-button>
             </div>
-            <div class="file-tip">请上传 <code>.py</code> 或 <code>.zip</code>。通过审核后会自动关联到用户算法。</div>
           </el-form-item>
         </el-form>
       </div>
@@ -2274,6 +2276,10 @@ async function resetToBuiltins() {
   padding: 12px 16px;
 }
 
+.data-table :deep(.el-table__cell) {
+  vertical-align: middle;
+}
+
 .data-table :deep(.el-table__row) {
   transition: background-color 0.2s ease;
 }
@@ -2282,37 +2288,38 @@ async function resetToBuiltins() {
   background-color: #f8faff !important;
 }
 
-.readonly-tag {
+.table-action-btn {
+  width: 112px;
+  height: 34px;
+  padding: 0 14px;
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
-  font-size: 12px;
-  min-width: 42px;
-  height: 30px;
   justify-content: center;
+  border-radius: 999px;
+  border-color: #d7e3f6;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 4px 12px rgba(43, 89, 158, 0.08);
+  color: #253b5c;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
-.readonly-tag :deep(.el-tag__content) {
+.table-action-btn :deep(span) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   line-height: 1;
 }
 
-.table-action-btn {
-  width: 104px;
-  height: 32px;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.readonly-action-btn {
-  margin-right: 8px;
+.table-action-btn:hover,
+.table-action-btn:focus {
+  border-color: #8fb4ff;
+  color: #2f6bff;
+  box-shadow: 0 8px 18px rgba(47, 107, 255, 0.14);
+  transform: translateY(-1px);
 }
 
 .pagination-row {
@@ -2595,11 +2602,41 @@ async function resetToBuiltins() {
   width: 100%;
 }
 
-.file-upload-row {
+.file-upload-card {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #dbe7ff;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fbfdff 0%, #f5f8ff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.file-upload-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.file-select-btn {
+  width: 112px;
+  height: 38px;
+  border-radius: 999px;
+  border-color: #bcd2ff;
+  color: #2f6bff;
+  font-weight: 700;
+  background: #ffffff;
+}
+
+.file-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .hidden-file-input {
@@ -2607,29 +2644,45 @@ async function resetToBuiltins() {
 }
 
 .file-name {
-  color: #3b4b72;
-  font-size: 13px;
+  max-width: 520px;
+  overflow: hidden;
+  color: #263b60;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-name.empty {
+  color: #8b99b7;
+  font-weight: 600;
 }
 
 .file-tip {
-  margin-top: 8px;
   color: #7d8cac;
   font-size: 13px;
+}
+
+.file-clear-btn {
+  min-width: 76px;
+  height: 36px;
+  border-radius: 999px;
+  font-weight: 700;
 }
 
 @media (max-width: 768px) {
   .page {
     padding: 16px;
   }
-  
+
   .title {
     font-size: 24px;
   }
-  
+
   .action-bar {
     padding: 20px;
   }
-  
+
   .toolbar-left {
     flex-direction: column;
     align-items: stretch;
@@ -2639,17 +2692,17 @@ async function resetToBuiltins() {
     flex-direction: column;
     align-items: flex-start;
   }
-  
+
   .filter-left {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .filter-box,
   .filter-input {
     width: 100%;
   }
-  
+
   .algorithm-form-container {
     flex-direction: column;
   }
@@ -2657,7 +2710,22 @@ async function resetToBuiltins() {
   .inline-grid {
     grid-template-columns: 1fr;
   }
-  
+
+  .file-upload-card,
+  .file-upload-main {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .file-select-btn,
+  .file-clear-btn {
+    width: 100%;
+  }
+
+  .file-name {
+    max-width: 100%;
+  }
+
   .form-left,
   .form-right {
     max-width: 100%;

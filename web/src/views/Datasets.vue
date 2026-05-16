@@ -177,6 +177,70 @@
         <el-button type="primary" @click="saveTaskTypesEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="showLayoutGuide"
+      title="目录与导入说明"
+      width="920px"
+      class="dataset-layout-dialog"
+      destroy-on-close
+    >
+      <div class="layout-guide">
+        <div class="layout-guide-summary">
+          <div>
+            <div class="summary-title">推荐直接上传 ZIP，平台会自动扫描并识别适用任务</div>
+            <div class="summary-text">准备数据时只需要保证输入目录与 <code>gt</code> 目录文件同名配对。</div>
+          </div>
+          <el-tag type="primary" effect="light" round>ZIP 导入</el-tag>
+        </div>
+
+        <div class="layout-guide-body">
+          <div class="layout-guide-rules">
+            <div class="rule-card">
+              <div class="rule-title">图像任务目录</div>
+              <div class="rule-text">根目录建议包含 <code>gt</code> 和一个或多个任务输入目录。</div>
+              <div class="rule-chip-row">
+                <span>hazy 去雾</span>
+                <span>noisy 去噪</span>
+                <span>blur 去模糊</span>
+                <span>lr 超分</span>
+                <span>dark 低照度</span>
+              </div>
+            </div>
+
+            <div class="rule-card">
+              <div class="rule-title">视频任务目录</div>
+              <div class="rule-text">视频数据同样使用输入目录和 <code>gt</code> 目录配对。</div>
+              <div class="rule-list">
+                <div>创建 Run 时选择 <code>video_denoise</code> 或 <code>video_sr</code>。</div>
+                <div>输入视频文件名需要与 <code>gt</code> 中的视频文件名一致。</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="layout-example-card">
+            <div class="example-title">推荐 ZIP 结构示例</div>
+            <pre>dataset.zip
+├─ gt/
+│  ├─ 0001.png
+│  └─ 0002.png
+├─ hazy/
+│  ├─ 0001.png
+│  └─ 0002.png
+└─ noisy/
+   ├─ 0001.png
+   └─ 0002.png</pre>
+          </div>
+        </div>
+
+        <div class="layout-guide-warning">
+          ZIP 导入会替换当前数据集目录内容，请先确认目标数据集无误，再执行导入。
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="showLayoutGuide = false">我知道了</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -207,6 +271,7 @@ function datasetSelectLabel(d) {
 }
 
 const showCreate = ref(false);
+const showLayoutGuide = ref(false);
 const activeDatasetTab = ref("owned");
 const selectedDatasetId = ref("");
 const importTargetId = ref("");
@@ -341,17 +406,7 @@ function closeCreate() {
 }
 
 function showDatasetLayoutGuide() {
-  ElMessageBox.alert(
-    [
-      "1) 推荐目录包含 gt 与任务输入目录，例如 hazy / noisy / blur / lr / dark。",
-      "2) 视频任务依靠创建 Run 时选择 video_denoise 或 video_sr 区分。",
-      "3) 视频任务要求输入目录中的视频文件与 gt 目录中的视频文件同名配对。",
-      "4) 推荐统一通过 ZIP 上传数据集，由平台自动管理存储目录。",
-      "5) 现在 ZIP 导入会默认替换当前数据集目录内容，请确认后再导入。",
-    ].join("\n"),
-    "目录与导入说明",
-    { confirmButtonText: "我知道了" }
-  );
+  showLayoutGuide.value = true;
 }
 
 async function submitCreate() {
@@ -993,6 +1048,171 @@ async function maybeSyncTypeByIdHint(datasetId, scannedDataset, beforeType = "")
   color: #6a7ca9;
   line-height: 1.5;
   font-size: 13px;
+}
+
+.dataset-layout-dialog :deep(.el-dialog) {
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.dataset-layout-dialog :deep(.el-dialog__header) {
+  padding: 24px 28px 10px;
+  margin-right: 0;
+}
+
+.dataset-layout-dialog :deep(.el-dialog__title) {
+  color: #10203f;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.dataset-layout-dialog :deep(.el-dialog__body) {
+  padding: 12px 28px 4px;
+}
+
+.dataset-layout-dialog :deep(.el-dialog__footer) {
+  padding: 16px 28px 24px;
+}
+
+.layout-guide {
+  color: #263b60;
+  display: grid;
+  gap: 16px;
+}
+
+.layout-guide code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #eef4ff;
+  color: #2459d6;
+  font-family: Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+}
+
+.layout-guide-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid #dbe7ff;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f5f9ff 0%, #eef5ff 100%);
+}
+
+.summary-title {
+  color: #16345f;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.summary-text {
+  margin-top: 6px;
+  color: #6b7ca2;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.layout-guide-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.layout-guide-rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rule-card {
+  padding: 16px;
+  border: 1px solid #e4ebf8;
+  border-radius: 14px;
+  background: #ffffff;
+  min-height: 230px;
+}
+
+.rule-title {
+  color: #10203f;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.rule-text,
+.rule-list {
+  color: #5f6f91;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.rule-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rule-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rule-chip-row span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #edf5ff;
+  color: #2d61ce;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.layout-example-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #0f1d35;
+  color: #dce7ff;
+  min-height: 230px;
+}
+
+.example-title {
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.layout-example-card pre {
+  margin: 0;
+  color: #dce7ff;
+  font-family: Consolas, "Microsoft YaHei", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.layout-guide-warning {
+  padding: 12px 14px;
+  border: 1px solid #ffe0a6;
+  border-radius: 12px;
+  background: #fff8e8;
+  color: #8a5b00;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .layout-guide-body,
+  .layout-guide-rules {
+    grid-template-columns: 1fr;
+  }
+
+  .layout-guide-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 768px) {

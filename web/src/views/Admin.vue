@@ -177,6 +177,9 @@
             clearable
             class="search-input"
           />
+          <el-button plain class="refresh-btn" :loading="adminDataLoading" @click="refreshAlgorithmSubmissions">
+            刷新审核列表
+          </el-button>
         </div>
         <el-table
           v-loading="adminDataLoading"
@@ -716,6 +719,7 @@ const adminTabFetchPromises = new Map();
 function normalizeAdminTabKey(tabName) {
   const key = String(tabName || "").trim();
   if (key === "metric-logs") return "metrics";
+  if (key === "algorithm-submissions") return "submissions";
   if (key === "algorithm-submission-logs") return "submissions";
   if (key === "report-logs") return "reports";
   if (key === "feedback") return "feedback";
@@ -1179,6 +1183,10 @@ async function loadAll(force = false) {
   await ensureTabData(tab.value, force);
 }
 
+async function refreshAlgorithmSubmissions() {
+  await ensureTabData("algorithm-submissions", true);
+}
+
 async function deleteRegisteredUserRow(row) {
   const u = String(row?.username || "").trim();
   if (!u || row?.role === "admin") return;
@@ -1584,7 +1592,9 @@ async function resolveFeedback(row) {
 }
 
 watch(tab, (next) => {
-  void ensureTabData(next);
+  const normalized = normalizeAdminTabKey(next);
+  const shouldForceRefresh = normalized === "submissions";
+  void ensureTabData(next, shouldForceRefresh);
 });
 
 onMounted(() => {
@@ -1631,6 +1641,12 @@ onMounted(() => {
 
 .clear-btn {
   margin-left: auto;
+}
+
+.refresh-btn {
+  margin-left: auto;
+  border-radius: 999px;
+  font-weight: 700;
 }
 
 .data-table {
@@ -1775,4 +1791,3 @@ onMounted(() => {
   color: #7b89a8;
 }
 </style>
-

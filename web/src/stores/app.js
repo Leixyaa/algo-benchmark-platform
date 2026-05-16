@@ -1137,8 +1137,24 @@ export const useAppStore = defineStore("app", {
         const list = await runsApi.listRuns({ limit });
         const mapped = (list ?? []).map((x) => this._mapRunOut(x));
 
-        // 覆盖式同步：以服务端返回为准
-        this.runs = mapped;
+        // 覆盖式同步服务端字段，同时保留本地进度时间戳，用于长任务阶段内的平滑进度展示。
+        const previousById = new Map((this.runs || []).map((run) => [run.id, run]));
+        const now = Date.now();
+        this.runs = mapped.map((run) => {
+          const prev = previousById.get(run.id);
+          if (!prev) return { ...run, progressUpdatedAt: now };
+          const prevProgress = Number(prev?.progress);
+          const nextProgress = Number(run?.progress);
+          const progressChanged =
+            prev?.status !== run?.status ||
+            (Number.isFinite(prevProgress) && Number.isFinite(nextProgress) && prevProgress !== nextProgress) ||
+            (!Number.isFinite(prevProgress) && Number.isFinite(nextProgress));
+          return {
+            ...prev,
+            ...run,
+            progressUpdatedAt: progressChanged ? now : prev?.progressUpdatedAt || now,
+          };
+        });
         saveState({ runs: this.runs });
         this._syncRunsListPolling();
       } catch (error) {
@@ -1167,16 +1183,22 @@ export const useAppStore = defineStore("app", {
       const prev = this.runs.find((r) => r.id === runId);
       if (prev && (prev.status === "已完成" || prev.status === "失败" || prev.status === "已取消")) return;
 
-      this._upsertRun({ id: runId, status: "取消中" });
+      this._upsertRun({ id: runId, status: "取消中", progress: Math.max(Number(prev?.progress || 0), 95), stage: "canceling", progressMessage: "正在取消任务" });
       try {
         const out = await runsApi.cancelRun(runId);
         if (out?.status) {
           const statusCN = normalizeStatusCN(out.status);
-          this._upsertRun({ id: runId, status: statusCN });
+          this._upsertRun({
+            id: runId,
+            status: statusCN,
+            progress: statusCN === "已取消" ? 100 : 95,
+            stage: out?.stage || (statusCN === "已取消" ? "canceled" : "canceling"),
+            progressMessage: statusCN === "已取消" ? "任务已取消" : (out?.progress_message || "正在取消任务"),
+          });
           if (statusCN === "已取消") this._syncRunsListPolling();
         }
       } catch (e) {
-        this._upsertRun({ id: runId, status: prev?.status ?? "运行中" });
+        this._upsertRun({ id: runId, status: prev?.status ?? "运行中", progressMessage: prev?.progressMessage || "" });
         throw e;
       }
     },
@@ -1262,6 +1284,9 @@ export const useAppStore = defineStore("app", {
 
 
         status: statusCN,
+        progress: Number.isFinite(Number(out?.progress)) ? Math.max(0, Math.min(100, Number(out.progress))) : (isTerminal(statusCN) ? 100 : 0),
+        stage: out?.stage ?? "",
+        progressMessage: out?.progress_message ?? "",
         createdAt: formatTs(out.created_at),
         startedAt: formatTs(out.started_at),
         finishedAt: formatTs(out.finished_at),
@@ -1283,11 +1308,22 @@ export const useAppStore = defineStore("app", {
     _upsertRun(run) {
       const idx = this.runs.findIndex((r) => r.id === run.id);
       if (idx === -1) {
-        this.runs.unshift(run);
+        this.runs.unshift({ ...run, progressUpdatedAt: Date.now() });
         return;
       }
 
-      this.runs[idx] = { ...this.runs[idx], ...run };
+      const prev = this.runs[idx];
+      const prevProgress = Number(prev?.progress);
+      const nextProgress = Number(run?.progress);
+      const progressChanged =
+        prev?.status !== run?.status ||
+        (Number.isFinite(prevProgress) && Number.isFinite(nextProgress) && prevProgress !== nextProgress) ||
+        (!Number.isFinite(prevProgress) && Number.isFinite(nextProgress));
+      this.runs[idx] = {
+        ...prev,
+        ...run,
+        progressUpdatedAt: run.progressUpdatedAt || (progressChanged ? Date.now() : prev?.progressUpdatedAt || Date.now()),
+      };
     },
   },
 });

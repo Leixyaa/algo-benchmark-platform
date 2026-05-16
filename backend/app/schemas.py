@@ -25,6 +25,9 @@ class RunOut(BaseModel):
     record: Dict[str, Any] = Field(default_factory=dict)
 
     status: str  # queued/running/done/failed
+    progress: int = 0
+    stage: str = ""
+    progress_message: str = ""
     created_at: float
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
